@@ -1,0 +1,17 @@
+# dependencies / build
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.turbo/
+
+# environment & secrets
+.env
+.env.*
+!.env.example
+
+# local runtime artifacts
+exports/
+
+# local-only Claude Code settings
+.claude/settings.local.json
