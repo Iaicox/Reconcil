@@ -1,0 +1,34 @@
+{
+  "name": "@pet-crypto/mcp-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Transport-agnostic MCP tool implementations: citation envelope, sanitized output, tenancy scoping.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@pet-crypto/core": "workspace:*",
+    "@pet-crypto/db": "workspace:*",
+    "@pet-crypto/exporters": "workspace:*",
+    "@pet-crypto/ledger": "workspace:*",
+    "@pet-crypto/pricing": "workspace:*",
+    "@pet-crypto/recon": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

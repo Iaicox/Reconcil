@@ -1,0 +1,19 @@
+# ee/ is deliberately NOT a workspace member: reserved for post-gate closed
+# SaaS scaffolding, empty pre-gate (ADR-013).
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+
+catalog:
+  "@types/node": ^22.10.0
+  eslint: ^9.17.0
+  tsx: ^4.19.0
+  typescript: ^5.7.2
+  vitest: ^3.0.0
+  zod: ^4.0.0
+
+onlyBuiltDependencies:
+  - esbuild

@@ -1,0 +1,17 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/db" },
+    { "path": "packages/ingestion" },
+    { "path": "packages/pricing" },
+    { "path": "packages/ledger" },
+    { "path": "packages/recon" },
+    { "path": "packages/exporters" },
+    { "path": "packages/mcp-tools" },
+    { "path": "packages/evals" },
+    { "path": "apps/mcp-server" },
+    { "path": "apps/worker" },
+    { "path": "apps/cli" }
+  ]
+}

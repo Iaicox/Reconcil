@@ -1,0 +1,28 @@
+{
+  "name": "@pet-crypto/worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "BullMQ processors: backfill, live tail, prices, token resolve, integrity checks, exports.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
+    "dev": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@pet-crypto/core": "workspace:*",
+    "@pet-crypto/db": "workspace:*",
+    "@pet-crypto/ingestion": "workspace:*",
+    "@pet-crypto/pricing": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,65 @@
+# Self-host stack (P10, 00-overview §5): the whole product on the customer's
+# infrastructure. Outbound traffic is limited to chain-data and price providers.
+#
+# stdio mode for Claude Desktop/Code runs the same image:
+#   docker compose run --rm mcp-server node apps/mcp-server/dist/stdio.js
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: pet_crypto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432" # local development convenience
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mcp-server:
+    build: .
+    command: node apps/mcp-server/dist/http.js
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/pet_crypto
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "8484:8484"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - exports:/app/exports
+
+  worker:
+    build: .
+    command: node apps/worker/dist/main.js
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/pet_crypto
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - exports:/app/exports
+
+volumes:
+  pgdata:
+  exports:

@@ -1,0 +1,29 @@
+{
+  "name": "@pet-crypto/ingestion",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ChainDataProvider adapters, normalizer, checkpoint state machine.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@pet-crypto/core": "workspace:*",
+    "@pet-crypto/db": "workspace:*"
+  },
+  "devDependencies": {
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

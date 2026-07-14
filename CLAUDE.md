@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Design phase is complete; implementation has not started. The repo contains only the
-design pack in `docs/` — there is no `package.json`, no build, no tests yet. When
-scaffolding begins, the stack is already decided (pnpm workspaces + Turborepo, TypeScript
-strict, Drizzle/Postgres 16, BullMQ/Redis, minimal Fastify host, MCP TypeScript SDK) —
-see the ADRs before proposing alternatives. Update this file with real build/test
-commands as soon as they exist.
+Design phase is complete; the monorepo scaffold is in place: pnpm workspaces +
+Turborepo, TypeScript strict with project references, 3 apps / 9 packages (see
+`docs/architecture/00-overview.md` §4), dependency-cruiser boundary rules,
+docker-compose, GitHub Actions CI. Business logic is not implemented yet — packages
+are documented stubs. Feature work follows the roadmap in `docs/brief.md` (weeks 1–3:
+core, db, ingestion, pricing, ledger, worker). The stack is decided — see the ADRs
+before proposing alternatives.
 
 ## Source of truth
 
@@ -23,8 +24,24 @@ commands as soon as they exist.
 
 ## Commands
 
-The only runnable artifact today is the schema. Validate DDL changes against a live
-Postgres (this exact flow has been verified):
+```bash
+pnpm install      # Node >= 22.12, pnpm 11 (packageManager is pinned)
+pnpm build        # turbo run build — tsc -b with project references
+pnpm typecheck    # turbo run typecheck (build-ordered tsc -b)
+pnpm lint         # eslint per package (flat config at repo root)
+pnpm test         # vitest per package (--passWithNoTests on stubs)
+pnpm depcruise    # boundary rules + signing-lib ban — needs `pnpm build` first
+```
+
+Dev entrypoints (tsx): `pnpm --filter @pet-crypto/mcp-server dev` (stdio) /
+`dev:http` (Fastify on :8484), `pnpm --filter @pet-crypto/worker dev`,
+`pnpm --filter @pet-crypto/cli dev`. Self-host stack: `docker compose up`
+(copy `.env.example` → `.env` first).
+
+Note: `pnpm depcruise` resolves cross-package imports through built `dist/`
+entrypoints — always build before cruising, locally and in CI.
+
+Validate DDL changes against a live Postgres (this exact flow has been verified):
 
 ```bash
 docker run --rm -d --name schema_check -e POSTGRES_PASSWORD=x postgres:16

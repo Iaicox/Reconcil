@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.turbo
+**/.turbo
+coverage
+exports
+.git
+.github
+.env
+.env.*
+*.log
+docs

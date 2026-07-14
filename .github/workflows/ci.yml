@@ -1,0 +1,39 @@
+# CI plan: docs/architecture/04-testing.md §7. Week-1 subset: `check` and
+# `test`; `integration` (Postgres service container) and `evals-*` jobs arrive
+# with the code they exercise.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # build = tsc -b (project references): typecheck happens here, and
+      # depcruise needs dist entrypoints to resolve cross-package imports
+      - run: pnpm build
+      - run: pnpm lint
+      - run: pnpm depcruise
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test

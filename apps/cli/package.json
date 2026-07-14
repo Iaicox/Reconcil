@@ -1,0 +1,27 @@
+{
+  "name": "@pet-crypto/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Thin CLI agent (Agent SDK): demo REPL + eval runs; tools bound in-process.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "lint": "eslint src",
+    "test": "vitest run --passWithNoTests",
+    "dev": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@pet-crypto/core": "workspace:*",
+    "@pet-crypto/evals": "workspace:*",
+    "@pet-crypto/mcp-tools": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
