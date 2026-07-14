@@ -1,4 +1,4 @@
-# pet_crypto — on-chain accounting ledger
+# Reconcil — on-chain accounting ledger
 
 A self-hostable, MCP-native on-chain ledger for crypto accounting: deterministic
 ingestion and computation over EVM wallet activity, exposed to LLM agents through
