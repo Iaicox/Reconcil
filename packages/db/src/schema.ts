@@ -323,3 +323,188 @@ export const entityAddresses = pgTable(
     index('entity_addresses_addr_idx').on(t.address),
   ],
 );
+
+// ---------------------------------------------------------- reconciliation ---
+
+// Source-agnostic external records (Option C seam #1): an invoice is just one
+// `kind`. Future kinds ('bill', 'agent_charge', ...) reuse the matching engine.
+export const externalRecords = pgTable(
+  'external_records',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull(),
+    clientId: uuid('client_id'),
+    kind: text('kind').notNull().default('invoice'),
+    direction: text('direction').$type<'receivable' | 'payable'>().notNull(),
+    source: text('source').notNull(), // 'csv' | 'manual' | 'api'
+    externalRef: text('external_ref').notNull(), // invoice number etc.
+    counterpartyEntityId: uuid('counterparty_entity_id'),
+    counterpartyName: text('counterparty_name'), // raw from import: HOSTILE
+    amount: numeric('amount').notNull(), // gross, in `currency`
+    currency: text('currency').notNull(), // 'EUR' | 'USD' | ...
+    vatRate: numeric('vat_rate'), // percent, e.g. 21.0
+    vatAmount: numeric('vat_amount'),
+    issuedOn: date('issued_on'),
+    dueOn: date('due_on'),
+    expectedTokenId: bigint('expected_token_id', { mode: 'number' }),
+    expectedAddress: text('expected_address'),
+    status: text('status')
+      .$type<'open' | 'partially_matched' | 'matched' | 'overpaid' | 'void'>()
+      .notNull()
+      .default('open'),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}), // raw import row (audit)
+    importedAt: timestamp('imported_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'external_records_tenant_id_fkey',
+      columns: [t.tenantId],
+      foreignColumns: [tenants.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'external_records_client_id_fkey',
+      columns: [t.clientId],
+      foreignColumns: [clients.id],
+    }).onDelete('set null'),
+    foreignKey({
+      name: 'external_records_counterparty_entity_id_fkey',
+      columns: [t.counterpartyEntityId],
+      foreignColumns: [entities.id],
+    }),
+    foreignKey({
+      name: 'external_records_expected_token_id_fkey',
+      columns: [t.expectedTokenId],
+      foreignColumns: [tokens.id],
+    }),
+    check('external_records_direction_check', sql`direction IN ('receivable', 'payable')`),
+    check('external_records_amount_check', sql`amount >= 0`),
+    check(
+      'external_records_expected_address_check',
+      sql`expected_address IS NULL OR expected_address = lower(expected_address)`,
+    ),
+    check(
+      'external_records_status_check',
+      sql`status IN ('open', 'partially_matched', 'matched', 'overpaid', 'void')`,
+    ),
+    // Idempotent re-import of the same CSV.
+    unique('external_records_tenant_id_kind_source_external_ref_key').on(
+      t.tenantId,
+      t.kind,
+      t.source,
+      t.externalRef,
+    ),
+    index('external_records_status_idx').on(t.tenantId, t.status),
+    index('external_records_period_idx').on(t.tenantId, t.issuedOn),
+  ],
+);
+
+// Pair-level match legs: m:n between external records and settlement events
+// (partial payments, overpayments, split settlements, fee shortfalls).
+// Cross-row invariants (sum of applied <= event amount; record status
+// derivation) are enforced in the repository layer under SERIALIZABLE tx +
+// property tests (triggers rejected: logic duplication, see ADR-010).
+export const matches = pgTable(
+  'matches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull(),
+    externalRecordId: uuid('external_record_id').notNull(),
+    chainEventId: bigint('chain_event_id', { mode: 'number' }).notNull(),
+    // Portion of the event applied to this record, token base units.
+    amountAppliedRaw: numeric('amount_applied_raw', {
+      precision: 78,
+      scale: 0,
+      mode: 'bigint',
+    }).notNull(),
+    // Valuation of that portion, pinned to the exact price/FX rows used (P5).
+    fiatValue: numeric('fiat_value').notNull(),
+    fiatCurrency: text('fiat_currency').notNull(),
+    priceSnapshotId: bigint('price_snapshot_id', { mode: 'number' }),
+    fxRateId: bigint('fx_rate_id', { mode: 'number' }),
+    status: text('status')
+      .$type<'suggested' | 'confirmed' | 'rejected'>()
+      .notNull()
+      .default('suggested'),
+    matchedBy: text('matched_by').$type<'auto' | 'agent' | 'manual'>().notNull(),
+    confidence: numeric('confidence'),
+    rationale: jsonb('rationale').$type<Record<string, unknown>>().notNull().default({}), // rule hits explaining the suggestion
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    confirmedBy: text('confirmed_by'),
+  },
+  (t) => [
+    foreignKey({
+      name: 'matches_tenant_id_fkey',
+      columns: [t.tenantId],
+      foreignColumns: [tenants.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'matches_external_record_id_fkey',
+      columns: [t.externalRecordId],
+      foreignColumns: [externalRecords.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'matches_chain_event_id_fkey',
+      columns: [t.chainEventId],
+      foreignColumns: [chainEvents.id],
+    }),
+    foreignKey({
+      name: 'matches_price_snapshot_id_fkey',
+      columns: [t.priceSnapshotId],
+      foreignColumns: [priceSnapshots.id],
+    }),
+    foreignKey({
+      name: 'matches_fx_rate_id_fkey',
+      columns: [t.fxRateId],
+      foreignColumns: [fxRates.id],
+    }),
+    check('matches_amount_applied_raw_check', sql`amount_applied_raw > 0`),
+    check('matches_status_check', sql`status IN ('suggested', 'confirmed', 'rejected')`),
+    check('matches_matched_by_check', sql`matched_by IN ('auto', 'agent', 'manual')`),
+    check('matches_confidence_check', sql`confidence BETWEEN 0 AND 1`),
+    index('matches_record_idx').on(t.externalRecordId),
+    index('matches_event_idx').on(t.chainEventId),
+    index('matches_status_idx').on(t.tenantId, t.status),
+  ],
+);
+
+// --------------------------------------------------------------- ingestion ---
+
+// Cursor per (chain, address, stream). GLOBAL: two tenants tracking the same
+// address share one checkpoint and one backfill. 'native' and 'erc20' are
+// separate provider endpoints, hence separate cursors.
+export const ingestionCheckpoints = pgTable(
+  'ingestion_checkpoints',
+  {
+    chainId: integer('chain_id').notNull(),
+    address: text('address').notNull(),
+    stream: text('stream').$type<'native' | 'erc20'>().notNull(),
+    status: text('status')
+      .$type<'queued' | 'backfilling' | 'live' | 'paused' | 'error'>()
+      .notNull()
+      .default('queued'),
+    // Events are complete for blocks <= last_processed_block (within coverage).
+    lastProcessedBlock: bigint('last_processed_block', { mode: 'number' }).notNull().default(0),
+    // Non-NULL => anchored-window backfill: coverage starts here, opening_balance
+    // event anchors the baseline (ADR-008).
+    anchorBlock: bigint('anchor_block', { mode: 'number' }),
+    backfillStartedAt: timestamp('backfill_started_at', { withTimezone: true }),
+    backfillCompletedAt: timestamp('backfill_completed_at', { withTimezone: true }),
+    // Last balance-vs-provider drift check result: {checked_at, block, drifts:[...]}.
+    lastIntegrity: jsonb('last_integrity').$type<unknown>(),
+    lastError: text('last_error'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({
+      name: 'ingestion_checkpoints_pkey',
+      columns: [t.chainId, t.address, t.stream],
+    }),
+    check('ingestion_checkpoints_address_check', sql`address = lower(address)`),
+    check('ingestion_checkpoints_stream_check', sql`stream IN ('native', 'erc20')`),
+    check(
+      'ingestion_checkpoints_status_check',
+      sql`status IN ('queued', 'backfilling', 'live', 'paused', 'error')`,
+    ),
+  ],
+);
