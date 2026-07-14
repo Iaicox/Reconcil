@@ -117,3 +117,89 @@ export const apiKeys = pgTable(
     }).onDelete('cascade'),
   ],
 );
+
+// ------------------------------------------------------------ chain data ---
+
+// Global token registry. The native currency of each chain is a pseudo-token
+// row (address IS NULL) so every event references a token uniformly.
+export const tokens = pgTable(
+  'tokens',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    chainId: integer('chain_id').notNull(),
+    address: text('address'),
+    standard: text('standard').$type<'native' | 'erc20'>().notNull(),
+    symbolRaw: text('symbol_raw'), // as fetched on-chain: HOSTILE, never shown to LLM
+    nameRaw: text('name_raw'), // HOSTILE
+    symbolDisplay: text('symbol_display'), // sanitized (core/sanitizer), safe for LLM context
+    nameDisplay: text('name_display'), // sanitized
+    decimals: integer('decimals').notNull(),
+    isStablecoin: boolean('is_stablecoin').notNull().default(false),
+    pegCurrency: text('peg_currency'), // 'USD' | 'EUR' when is_stablecoin
+    verified: boolean('verified').notNull().default(false), // curated allowlist vs auto-discovered (spam)
+    coingeckoId: text('coingecko_id'), // price-source mapping; DefiLlama keys by (chain, address)
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('tokens_address_check', sql`address IS NULL OR address = lower(address)`),
+    check('tokens_standard_check', sql`standard IN ('native', 'erc20')`),
+    check('tokens_decimals_check', sql`decimals BETWEEN 0 AND 36`),
+    check('tokens_native_iff_no_addr', sql`(standard = 'native') = (address IS NULL)`),
+    unique('tokens_chain_id_address_key').on(t.chainId, t.address).nullsNotDistinct(),
+  ],
+);
+
+// Append-only event store (P3). GLOBAL: public chain data, shared across
+// tenants. Rows are never updated or deleted; reorg safety is by construction
+// (ingestion never passes head - finality_depth, see 03-ingestion.md).
+export const chainEvents = pgTable(
+  'chain_events',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    chainId: integer('chain_id').notNull(),
+    // lowercase 0x-hex(64); synthetic 'anchor:<addr>:<block>' for opening_balance
+    txHash: text('tx_hash').notNull(),
+    // sentinels: -1 native transfer, -2 gas fee, -3 opening balance;
+    // reserved: -(1000+n) for future internal (trace) transfers
+    logIndex: integer('log_index').notNull(),
+    eventKind: text('event_kind')
+      .$type<'native_transfer' | 'erc20_transfer' | 'gas_fee' | 'opening_balance'>()
+      .notNull(),
+    tokenId: bigint('token_id', { mode: 'number' }).notNull(),
+    amountRaw: numeric('amount_raw', { precision: 78, scale: 0, mode: 'bigint' }).notNull(),
+    fromAddr: text('from_addr').notNull(),
+    toAddr: text('to_addr').notNull(),
+    blockNumber: bigint('block_number', { mode: 'number' }).notNull(),
+    blockTime: timestamp('block_time', { withTimezone: true }).notNull(),
+    txFrom: text('tx_from').notNull(), // tx-level sender (gas payer, counterparty resolution)
+    txTo: text('tx_to'), // NULL for contract creation
+    provider: text('provider').notNull(), // which provider supplied this row (audit)
+    // provider payload as received; server-side only, never sent to LLM
+    raw: jsonb('raw').$type<unknown>().notNull(),
+    ingestedAt: timestamp('ingested_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'chain_events_token_id_fkey',
+      columns: [t.tokenId],
+      foreignColumns: [tokens.id],
+    }),
+    check(
+      'chain_events_event_kind_check',
+      sql`event_kind IN ('native_transfer', 'erc20_transfer', 'gas_fee', 'opening_balance')`,
+    ),
+    check('chain_events_amount_raw_check', sql`amount_raw >= 0`),
+    check('chain_events_from_addr_check', sql`from_addr = lower(from_addr)`),
+    check('chain_events_to_addr_check', sql`to_addr = lower(to_addr)`),
+    // Idempotency key (P3/P4): safe re-ingestion via ON CONFLICT DO NOTHING.
+    unique('chain_events_idempotency').on(t.chainId, t.txHash, t.logIndex),
+    // Flow queries: "events where X is sender/recipient in period".
+    // chain_id is filtered after the address probe: address selectivity dominates.
+    index('chain_events_from_idx').on(t.fromAddr, t.blockTime),
+    index('chain_events_to_idx').on(t.toAddr, t.blockTime),
+    // Integrity checks and coverage math per chain height.
+    index('chain_events_block_idx').on(t.chainId, t.blockNumber),
+    // Token-level scans (stablecoin movement queries, spam audits).
+    index('chain_events_token_idx').on(t.tokenId),
+  ],
+);
