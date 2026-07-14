@@ -508,3 +508,99 @@ export const ingestionCheckpoints = pgTable(
     ),
   ],
 );
+
+// --------------------------------------------------------------- interface ---
+
+// Persisted tool invocations: the anchor for citations (P2). Every MCP tool
+// response carries a tool_call_id referencing a row here; trace_tool_call
+// replays it. Also the audit/usage log.
+export const toolCalls = pgTable(
+  'tool_calls',
+  {
+    id: text('id').primaryKey(), // ULID (lexically time-ordered)
+    tenantId: uuid('tenant_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    args: jsonb('args').$type<Record<string, unknown>>().notNull(),
+    resultDigest: text('result_digest').notNull(), // sha256 of canonical result JSON
+    // coverage snapshot at call time (replayable)
+    coverage: jsonb('coverage').$type<unknown[]>().notNull().default([]),
+    calledAt: timestamp('called_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'tool_calls_tenant_id_fkey',
+      columns: [t.tenantId],
+      foreignColumns: [tenants.id],
+    }).onDelete('cascade'),
+    index('tool_calls_tenant_time_idx').on(t.tenantId, t.calledAt),
+  ],
+);
+
+// QuickBooks/Xero OAuth tokens, AES-256-GCM under MASTER_KEY (P9). Plaintext
+// exists only in memory during an export run; key_version enables rotation.
+export const integrationCredentials = pgTable(
+  'integration_credentials',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull(),
+    provider: text('provider').$type<'quickbooks' | 'xero'>().notNull(),
+    ciphertext: bytea('ciphertext').notNull(),
+    nonce: bytea('nonce').notNull(),
+    keyVersion: integer('key_version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    rotatedAt: timestamp('rotated_at', { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: 'integration_credentials_tenant_id_fkey',
+      columns: [t.tenantId],
+      foreignColumns: [tenants.id],
+    }).onDelete('cascade'),
+    check('integration_credentials_provider_check', sql`provider IN ('quickbooks', 'xero')`),
+    unique('integration_credentials_tenant_id_provider_key').on(t.tenantId, t.provider),
+  ],
+);
+
+// Export artifact registry + audit manifest (which coverage, price snapshots
+// and tool calls produced each file). Bound as `exportsTable` to avoid
+// clashing with the module keyword; wire name stays 'exports'.
+export const exportsTable = pgTable(
+  'exports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull(),
+    clientId: uuid('client_id'),
+    kind: text('kind')
+      .$type<'close_pack' | 'pdf_summary' | 'journal_qbo' | 'journal_xero'>()
+      .notNull(),
+    periodStart: date('period_start').notNull(),
+    periodEnd: date('period_end').notNull(),
+    params: jsonb('params').$type<Record<string, unknown>>().notNull().default({}),
+    status: text('status')
+      .$type<'pending' | 'running' | 'done' | 'failed'>()
+      .notNull()
+      .default('pending'),
+    filePath: text('file_path'),
+    manifest: jsonb('manifest').$type<unknown>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    foreignKey({
+      name: 'exports_tenant_id_fkey',
+      columns: [t.tenantId],
+      foreignColumns: [tenants.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'exports_client_id_fkey',
+      columns: [t.clientId],
+      foreignColumns: [clients.id],
+    }).onDelete('set null'),
+    check(
+      'exports_kind_check',
+      sql`kind IN ('close_pack', 'pdf_summary', 'journal_qbo', 'journal_xero')`,
+    ),
+    check('exports_status_check', sql`status IN ('pending', 'running', 'done', 'failed')`),
+    index('exports_tenant_idx').on(t.tenantId, t.createdAt),
+  ],
+);
