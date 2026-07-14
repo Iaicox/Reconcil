@@ -203,3 +203,123 @@ export const chainEvents = pgTable(
     index('chain_events_token_idx').on(t.tokenId),
   ],
 );
+
+// ---------------------------------------------------------------- pricing ---
+
+// Daily UTC close snapshots (P5). Append-only: corrections are new rows under
+// a different source ('manual'); calculations pin the exact row they used by FK.
+export const priceSnapshots = pgTable(
+  'price_snapshots',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    tokenId: bigint('token_id', { mode: 'number' }).notNull(),
+    priceDate: date('price_date').notNull(), // UTC day
+    currency: text('currency').notNull().default('USD'),
+    price: numeric('price').notNull(), // per 1 whole token (display units)
+    source: text('source').notNull(), // 'defillama' | 'coingecko' | 'peg' | 'manual'
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'price_snapshots_token_id_fkey',
+      columns: [t.tokenId],
+      foreignColumns: [tokens.id],
+    }),
+    check('price_snapshots_price_check', sql`price >= 0`),
+    unique('price_snapshots_token_id_price_date_currency_source_key').on(
+      t.tokenId,
+      t.priceDate,
+      t.currency,
+      t.source,
+    ),
+  ],
+);
+
+// ECB daily reference rates (P5). Weekend/holiday rule: use latest prior row.
+export const fxRates = pgTable(
+  'fx_rates',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    rateDate: date('rate_date').notNull(),
+    baseCurrency: text('base_currency').notNull(), // 'EUR' (ECB publishes EUR-based)
+    quoteCurrency: text('quote_currency').notNull(), // 'USD', ...
+    rate: numeric('rate').notNull(),
+    source: text('source').notNull().default('ecb'),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check('fx_rates_rate_check', sql`rate > 0`),
+    unique('fx_rates_rate_date_base_currency_quote_currency_source_key').on(
+      t.rateDate,
+      t.baseCurrency,
+      t.quoteCurrency,
+      t.source,
+    ),
+  ],
+);
+
+// -------------------------------------------------------------- directory ---
+
+// Address book. tenant_id NULL = built-in curated labels (exchanges, routers),
+// shipped as seed data, read-only for tenants.
+export const entities = pgTable(
+  'entities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id'),
+    clientId: uuid('client_id'),
+    name: text('name').notNull(),
+    kind: text('kind')
+      .$type<'self' | 'client' | 'vendor' | 'exchange' | 'contract' | 'employee' | 'other'>()
+      .notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'entities_tenant_id_fkey',
+      columns: [t.tenantId],
+      foreignColumns: [tenants.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'entities_client_id_fkey',
+      columns: [t.clientId],
+      foreignColumns: [clients.id],
+    }).onDelete('set null'),
+    check(
+      'entities_kind_check',
+      sql`kind IN ('self', 'client', 'vendor', 'exchange', 'contract', 'employee', 'other')`,
+    ),
+    index('entities_tenant_idx').on(t.tenantId),
+  ],
+);
+
+export const entityAddresses = pgTable(
+  'entity_addresses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    entityId: uuid('entity_id').notNull(),
+    // Denormalized from entities to make the uniqueness rule enforceable in-DB:
+    // one owner per (tenant, chain, address). Kept in sync by the repository layer.
+    tenantId: uuid('tenant_id'),
+    chainId: integer('chain_id'), // NULL = applies to any EVM chain
+    address: text('address').notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: 'entity_addresses_entity_id_fkey',
+      columns: [t.entityId],
+      foreignColumns: [entities.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'entity_addresses_tenant_id_fkey',
+      columns: [t.tenantId],
+      foreignColumns: [tenants.id],
+    }).onDelete('cascade'),
+    check('entity_addresses_address_check', sql`address = lower(address)`),
+    unique('entity_addresses_tenant_id_chain_id_address_key')
+      .on(t.tenantId, t.chainId, t.address)
+      .nullsNotDistinct(),
+    index('entity_addresses_addr_idx').on(t.address),
+  ],
+);
