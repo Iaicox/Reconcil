@@ -1,6 +1,7 @@
 # ADR-005: Event store — append-only, composite idempotency key, gas-as-event, finality lag
 
-**Status:** accepted · **Date:** 2026-07-14
+**Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-07-15 (`token_id`
+added to the idempotency key — see decision 2)
 
 ## Context
 
@@ -12,10 +13,15 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
 
 1. **Append-only `chain_events`**; derived figures are always computed from events
    (no materialized state to invalidate in MVP).
-2. **Idempotency key `UNIQUE (chain_id, tx_hash, log_index)`** with sentinel
+2. **Idempotency key `UNIQUE (chain_id, tx_hash, log_index, token_id)`** with sentinel
    `log_index` values for non-log facts: `-1` native transfer, `-2` gas fee,
    `-3` opening balance, `-(1000+n)` reserved for future trace-level internal transfers.
    One uniform key ⇒ one dedup mechanism (`ON CONFLICT DO NOTHING`) everywhere.
+   `token_id` is functionally dependent on the first three columns for real logs (a log
+   carries exactly one token), but load-bearing for anchored opening balances: anchoring
+   writes one `opening_balance` event *per token* under a single synthetic
+   `tx_hash`/`log_index` slot, and without `token_id` every token after the first would
+   be silently dropped by `ON CONFLICT DO NOTHING`.
 3. **Gas is an event**, synthesized per outgoing tx (`from = payer`, `amount = total fee`).
    Balance = fold over events with no special cases; gas totals get the same citation
    machinery as any flow (P2).

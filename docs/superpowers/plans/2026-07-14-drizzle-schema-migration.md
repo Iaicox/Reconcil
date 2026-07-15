@@ -1,3 +1,45 @@
+# Drizzle Schema + Initial Migration Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Executable Drizzle schema in `@pet-crypto/db` mirroring `docs/architecture/schema.sql` (16 tables), with a generated SQL migration `0000` proven byte-identical (via `pg_dump` diff) to the reference DDL on Postgres 16.
+
+**Architecture:** TS-schema-first (approved spec: `docs/superpowers/specs/2026-07-14-drizzle-schema-migration-design.md`). `src/schema.ts` is hand-written in the same section order as `schema.sql`; `drizzle-kit generate` produces the migration; parity is verified by applying migration and reference DDL to two fresh databases in one disposable postgres:16 container and diffing schema-only dumps.
+
+**Tech Stack:** drizzle-orm 0.45.2 + drizzle-kit 0.31.10 (already in `packages/db/package.json` — verified installed), pg / node-postgres, TypeScript strict with project references, Docker (postgres:16) for verification.
+
+## Global Constraints
+
+- **Money is never `number`** (ADR-004): `NUMERIC(78,0)` columns use `numeric({ precision: 78, scale: 0, mode: 'bigint' })`; fiat `NUMERIC` columns stay in default string mode. Identity ids and block numbers use `bigint(..., { mode: 'number' })` — they stay far below 2^53 and are not money.
+- **Do not modify** `docs/architecture/schema.sql` — it is the annotated reference. Any parity fix goes into `src/schema.ts`.
+- **Never hand-edit generated migration SQL.** Fix `src/schema.ts`, delete `packages/db/migrations/` contents, regenerate (nothing is deployed yet — regenerating `0000` is safe until the gate).
+- **Name parity rule:** every constraint/index name in the generated DDL must equal what `schema.sql` produces on Postgres — named constraints verbatim (`chain_events_idempotency`, all `*_idx`), unnamed ones get Postgres auto-names (`<table>_<column>_check`, `<table>_<cols>_key`, `<table>_<column>_fkey`, `<table>_pkey`).
+- **CHECK expressions are copied verbatim** from `schema.sql` into `` check(name, sql`…`) ``.
+- No new dependencies. No Python. Repo language is English. License Apache-2.0.
+- All commits end with:
+  ```
+  Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+  Claude-Session: https://claude.ai/code/session_016HbUzUGj8AoYa5qWgequyv
+  ```
+- Node >= 22.12, pnpm 11. Run package scripts via `pnpm --filter @pet-crypto/db <script>` from the repo root.
+- No unit tests for schema shape (spec decision): the verification cycle per task is `tsc -b` build; the end-to-end test is the live-Postgres parity diff (Task 7). `vitest` stays `--passWithNoTests`.
+
+---
+
+### Task 1: Schema foundation + tenancy tables
+
+**Files:**
+- Modify: `packages/db/src/schema.ts` (replace the stub entirely)
+
+**Interfaces:**
+- Consumes: nothing (first task).
+- Produces: `tenants`, `clients`, `wallets`, `apiKeys` pgTable exports; `bytea` customType (module-private, used again in Task 5). Later tasks append to this file and reference `tenants.id`, `clients.id`.
+
+- [ ] **Step 1: Replace the stub with the file header, imports, bytea helper, and the tenancy section**
+
+Write `packages/db/src/schema.ts` with exactly this content:
+
+```ts
 /**
  * Drizzle schema. Source DDL: docs/architecture/schema.sql — the schema here
  * must stay in sync with it (ADR-002); migrations are generated as plain SQL
@@ -117,7 +159,36 @@ export const apiKeys = pgTable(
     }).onDelete('cascade'),
   ],
 );
+```
 
+Note: `bytea` is intentionally unused until Task 5 — if the linter flags the unused binding, leave it (Task 5 consumes it) and suppress nothing; `tsc` does not error on unused module-level consts (`noUnusedLocals` applies, so if the build fails on `bytea` being unused, move the `bytea` declaration to Task 5 instead and drop it here — the file compiles either way).
+
+- [ ] **Step 2: Build**
+
+Run: `pnpm --filter @pet-crypto/db build`
+Expected: exit 0 (compiles `@pet-crypto/core` then `db` via project references). If it fails on `'bytea' is declared but its value is never read`, apply the note from Step 1 (defer the `bytea` helper to Task 5) and rebuild.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/db/src/schema.ts
+git commit -m "feat(db): tenancy tables in Drizzle schema (tenants, clients, wallets, api_keys)"
+```
+
+---
+
+### Task 2: Chain data tables
+
+**Files:**
+- Modify: `packages/db/src/schema.ts` (append section)
+
+**Interfaces:**
+- Consumes: nothing from Task 1 (tables are FK-independent from tenancy).
+- Produces: `tokens`, `chainEvents` exports. Later tasks FK-reference `tokens.id` (Tasks 3, 4) and `chainEvents.id` (Task 4).
+
+- [ ] **Step 1: Append the chain-data section to `packages/db/src/schema.ts`**
+
+```ts
 // ------------------------------------------------------------ chain data ---
 
 // Global token registry. The native currency of each chain is a pseudo-token
@@ -192,10 +263,7 @@ export const chainEvents = pgTable(
     check('chain_events_from_addr_check', sql`from_addr = lower(from_addr)`),
     check('chain_events_to_addr_check', sql`to_addr = lower(to_addr)`),
     // Idempotency key (P3/P4): safe re-ingestion via ON CONFLICT DO NOTHING.
-    // token_id is functionally dependent on (chain_id, tx_hash, log_index) for real
-    // logs; it is load-bearing for anchored opening balances, which write one event
-    // per token under a single synthetic tx_hash / log_index slot (03-ingestion.md).
-    unique('chain_events_idempotency').on(t.chainId, t.txHash, t.logIndex, t.tokenId),
+    unique('chain_events_idempotency').on(t.chainId, t.txHash, t.logIndex),
     // Flow queries: "events where X is sender/recipient in period".
     // chain_id is filtered after the address probe: address selectivity dominates.
     index('chain_events_from_idx').on(t.fromAddr, t.blockTime),
@@ -206,7 +274,34 @@ export const chainEvents = pgTable(
     index('chain_events_token_idx').on(t.tokenId),
   ],
 );
+```
 
+- [ ] **Step 2: Build**
+
+Run: `pnpm --filter @pet-crypto/db build`
+Expected: exit 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/db/src/schema.ts
+git commit -m "feat(db): chain data tables (tokens, chain_events) with bigint-mode NUMERIC(78,0)"
+```
+
+---
+
+### Task 3: Pricing + directory tables
+
+**Files:**
+- Modify: `packages/db/src/schema.ts` (append sections)
+
+**Interfaces:**
+- Consumes: `tokens.id` (Task 2), `tenants.id`, `clients.id` (Task 1).
+- Produces: `priceSnapshots`, `fxRates`, `entities`, `entityAddresses` exports. Task 4 FK-references `priceSnapshots.id`, `fxRates.id`, `entities.id`.
+
+- [ ] **Step 1: Append the pricing and directory sections**
+
+```ts
 // ---------------------------------------------------------------- pricing ---
 
 // Daily UTC close snapshots (P5). Append-only: corrections are new rows under
@@ -326,7 +421,34 @@ export const entityAddresses = pgTable(
     index('entity_addresses_addr_idx').on(t.address),
   ],
 );
+```
 
+- [ ] **Step 2: Build**
+
+Run: `pnpm --filter @pet-crypto/db build`
+Expected: exit 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/db/src/schema.ts
+git commit -m "feat(db): pricing snapshots, fx rates, entity directory tables"
+```
+
+---
+
+### Task 4: Reconciliation + ingestion tables
+
+**Files:**
+- Modify: `packages/db/src/schema.ts` (append sections)
+
+**Interfaces:**
+- Consumes: `tenants.id`, `clients.id` (Task 1); `tokens.id`, `chainEvents.id` (Task 2); `entities.id`, `priceSnapshots.id`, `fxRates.id` (Task 3).
+- Produces: `externalRecords`, `matches`, `ingestionCheckpoints` exports.
+
+- [ ] **Step 1: Append the reconciliation and ingestion sections**
+
+```ts
 // ---------------------------------------------------------- reconciliation ---
 
 // Source-agnostic external records (Option C seam #1): an invoice is just one
@@ -389,12 +511,13 @@ export const externalRecords = pgTable(
       'external_records_status_check',
       sql`status IN ('open', 'partially_matched', 'matched', 'overpaid', 'void')`,
     ),
-    // Idempotent re-import of the same CSV, partitioned per client (ADR-006): two
-    // clients of one firm may legitimately use the same invoice number. NULLS NOT
-    // DISTINCT so single-company rows (client_id IS NULL) still dedupe.
-    unique('external_records_import_idempotency')
-      .on(t.tenantId, t.clientId, t.kind, t.source, t.externalRef)
-      .nullsNotDistinct(),
+    // Idempotent re-import of the same CSV.
+    unique('external_records_tenant_id_kind_source_external_ref_key').on(
+      t.tenantId,
+      t.kind,
+      t.source,
+      t.externalRef,
+    ),
     index('external_records_status_idx').on(t.tenantId, t.status),
     index('external_records_period_idx').on(t.tenantId, t.issuedOn),
   ],
@@ -510,7 +633,37 @@ export const ingestionCheckpoints = pgTable(
     ),
   ],
 );
+```
 
+- [ ] **Step 2: Build**
+
+Run: `pnpm --filter @pet-crypto/db build`
+Expected: exit 0.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/db/src/schema.ts
+git commit -m "feat(db): reconciliation (external_records, matches) and ingestion checkpoint tables"
+```
+
+---
+
+### Task 5: Interface tables, db client, drizzle-kit scripts
+
+**Files:**
+- Modify: `packages/db/src/schema.ts` (append final section)
+- Create: `packages/db/src/client.ts`
+- Modify: `packages/db/src/index.ts`
+- Modify: `packages/db/package.json` (scripts only)
+
+**Interfaces:**
+- Consumes: `tenants.id`, `clients.id` (Task 1); `bytea` helper (Task 1).
+- Produces: `toolCalls`, `integrationCredentials`, `exportsTable` exports; `createDb(pool: Pool): Db` and `type Db` from `client.ts`; package scripts `db:generate`, `db:migrate`, `db:check` used by Tasks 6–7.
+
+- [ ] **Step 1: Append the interface section to `packages/db/src/schema.ts`**
+
+```ts
 // --------------------------------------------------------------- interface ---
 
 // Persisted tool invocations: the anchor for citations (P2). Every MCP tool
@@ -606,3 +759,173 @@ export const exportsTable = pgTable(
     index('exports_tenant_idx').on(t.tenantId, t.createdAt),
   ],
 );
+```
+
+If the `bytea` helper was deferred out of Task 1 (see its Step 1 note), add it now directly above `integrationCredentials`, together with the `customType` import and the `import type { Buffer } from 'node:buffer';` line.
+
+- [ ] **Step 2: Create `packages/db/src/client.ts`**
+
+```ts
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { Pool } from 'pg';
+import * as schema from './schema.js';
+
+export type Db = NodePgDatabase<typeof schema>;
+
+/** Drizzle handle over an externally owned pg Pool (caller manages lifecycle). */
+export function createDb(pool: Pool): Db {
+  return drizzle(pool, { schema });
+}
+```
+
+- [ ] **Step 3: Update `packages/db/src/index.ts`**
+
+Replace its content with:
+
+```ts
+/**
+ * Tenant-scoped repositories over the Drizzle schema. Tenant identity comes
+ * from the transport session, never from tool arguments (ADR-006).
+ */
+export * from './schema.js';
+export { createDb, type Db } from './client.js';
+```
+
+- [ ] **Step 4: Add drizzle-kit scripts to `packages/db/package.json`**
+
+In the `"scripts"` block, after `"test"`, add:
+
+```json
+"db:generate": "drizzle-kit generate",
+"db:migrate": "drizzle-kit migrate",
+"db:check": "drizzle-kit check"
+```
+
+- [ ] **Step 5: Build and lint**
+
+Run: `pnpm --filter @pet-crypto/db build && pnpm --filter @pet-crypto/db lint`
+Expected: both exit 0. Fix any lint findings (formatting only — no logic changes) before committing.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/db/src/schema.ts packages/db/src/client.ts packages/db/src/index.ts packages/db/package.json
+git commit -m "feat(db): interface tables (tool_calls, integration_credentials, exports), db client, drizzle-kit scripts"
+```
+
+---
+
+### Task 6: Generate migration 0000 and hand-review it
+
+**Files:**
+- Create (generated): `packages/db/migrations/0000_*.sql`, `packages/db/migrations/meta/_journal.json`, `packages/db/migrations/meta/0000_snapshot.json`
+
+**Interfaces:**
+- Consumes: complete `src/schema.ts` (Tasks 1–5), `db:generate` script (Task 5). `drizzle.config.ts` already points schema → `./src/schema.ts`, out → `./migrations`; do not modify it.
+- Produces: the migration file Task 7 applies. `drizzle-kit generate` is offline — no database needed.
+
+- [ ] **Step 1: Generate**
+
+Run: `pnpm --filter @pet-crypto/db db:generate`
+Expected: output ends with `Your SQL migration file ➜ migrations/0000_<random-name>.sql 🚀` and reports 16 tables. No errors.
+
+- [ ] **Step 2: Hand-review the generated SQL against `docs/architecture/schema.sql`** (ADR-002: the migration is an audit artifact)
+
+Verify, reading both files side by side:
+1. 16 `CREATE TABLE` statements; table and column names all snake_case, matching the reference.
+2. Money columns are `numeric(78, 0)`: `chain_events.amount_raw`, `matches.amount_applied_raw`. Fiat numerics (`price`, `rate`, `amount`, `vat_rate`, `vat_amount`, `fiat_value`, `confidence`) are bare `numeric`.
+3. All 23 FOREIGN KEY constraints present with `_fkey` names and correct `ON DELETE` actions (cascade for tenant links; set null for client links; none for token/event/snapshot/fx references).
+4. `UNIQUE NULLS NOT DISTINCT` on `tokens_chain_id_address_key` and `entity_addresses_tenant_id_chain_id_address_key`.
+5. All CHECK constraints present with their expressions verbatim, including `tokens_native_iff_no_addr`.
+6. `GENERATED ALWAYS AS IDENTITY` on `tokens.id`, `chain_events.id`, `price_snapshots.id`, `fx_rates.id`.
+7. Composite `ingestion_checkpoints_pkey` on (chain_id, address, stream).
+8. All 14 secondary indexes with the exact `_idx` names from the reference.
+9. `bytea` type on `integration_credentials.ciphertext` / `nonce`; `DEFAULT` clauses match (`'{}'::jsonb`, `'[]'::jsonb`, `'USD'`, `'ecb'`, `'invoice'`, `'open'`, `'queued'`, `'pending'`, `'suggested'`, `0`, `1`, `false`, `now()`, `gen_random_uuid()`).
+
+If anything is off: fix `src/schema.ts`, delete everything under `packages/db/migrations/`, rebuild, regenerate. Never edit the generated SQL.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/db/migrations
+git commit -m "feat(db): generated initial migration 0000 from Drizzle schema"
+```
+
+---
+
+### Task 7: Live-Postgres parity verification + full pipeline
+
+**Files:**
+- Possibly modify: `packages/db/src/schema.ts` + regenerate `packages/db/migrations/` (only if the diff finds deltas)
+
+**Interfaces:**
+- Consumes: `packages/db/migrations/0000_*.sql` (Task 6), `docs/architecture/schema.sql` (read-only reference).
+- Produces: verified parity — the spec's acceptance criterion. Requires Docker Desktop running.
+
+- [ ] **Step 1: Spin up disposable Postgres 16 with two databases** (Bash tool; `$SCRATCH` = the session scratchpad directory)
+
+```bash
+docker run --rm -d --name schema_parity -e POSTGRES_PASSWORD=x postgres:16
+docker exec schema_parity pg_isready -U postgres   # repeat until "accepting connections"
+docker exec schema_parity psql -U postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE from_migration' -c 'CREATE DATABASE from_reference'
+```
+
+- [ ] **Step 2: Apply the generated migration to one DB and the reference DDL to the other**
+
+`--> statement-breakpoint` lines in the generated file are SQL comments — psql ignores them; applying via psql (not `db:migrate`) keeps the drizzle bookkeeping schema out of the dump.
+
+```bash
+docker cp packages/db/migrations/0000_*.sql schema_parity:/m0000.sql
+docker cp docs/architecture/schema.sql schema_parity:/reference.sql
+docker exec schema_parity psql -U postgres -d from_migration -v ON_ERROR_STOP=1 -q -f /m0000.sql
+docker exec schema_parity psql -U postgres -d from_reference -v ON_ERROR_STOP=1 -q -f /reference.sql
+```
+
+Expected: both apply with exit 0 and no error output.
+
+- [ ] **Step 3: Dump both schemas and diff**
+
+```bash
+docker exec schema_parity pg_dump -U postgres -d from_migration --schema-only --no-owner > "$SCRATCH/dump_migration.sql"
+docker exec schema_parity pg_dump -U postgres -d from_reference --schema-only --no-owner > "$SCRATCH/dump_reference.sql"
+diff "$SCRATCH/dump_migration.sql" "$SCRATCH/dump_reference.sql"
+```
+
+Expected: `diff` exits 0 with empty output — **zero differences is the acceptance criterion**.
+
+If there are differences:
+- Name deltas (constraint/index named differently) → fix the explicit name in `src/schema.ts`.
+- Type/default/nullability deltas → fix the column definition in `src/schema.ts`.
+- Then: delete `packages/db/migrations/` contents, `pnpm --filter @pet-crypto/db build`, regenerate (Task 6 Step 1), re-run Steps 2–3 of this task (drop and recreate both databases first: `docker exec schema_parity psql -U postgres -c 'DROP DATABASE from_migration' -c 'DROP DATABASE from_reference'`, then repeat from Step 1's CREATE DATABASE command). Commit the fix as `fix(db): align schema with reference DDL (parity diff)`.
+
+- [ ] **Step 4: Tear down**
+
+```bash
+docker rm -f schema_parity
+```
+
+- [ ] **Step 5: Full root pipeline**
+
+Run from the repo root, in order:
+
+```bash
+pnpm build && pnpm typecheck && pnpm lint && pnpm test && pnpm depcruise
+```
+
+Expected: all exit 0 (`depcruise` needs the fresh `pnpm build` — that ordering is already in the command). `pnpm test` passes via `--passWithNoTests`.
+
+- [ ] **Step 6: Record the parity result**
+
+If Step 3 required no fixes, make an empty-change record by amending nothing — instead append the evidence to the final commit of the branch: create commit only if files changed. If nothing changed after Task 6's commit, record the verification in the commit message of a docs touch-up:
+
+```bash
+git commit --allow-empty -m "chore(db): parity verified — migration 0000 vs schema.sql pg_dump diff is empty on postgres:16"
+```
+
+---
+
+## Self-review notes (run after writing, fixed inline)
+
+- **Spec coverage:** package layout (Tasks 1–5), column mapping table (Tasks 1–5 code), constraint/index parity (explicit names throughout + Task 7 diff loop), migration workflow scripts (Task 5 Step 4), verification/acceptance (Task 7), non-goals untouched (no repositories, no compose wiring, no seeds, no branded types). ✓
+- **Type consistency:** `exportsTable`/`toolCalls`/`integrationCredentials` names consistent between Task 5 code and index re-export (`export * from './schema.js'` covers them); `createDb`/`Db` consistent between client.ts and index.ts. FK count stated as 23 in Task 6 matches the foreignKey() calls defined across Tasks 1–5 (clients 1, wallets 2, api_keys 1, chain_events 1, price_snapshots 1, entities 2, entity_addresses 2, external_records 4, matches 5, tool_calls 1, integration_credentials 1, exports 2). ✓
+- **Placeholders:** none — every code step carries full content; commands carry expected output. ✓

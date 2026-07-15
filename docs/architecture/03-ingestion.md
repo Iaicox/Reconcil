@@ -62,7 +62,7 @@ loop:
   page = provider.getPage(address, from=cursor+1, to=safe, limit=1000, sort=asc)
   events = normalize(page)                        // pure function, packages/ingestion
   tx {                                            // single Postgres transaction
-    INSERT ... ON CONFLICT (chain_id, tx_hash, log_index) DO NOTHING
+    INSERT ... ON CONFLICT (chain_id, tx_hash, log_index, token_id) DO NOTHING
     UPDATE ingestion_checkpoints SET last_processed_block = newCursor
   }
   enqueue token-resolve for unseen contracts

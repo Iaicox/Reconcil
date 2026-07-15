@@ -5,7 +5,7 @@
 
 ## Goal
 
-Turn the reference DDL `docs/architecture/schema.sql` (15 tables) into an
+Turn the reference DDL `docs/architecture/schema.sql` (16 tables) into an
 executable Drizzle schema with a generated, hand-auditable SQL migration
 `0000`, verified for parity against the reference on a live Postgres 16.
 
@@ -36,7 +36,7 @@ drift.
 ```
 packages/db/
   drizzle.config.ts        # already present, unchanged (schema → src/schema.ts, out → migrations)
-  src/schema.ts            # all 15 tables; section order and names mirror schema.sql 1:1
+  src/schema.ts            # all 16 tables; section order and names mirror schema.sql 1:1
   src/client.ts            # createDb(pool): drizzle over node-postgres
   src/index.ts             # re-exports schema + client
   migrations/              # 0000_*.sql + meta/ journal — generated, checked in

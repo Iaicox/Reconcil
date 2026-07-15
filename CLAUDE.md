@@ -64,7 +64,7 @@ with full rationale.
   traceable through the citation envelope (`tool_call_id`, event refs, pinned
   price/fx snapshot IDs). A number without provenance is a bug. (P1/P2, ADR-012)
 - **`chain_events` is append-only.** No UPDATE/DELETE ever; idempotency via
-  `UNIQUE (chain_id, tx_hash, log_index)` with sentinel log_index values; ingestion never
+  `UNIQUE (chain_id, tx_hash, log_index, token_id)` with sentinel log_index values; ingestion never
   advances past `head − finality_depth` — there is deliberately no reorg rollback path.
   (ADR-005)
 - **No signing or key material anywhere in the dependency tree** — the product is
