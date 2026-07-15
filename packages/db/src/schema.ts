@@ -192,7 +192,10 @@ export const chainEvents = pgTable(
     check('chain_events_from_addr_check', sql`from_addr = lower(from_addr)`),
     check('chain_events_to_addr_check', sql`to_addr = lower(to_addr)`),
     // Idempotency key (P3/P4): safe re-ingestion via ON CONFLICT DO NOTHING.
-    unique('chain_events_idempotency').on(t.chainId, t.txHash, t.logIndex),
+    // token_id is functionally dependent on (chain_id, tx_hash, log_index) for real
+    // logs; it is load-bearing for anchored opening balances, which write one event
+    // per token under a single synthetic tx_hash / log_index slot (03-ingestion.md).
+    unique('chain_events_idempotency').on(t.chainId, t.txHash, t.logIndex, t.tokenId),
     // Flow queries: "events where X is sender/recipient in period".
     // chain_id is filtered after the address probe: address selectivity dominates.
     index('chain_events_from_idx').on(t.fromAddr, t.blockTime),
@@ -386,13 +389,12 @@ export const externalRecords = pgTable(
       'external_records_status_check',
       sql`status IN ('open', 'partially_matched', 'matched', 'overpaid', 'void')`,
     ),
-    // Idempotent re-import of the same CSV.
-    unique('external_records_tenant_id_kind_source_external_ref_key').on(
-      t.tenantId,
-      t.kind,
-      t.source,
-      t.externalRef,
-    ),
+    // Idempotent re-import of the same CSV, partitioned per client (ADR-006): two
+    // clients of one firm may legitimately use the same invoice number. NULLS NOT
+    // DISTINCT so single-company rows (client_id IS NULL) still dedupe.
+    unique('external_records_import_idempotency')
+      .on(t.tenantId, t.clientId, t.kind, t.source, t.externalRef)
+      .nullsNotDistinct(),
     index('external_records_status_idx').on(t.tenantId, t.status),
     index('external_records_period_idx').on(t.tenantId, t.issuedOn),
   ],

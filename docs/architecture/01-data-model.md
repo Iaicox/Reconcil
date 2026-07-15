@@ -65,9 +65,12 @@ Append-only. Rows are never updated or deleted. Reorg safety is **by constructio
 ingestion never advances past `head − finality_depth` (see `03-ingestion.md` §4), so
 everything written is final. There is no rollback path to test.
 
-**Idempotency key**: `UNIQUE (chain_id, tx_hash, log_index)`. Re-ingestion of any page is
-`INSERT … ON CONFLICT DO NOTHING` (P4). Backfill pagination deliberately overlaps block
-boundaries and relies on this key to dedupe.
+**Idempotency key**: `UNIQUE (chain_id, tx_hash, log_index, token_id)`. Re-ingestion of
+any page is `INSERT … ON CONFLICT DO NOTHING` (P4). Backfill pagination deliberately
+overlaps block boundaries and relies on this key to dedupe. `token_id` is redundant for
+real logs (a log carries exactly one token) but load-bearing for anchored opening
+balances, which write one event per token under a single synthetic
+`tx_hash`/`log_index` slot (ADR-005).
 
 **`log_index` conventions** (one uniform key for heterogeneous facts):
 
@@ -96,7 +99,7 @@ Its citation is the provider snapshot call, not tx hashes — tools must surface
 
 | Index | Serves |
 |---|---|
-| `UNIQUE (chain_id, tx_hash, log_index)` | Idempotent ingestion; citation lookups by ref |
+| `UNIQUE (chain_id, tx_hash, log_index, token_id)` | Idempotent ingestion; citation lookups by ref |
 | `(from_addr, block_time)`, `(to_addr, block_time)` | All flow/balance queries (`WHERE addr = X AND block_time <@ period`, bitmap-OR over both) |
 | `(chain_id, block_number)` | Coverage math, integrity checks at a given height |
 | `(token_id)` | Stablecoin scans, spam-token audits |
@@ -149,8 +152,11 @@ citations (an auditor sees that a Saturday payment used Friday's rate).
 (`'invoice'` today; `'bill'`, `'agent_charge'` later) — the matching engine binds
 *external record ↔ settlement event*, not *invoice ↔ transfer*.
 
-`UNIQUE (tenant_id, kind, source, external_ref)` makes CSV re-import idempotent: the same
-file can be dropped twice; existing refs are skipped and reported.
+`UNIQUE NULLS NOT DISTINCT (tenant_id, client_id, kind, source, external_ref)` makes CSV
+re-import idempotent *per client* (records partition per client, ADR-006): the same file
+can be dropped twice — existing refs are skipped and reported — while two clients of one
+firm may legitimately use the same invoice number. `NULLS NOT DISTINCT` keeps
+single-company rows (`client_id IS NULL`) deduplicating as one scope.
 
 **`matches` are pair-level legs**, m:n by construction:
 

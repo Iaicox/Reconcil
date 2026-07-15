@@ -100,7 +100,10 @@ CREATE TABLE chain_events (
     raw          JSONB NOT NULL,       -- provider payload as received; server-side only, never sent to LLM
     ingested_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     -- Idempotency key (P3/P4): safe re-ingestion via ON CONFLICT DO NOTHING.
-    CONSTRAINT chain_events_idempotency UNIQUE (chain_id, tx_hash, log_index)
+    -- token_id is functionally dependent on (chain_id, tx_hash, log_index) for real
+    -- logs; it is load-bearing for anchored opening balances, which write one event
+    -- per token under a single synthetic tx_hash / log_index slot (03-ingestion.md).
+    CONSTRAINT chain_events_idempotency UNIQUE (chain_id, tx_hash, log_index, token_id)
 );
 -- Flow queries: "events where X is sender/recipient in period".
 -- chain_id is filtered after the address probe: address selectivity dominates.
@@ -192,8 +195,11 @@ CREATE TABLE external_records (
                                 ('open', 'partially_matched', 'matched', 'overpaid', 'void')),
     payload                 JSONB NOT NULL DEFAULT '{}',   -- raw import row (audit)
     imported_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    -- Idempotent re-import of the same CSV.
-    UNIQUE (tenant_id, kind, source, external_ref)
+    -- Idempotent re-import of the same CSV, partitioned per client (ADR-006): two
+    -- clients of one firm may legitimately use the same invoice number. NULLS NOT
+    -- DISTINCT so single-company rows (client_id IS NULL) still dedupe.
+    CONSTRAINT external_records_import_idempotency
+        UNIQUE NULLS NOT DISTINCT (tenant_id, client_id, kind, source, external_ref)
 );
 CREATE INDEX external_records_status_idx ON external_records (tenant_id, status);
 CREATE INDEX external_records_period_idx ON external_records (tenant_id, issued_on);

@@ -1,5 +1,5 @@
 {
-  "id": "a4772c35-1a23-4c00-b2aa-3c0a8e1ade4c",
+  "id": "0e289dc2-2b45-4b57-9a30-214f63e389c6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -293,7 +293,8 @@
           "columns": [
             "chain_id",
             "tx_hash",
-            "log_index"
+            "log_index",
+            "token_id"
           ]
         }
       },
@@ -971,11 +972,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "external_records_tenant_id_kind_source_external_ref_key": {
-          "name": "external_records_tenant_id_kind_source_external_ref_key",
-          "nullsNotDistinct": false,
+        "external_records_import_idempotency": {
+          "name": "external_records_import_idempotency",
+          "nullsNotDistinct": true,
           "columns": [
             "tenant_id",
+            "client_id",
             "kind",
             "source",
             "external_ref"
