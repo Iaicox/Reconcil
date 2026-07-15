@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Executable Drizzle schema in `@pet-crypto/db` mirroring `docs/architecture/schema.sql` (15 tables), with a generated SQL migration `0000` proven byte-identical (via `pg_dump` diff) to the reference DDL on Postgres 16.
+**Goal:** Executable Drizzle schema in `@pet-crypto/db` mirroring `docs/architecture/schema.sql` (16 tables), with a generated SQL migration `0000` proven byte-identical (via `pg_dump` diff) to the reference DDL on Postgres 16.
 
 **Architecture:** TS-schema-first (approved spec: `docs/superpowers/specs/2026-07-14-drizzle-schema-migration-design.md`). `src/schema.ts` is hand-written in the same section order as `schema.sql`; `drizzle-kit generate` produces the migration; parity is verified by applying migration and reference DDL to two fresh databases in one disposable postgres:16 container and diffing schema-only dumps.
 
@@ -827,19 +827,19 @@ git commit -m "feat(db): interface tables (tool_calls, integration_credentials, 
 - [ ] **Step 1: Generate**
 
 Run: `pnpm --filter @pet-crypto/db db:generate`
-Expected: output ends with `Your SQL migration file ➜ migrations/0000_<random-name>.sql 🚀` and reports 15 tables. No errors.
+Expected: output ends with `Your SQL migration file ➜ migrations/0000_<random-name>.sql 🚀` and reports 16 tables. No errors.
 
 - [ ] **Step 2: Hand-review the generated SQL against `docs/architecture/schema.sql`** (ADR-002: the migration is an audit artifact)
 
 Verify, reading both files side by side:
-1. 15 `CREATE TABLE` statements; table and column names all snake_case, matching the reference.
+1. 16 `CREATE TABLE` statements; table and column names all snake_case, matching the reference.
 2. Money columns are `numeric(78, 0)`: `chain_events.amount_raw`, `matches.amount_applied_raw`. Fiat numerics (`price`, `rate`, `amount`, `vat_rate`, `vat_amount`, `fiat_value`, `confidence`) are bare `numeric`.
 3. All 23 FOREIGN KEY constraints present with `_fkey` names and correct `ON DELETE` actions (cascade for tenant links; set null for client links; none for token/event/snapshot/fx references).
 4. `UNIQUE NULLS NOT DISTINCT` on `tokens_chain_id_address_key` and `entity_addresses_tenant_id_chain_id_address_key`.
 5. All CHECK constraints present with their expressions verbatim, including `tokens_native_iff_no_addr`.
 6. `GENERATED ALWAYS AS IDENTITY` on `tokens.id`, `chain_events.id`, `price_snapshots.id`, `fx_rates.id`.
 7. Composite `ingestion_checkpoints_pkey` on (chain_id, address, stream).
-8. All 12 secondary indexes with the exact `_idx` names from the reference.
+8. All 14 secondary indexes with the exact `_idx` names from the reference.
 9. `bytea` type on `integration_credentials.ciphertext` / `nonce`; `DEFAULT` clauses match (`'{}'::jsonb`, `'[]'::jsonb`, `'USD'`, `'ecb'`, `'invoice'`, `'open'`, `'queued'`, `'pending'`, `'suggested'`, `0`, `1`, `false`, `now()`, `gen_random_uuid()`).
 
 If anything is off: fix `src/schema.ts`, delete everything under `packages/db/migrations/`, rebuild, regenerate. Never edit the generated SQL.
