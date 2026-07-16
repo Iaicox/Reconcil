@@ -14,15 +14,19 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run --passWithNoTests",
+    "capture": "node --env-file-if-exists=../../.env --import tsx scripts/capture.ts"
   },
   "dependencies": {
     "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*"
+    "@pet-crypto/db": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "eslint": "catalog:",
+    "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }
