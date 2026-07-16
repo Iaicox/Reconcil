@@ -11,3 +11,11 @@ declare const brand: unique symbol;
  * unit/currency mix-ups a compile error.
  */
 export type Brand<T, TBrand extends string> = T & { readonly [brand]: TBrand };
+
+export {
+  chains,
+  chainById,
+  type ChainConfig,
+  type ProviderConfig,
+  type FeeStrategy,
+} from './chains.config.js';
