@@ -99,6 +99,10 @@ describe('getNativeTxs', () => {
       name: 'ProviderError',
       kind: 'rate_limited',
     });
+    // provider strings are hostile: the error message must not embed response content
+    await adapter(transport)
+      .getNativeTxs(Q)
+      .catch((e: ProviderError) => expect(e.message).not.toContain('Max rate limit reached'));
   });
 
   it('maps HTTP 429 to rate_limited and HTTP 500 to http', async () => {
@@ -113,6 +117,10 @@ describe('getNativeTxs', () => {
     await expect(adapter(transport).getNativeTxs(Q)).rejects.toMatchObject({
       kind: 'provider_error',
     });
+    // provider strings are hostile: the error message must not embed response content
+    await adapter(transport)
+      .getNativeTxs(Q)
+      .catch((e: ProviderError) => expect(e.message).not.toContain('Invalid address format'));
   });
 
   it('maps Zod-rejected rows to malformed', async () => {

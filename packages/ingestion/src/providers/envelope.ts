@@ -20,8 +20,10 @@ export function unwrapAccountEnvelope(status: number, body: unknown): unknown {
     // "No transactions found" / "No token transfers found" ⇒ empty page, not an error
     if (/^no .+ found$/i.test(message)) return [];
     const text = typeof result === 'string' ? result : message;
-    if (/rate limit/i.test(text)) throw new ProviderError('rate_limited', text);
-    throw new ProviderError('provider_error', text);
+    if (/rate limit/i.test(text)) {
+      throw new ProviderError('rate_limited', 'provider rate limit', { cause: text });
+    }
+    throw new ProviderError('provider_error', 'provider returned an error status', { cause: text });
   }
   return result;
 }
