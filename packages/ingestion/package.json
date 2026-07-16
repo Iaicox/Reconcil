@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src test",
+    "lint": "eslint src test scripts",
     "test": "vitest run --passWithNoTests",
     "capture": "node --env-file-if-exists=../../.env --import tsx scripts/capture.ts"
   },
