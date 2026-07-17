@@ -66,9 +66,9 @@ export function normalize(
 
   for (const t of input.erc20?.items ?? []) {
     if (t.logIndex === null) {
-      throw new Error(
-        `missing logIndex for erc20 transfer in tx ${t.hash.toLowerCase()} — resolve spec §11 before ingesting`,
-      );
+      throw new Error('missing logIndex for erc20 transfer — resolve spec §11 before ingesting', {
+        cause: t.hash.toLowerCase(),
+      });
     }
     events.push({
       chainId: ctx.chainId,
@@ -94,9 +94,9 @@ function gasFee(tx: RawNativeTx, ctx: NormalizeContext): bigint {
   }
   const receipt = ctx.receipts?.get(tx.hash.toLowerCase());
   if (!receipt) {
-    throw new Error(
-      `missing receipt for outgoing tx ${tx.hash.toLowerCase()} — receipts-opstack requires receipts before normalize()`,
-    );
+    throw new Error('missing receipt for outgoing tx — receipts-opstack requires receipts before normalize()', {
+      cause: tx.hash.toLowerCase(),
+    });
   }
   const l2 = BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice);
   return receipt.l1Fee === null ? l2 : l2 + BigInt(receipt.l1Fee);

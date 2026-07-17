@@ -127,11 +127,13 @@ interface RawErc20Transfer {
   blockNumber: string; timeStamp: string; hash: string;
   logIndex: string | null;                  // see Open Question §11
   from: string; to: string; contractAddress: string; value: string;
-  tokenName: string; tokenSymbol: string; tokenDecimal: string;   // hostile, pass-through
+  tokenName: string; tokenSymbol: string;   // hostile, pass-through ('' when the provider returns null — Blockscout spam tokens)
+  tokenDecimal: string;
 }
 interface RawTokenMeta { contractAddress: string; name: string; symbol: string; decimals: string; }
 interface RawReceipt   { transactionHash: string; gasUsed: string; effectiveGasPrice: string;
-                         l1Fee: string | null; status: '0x0' | '0x1'; }
+                         l1Fee: string | null; status: '0' | '1';   // decimal post-mapping (wire shape is 0x-hex; adapters convert)
+}
 
 // normalize() output. Note: token is an address ref, NOT tokens.id — FK resolution
 // is a DB-write concern (worker spec).

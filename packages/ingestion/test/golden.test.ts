@@ -77,7 +77,11 @@ function erc20Tuples(rows: RawErc20Transfer[]): string[] {
     .sort();
 }
 
-describe.skipIf(manifest.length === 0)('golden replay of recorded fixtures', () => {
+describe('golden replay of recorded fixtures', () => {
+  it('manifest lists the three recorded wallets (suite must never silently skip)', () => {
+    expect(manifest.length).toBe(3);
+  });
+
   for (const wallet of manifest) {
     for (const [chainId, window] of Object.entries(wallet.chains)) {
       describe(`${wallet.role} on chain ${chainId}`, () => {

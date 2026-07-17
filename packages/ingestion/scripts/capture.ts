@@ -44,7 +44,10 @@ function withRateLimitRetry(inner: FetchJson, attempts = 5, backoffMs = 6000): F
   return async (url) => {
     for (let attempt = 1; ; attempt++) {
       const res = await inner(url);
-      if (attempt >= attempts || !isRateLimited(res)) return res;
+      if (!isRateLimited(res)) return res;
+      if (attempt >= attempts) {
+        throw new ProviderError('rate_limited', 'rate limit retries exhausted');
+      }
       console.log(`  rate-limited, retry ${String(attempt)}/${String(attempts - 1)} in ${String(backoffMs)}ms`);
       await new Promise((resolve) => setTimeout(resolve, backoffMs));
     }

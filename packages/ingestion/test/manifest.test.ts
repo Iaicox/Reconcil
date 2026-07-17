@@ -29,6 +29,14 @@ describe('manifest', () => {
     expect(entries).toHaveLength(2);
     expect(entries.find((e) => e.address === '0xabc')?.role).toBe('edge-spam');
   });
+
+  it('returns [] for a missing file but rethrows on corrupt JSON', () => {
+    dir = mkdtempSync(join(tmpdir(), 'manifest-'));
+    const path = join(dir, 'manifest.json');
+    expect(readManifest(path)).toEqual([]);
+    writeFileSync(path, '{not json');
+    expect(() => readManifest(path)).toThrow();
+  });
 });
 
 describe('assertScrubbed', () => {

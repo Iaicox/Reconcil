@@ -17,11 +17,14 @@ export interface WalletManifestEntry {
 }
 
 export function readManifest(path: string): WalletManifestEntry[] {
+  let text: string;
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as WalletManifestEntry[];
-  } catch {
-    return [];
+    text = readFileSync(path, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
   }
+  return JSON.parse(text) as WalletManifestEntry[];
 }
 
 export function upsertManifest(path: string, entry: WalletManifestEntry): void {
