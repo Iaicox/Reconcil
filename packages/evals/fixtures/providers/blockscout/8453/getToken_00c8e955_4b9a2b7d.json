@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=getToken&contractaddress=0x00c8e9558dc4c8928dc07ff8fb34adb875695f26&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x00c8e9558dc4c8928dc07ff8fb34adb875695f26",
+        "decimals": "9",
+        "name": "Citrea",
+        "symbol": "CTR",
+        "totalSupply": "1000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

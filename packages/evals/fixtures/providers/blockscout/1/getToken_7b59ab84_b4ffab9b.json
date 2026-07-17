@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0x7b59ab84ba4c1dd58b4483a44e30fa64c2cc3f34&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x7b59ab84ba4c1dd58b4483a44e30fa64c2cc3f34",
+        "decimals": "18",
+        "name": "ĖTḨ",
+        "symbol": "ĖTḨ",
+        "totalSupply": "1000000000000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

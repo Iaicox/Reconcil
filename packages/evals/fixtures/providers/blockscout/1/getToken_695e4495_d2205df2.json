@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0x695e449525d42055d368f84e97912032c7410a46&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x695e449525d42055d368f84e97912032c7410a46",
+        "decimals": "18",
+        "name": "SUPERDOG",
+        "symbol": "SUPERDOG",
+        "totalSupply": "100000000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

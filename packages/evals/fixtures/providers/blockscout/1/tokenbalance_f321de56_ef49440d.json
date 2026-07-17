@@ -1,0 +1,13 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=tokenbalance&address=0xf321de563a4420afdf15e68ace4d9254c0963905&block=25552210&contractaddress=0xa2bffb30c07f0dcda3d46aec4b1446e0229eb536&module=account"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": "0",
+      "status": "1"
+    }
+  }
+}

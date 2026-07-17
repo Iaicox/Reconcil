@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=getToken&contractaddress=0x49fd3feb78b5901d7cb4c0809aaaf7d5a4e9686b&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x49fd3feb78b5901d7cb4c0809aaaf7d5a4e9686b",
+        "decimals": "9",
+        "name": "Wallitelli",
+        "symbol": "WALLI",
+        "totalSupply": "1000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

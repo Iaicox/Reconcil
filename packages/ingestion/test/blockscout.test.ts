@@ -69,8 +69,9 @@ describe('paging endpoints (shared etherscan-compatible shape)', () => {
 });
 
 describe('capabilities (Blockscout has them all)', () => {
-  it('getNativeBalanceAt parses hex or decimal result', async () => {
-    const { transport, calls } = stub({ status: '1', message: 'OK', result: '0xde0b6b3a7640000' });
+  it('getNativeBalanceAt parses the JSON-RPC-shaped hex result', async () => {
+    // real shape verified at fixture capture (spec §7): {jsonrpc, id, result}
+    const { transport, calls } = stub({ jsonrpc: '2.0', id: 0, result: '0xde0b6b3a7640000' });
     const balance = await adapter(transport).getNativeBalanceAt(1, Q.address, 100n);
     expect(balance).toBe(1000000000000000000n);
     const u = new URL(calls[0] ?? '');
@@ -113,9 +114,12 @@ describe('capabilities (Blockscout has them all)', () => {
     expect(new URL(calls[0] ?? '').searchParams.get('action')).toBe('getToken');
   });
 
-  it('getHead parses proxy eth_blockNumber', async () => {
-    const { transport } = stub({ jsonrpc: '2.0', id: 1, result: '0x64' });
+  it('getHead uses the portable block module (base rejects module=proxy)', async () => {
+    const { transport, calls } = stub({ jsonrpc: '2.0', id: 1, result: '0x64' });
     expect(await adapter(transport).getHead(1)).toBe(100n);
+    const u = new URL(calls[0] ?? '');
+    expect(u.searchParams.get('module')).toBe('block');
+    expect(u.searchParams.get('action')).toBe('eth_block_number');
   });
 
   it('getReceipts reuses the shared receipt mapping', async () => {

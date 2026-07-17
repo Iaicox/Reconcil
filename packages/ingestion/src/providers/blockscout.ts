@@ -10,7 +10,7 @@ import type {
   RawTokenMeta,
 } from '../types.js';
 import { ProviderError } from '../types.js';
-import { parseRows, unwrapAccountEnvelope, unwrapProxy } from './envelope.js';
+import { parseRows, unwrapAccountEnvelope, unwrapProxy, unwrapProxyHex } from './envelope.js';
 import { mapReceipt, mapTokenRows, mapTxRows, receiptResult, tokenRow, txRow } from './etherscan-v2.js';
 
 const tokenMetaResult = z.object({
@@ -50,8 +50,10 @@ export function blockscoutAdapter(opts: {
 
     async getHead(chainId: number): Promise<bigint> {
       assertChain(chainId);
-      const { status, body } = await call({ module: 'proxy', action: 'eth_blockNumber' });
-      return BigInt(unwrapProxy(status, body, z.string()));
+      // module=block is the portable Blockscout action: base.blockscout.com
+      // rejects module=proxy with "Unknown module" (verified at capture).
+      const { status, body } = await call({ module: 'block', action: 'eth_block_number' });
+      return unwrapProxyHex(status, body);
     },
 
     async getNativeTxs(q: PageQuery): Promise<Page<RawNativeTx>> {
@@ -110,8 +112,9 @@ export function blockscoutAdapter(opts: {
         address,
         block: block.toString(),
       });
-      // BigInt() accepts both '0x…' hex and decimal strings
-      return BigInt(parseRows(z.string(), unwrapAccountEnvelope(status, body)));
+      // eth_get_balance answers in JSON-RPC shape, not the account envelope
+      // (verified against eth.blockscout.com at fixture capture, spec §7).
+      return unwrapProxyHex(status, body);
     },
 
     async getErc20BalanceAt(

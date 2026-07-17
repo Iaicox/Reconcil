@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=getToken&contractaddress=0x48ffb148167894e2ab1e273fdcd1aaca705bd6ff&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x48ffb148167894e2ab1e273fdcd1aaca705bd6ff",
+        "decimals": "6",
+        "name": "USḌ Coin",
+        "symbol": "USḌC",
+        "totalSupply": "",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

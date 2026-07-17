@@ -8,7 +8,7 @@ import type {
   RawNativeTx,
   RawReceipt,
 } from '../types.js';
-import { parseRows, unwrapAccountEnvelope, unwrapProxy } from './envelope.js';
+import { parseRows, unwrapAccountEnvelope, unwrapProxy, unwrapProxyHex } from './envelope.js';
 
 const txRow = z.object({
   blockNumber: z.string(),
@@ -31,8 +31,10 @@ const tokenRow = z.object({
   to: z.string(),
   contractAddress: z.string(),
   value: z.string(),
-  tokenName: z.string(),
-  tokenSymbol: z.string(),
+  // Blockscout returns null name/symbol for metadata-less spam tokens
+  // (observed in edge-spam fixtures, 2026-07-17)
+  tokenName: z.string().nullable(),
+  tokenSymbol: z.string().nullable(),
   tokenDecimal: z.string(),
 });
 
@@ -68,8 +70,8 @@ export function mapTokenRows(rows: z.infer<typeof tokenRow>[]): RawErc20Transfer
     to: r.to,
     contractAddress: r.contractAddress,
     value: r.value,
-    tokenName: r.tokenName,
-    tokenSymbol: r.tokenSymbol,
+    tokenName: r.tokenName ?? '',
+    tokenSymbol: r.tokenSymbol ?? '',
     tokenDecimal: r.tokenDecimal,
   }));
 }
@@ -107,7 +109,7 @@ export function etherscanV2Adapter(opts: {
         module: 'proxy',
         action: 'eth_blockNumber',
       });
-      return BigInt(unwrapProxy(status, body, z.string()));
+      return unwrapProxyHex(status, body);
     },
 
     async getNativeTxs(q: PageQuery): Promise<Page<RawNativeTx>> {

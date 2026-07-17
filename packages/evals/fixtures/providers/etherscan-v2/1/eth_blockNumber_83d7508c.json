@@ -1,0 +1,13 @@
+{
+  "request": {
+    "url": "https://api.etherscan.io/v2/api?action=eth_blockNumber&apikey=REDACTED&chainid=1&module=proxy"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 83,
+      "result": "0x185e592"
+    }
+  }
+}

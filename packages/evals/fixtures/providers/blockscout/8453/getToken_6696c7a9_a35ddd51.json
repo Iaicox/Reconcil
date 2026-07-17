@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=getToken&contractaddress=0x6696c7a90ad361a70048eecd7758f238d089d32a&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x6696c7a90ad361a70048eecd7758f238d089d32a",
+        "decimals": "18",
+        "name": "United States Equalizer Movement",
+        "symbol": "USEM",
+        "totalSupply": "1000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

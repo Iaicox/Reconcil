@@ -201,7 +201,10 @@ Endpoints (both providers speak the etherscan-style API; base URLs from
 
 Capability degradation is explicit per ADR-009: on the free tier the Etherscan
 adapter ships **without** `getTokenMeta` / balance-at-block; Blockscout provides
-them. `tokentx` rows already carry `tokenName/tokenSymbol/tokenDecimal`, which is
+them. *(Amended at capture, 2026-07-16: Blockscout's `eth_get_balance` answers in
+JSON-RPC shape `{jsonrpc, id, result}`, not the account envelope — the adapter
+unwraps it via the proxy path; `tokenbalance` and `getToken` use the account
+envelope as documented.)* `tokentx` rows already carry `tokenName/tokenSymbol/tokenDecimal`, which is
 what token discovery uses in practice. If capture shows a listed endpoint behaves
 differently than documented here, the adapter follows reality and this spec gets a
 one-line amendment (fixtures are the ground truth).
@@ -214,6 +217,22 @@ Quirks handled in adapters (never leak past them, per ADR-009):
 - Hex vs decimal: `proxy` module returns hex strings; `account` module returns
   decimal strings. Adapters convert hex → decimal string so `Raw*` is uniform.
 - Zod validation on every response body; reject ⇒ `ProviderError('malformed')`.
+
+**Amendments from live capture (2026-07-16/17)** — fixtures are the ground truth:
+
+- **Etherscan V2 free tier does not cover Base**: chainid=8453 answers
+  `status:"0"` / "Free API access is not supported for this chain" — and it does
+  so in the *account envelope shape on proxy actions*, so `unwrapProxy` detects
+  the envelope-error form and routes it through the error taxonomy. On the free
+  tier, Base is effectively Blockscout-only (ADR-009 amended accordingly).
+- **`module=proxy` is not portable across Blockscout instances**:
+  base.blockscout.com rejects it ("Unknown module", HTTP 400). `getHead` uses the
+  portable `module=block&action=eth_block_number` (JSON-RPC-shaped result).
+- **Full receipts are unavailable on Base from either indexer API** (Etherscan
+  walled, Blockscout has no proxy module there). The `receipts-opstack` fee path
+  therefore runs on public-RPC `eth_getTransactionReceipt`, exactly as
+  03-ingestion §6 specifies — implemented in the worker slice. `getReceipts`
+  stays on the adapters for chains/instances that serve it (works on Ethereum).
 
 ## 8. normalize()
 
@@ -274,7 +293,7 @@ user for confirmation before capture** (they land in a public OSS repo).
 | Adapter golden | real adapter + `FixtureTransport` ⇒ assert page counts, first/last item fields, hex→decimal conversion, empty-page quirk, error mapping (hand-written error fixtures: 429, status-0, malformed) |
 | `normalize()` unit | hand-built `Raw*` cases: failed tx (gas yes, transfer no), zero-value call, self-transfer, incoming (no gas), injection payload in `tokenSymbol` passes through byte-identical, `receipts-opstack` with/without `l1Fee`, missing receipt throws |
 | `normalize()` golden | fixture pages ⇒ assert event counts per kind and per-token `bigint` sums (plain assertions, not snapshots — reviewable numbers) |
-| Cross-provider | same wallet, same window, both providers ⇒ same set of `(txHash, logIndex, amountRaw)` triples after normalize — this is what keeps two adapters honest (ADR-009) |
+| Cross-provider | same wallet, same window, both providers ⇒ same normalized native+gas event set, and same raw erc20 `(txHash, contract, value, blockNumber)` tuple set (no provider logIndex exists — §11) — this is what keeps two adapters honest (ADR-009) |
 
 ## 11. Open question — resolved at capture time
 
@@ -291,6 +310,28 @@ idempotency key. Blockscout's etherscan-compat API documents it; Etherscan's
    idempotency, which is the whole point of the key.
 
 The choice is recorded in this spec (amended) before the normalizer task starts.
+
+**RESOLVED (2026-07-17, from captured fixtures): NEITHER provider returns
+`logIndex` in `tokentx`** — Etherscan V2 omits it (verified against live rows)
+and Blockscout's compat rows omit it too. Binding resolution is option 3,
+provider-independent log-index derivation at ingestion time, implemented in the
+worker slice — either per-tx receipts (`eth_getTransactionReceipt.logs`) or
+`eth_getLogs` over the Transfer topic, whichever the worker spec chooses; both
+carry exact `logIndex`. Consequences for this slice:
+
+- `RawErc20Transfer.logIndex` stays `string | null` and is null in practice;
+  `normalize()` throws on null — the guard that no erc20 event reaches the DB
+  without a real log index (option 4, synthetic ordinals, stays rejected).
+- The golden cross-provider check compares erc20 rows as raw
+  `(txHash, contract, value, blockNumber)` tuples (no logIndex available), and
+  exercises `normalize()` end-to-end on native+gas events only. The erc20
+  normalize golden lands with the worker slice, alongside the receipts path.
+
+**Capture-format amendments (2026-07-17):** recorded account-module responses
+have per-row `input` calldata pruned to `'<pruned>'` (no `Raw*` schema reads it;
+unpruned Blockscout pages hit 90 MB on airdrop-batch txs), and token-meta /
+balance-at fixtures are capped at the first 40 distinct contracts per wallet
+(spam wallets hold hundreds; 2×N requests at 1 s spacing must stay bounded).
 
 ## 12. Red lines honored
 

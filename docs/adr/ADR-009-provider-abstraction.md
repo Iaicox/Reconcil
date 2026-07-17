@@ -1,6 +1,7 @@
 # ADR-009: Provider abstraction — capability interface, chains as configuration
 
-**Status:** accepted · **Date:** 2026-07-14
+**Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-07-17 (free-tier
+reality from fixture capture — see MVP wiring note)
 
 ## Context
 
@@ -28,6 +29,17 @@ different fee computation than Ethereum (ADR-005, ingestion §6).
    (OSS, keyless, self-host-aligned). Failover: circuit breaker (5 consecutive failures →
    open 60 s → half-open probe) routes to the next provider; every event row records its
    `provider`.
+
+   *Amendment (2026-07-17, verified during fixture capture):* the Etherscan V2
+   **free tier no longer covers Base** ("Free API access is not supported for this
+   chain") — multichain-under-one-key requires a paid plan. On the free tier Base
+   is served by Blockscout alone; the capability interface absorbs this without
+   code changes (the etherscan adapter simply errors on 8453 and failover routes
+   on). Also: `tokentx` carries no `logIndex` on either provider — erc20 log
+   indexes come from receipts/`eth_getLogs` at ingestion time (worker), and
+   Blockscout instances differ in module support (base.blockscout.com has no
+   `proxy` module; head via `module=block`, OP-stack receipts via public RPC per
+   03-ingestion §6).
 
 ## Alternatives considered
 

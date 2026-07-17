@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0xb6987df32c13df51eea6a6253d9498e339ae69c5&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0xb6987df32c13df51eea6a6253d9498e339ae69c5",
+        "decimals": "18",
+        "name": "ꓴꓢꓓꓔ",
+        "symbol": "ꓴꓢꓓꓔ",
+        "totalSupply": "1000000000000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

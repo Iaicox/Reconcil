@@ -1,0 +1,13 @@
+{
+  "request": {
+    "url": "https://api.etherscan.io/v2/api?action=eth_blockNumber&apikey=REDACTED&chainid=8453&module=proxy"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "status": "0",
+      "message": "NOTOK",
+      "result": "Free API access is not supported for this chain. Please upgrade your api plan for full chain coverage. https://etherscan.io/apis"
+    }
+  }
+}

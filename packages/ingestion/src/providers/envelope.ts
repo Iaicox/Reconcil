@@ -31,9 +31,31 @@ export function unwrapAccountEnvelope(status: number, body: unknown): unknown {
 /** JSON-RPC style {result} envelope used by the proxy module. */
 export function unwrapProxy<T>(status: number, body: unknown, schema: z.ZodType<T>): T {
   throwOnHttpError(status);
+  // Etherscan V2 reports proxy-module errors in the ACCOUNT envelope shape
+  // ({status:"0", message, result}) — e.g. "free tier does not cover this
+  // chain". Route those through the same error taxonomy instead of letting an
+  // error string parse as a legitimate result.
+  const envelope = accountEnvelope.safeParse(body);
+  if (envelope.success && envelope.data.status === '0') {
+    const { message, result } = envelope.data;
+    const text = typeof result === 'string' ? result : message;
+    if (/rate limit/i.test(text)) {
+      throw new ProviderError('rate_limited', 'provider rate limit', { cause: text });
+    }
+    throw new ProviderError('provider_error', 'provider returned an error status', { cause: text });
+  }
   const parsed = z.object({ result: schema }).safeParse(body);
   if (!parsed.success) throw new ProviderError('malformed', 'unexpected proxy response shape');
   return parsed.data.result;
+}
+
+/** Proxy hex quantity (eth_blockNumber) → bigint, guarded so error text never reaches BigInt(). */
+export function unwrapProxyHex(status: number, body: unknown): bigint {
+  const hex = unwrapProxy(status, body, z.string());
+  if (!/^0x[0-9a-fA-F]+$/.test(hex)) {
+    throw new ProviderError('malformed', 'proxy returned a non-numeric quantity', { cause: hex });
+  }
+  return BigInt(hex);
 }
 
 /**

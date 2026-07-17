@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0xfdb7941769e292d3f0b9cc356c9e054cb3f2c729&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0xfdb7941769e292d3f0b9cc356c9e054cb3f2c729",
+        "decimals": "18",
+        "name": "Ainance",
+        "symbol": "Ainance",
+        "totalSupply": "10000000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

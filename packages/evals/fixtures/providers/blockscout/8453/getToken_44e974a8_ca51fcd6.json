@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=getToken&contractaddress=0x44e974a8a6909e67d13c2c80e81a6e360091fa1f&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x44e974a8a6909e67d13c2c80e81a6e360091fa1f",
+        "decimals": "9",
+        "name": "SK hynix tokenized stock (xStock)",
+        "symbol": "SKHYx",
+        "totalSupply": "1000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

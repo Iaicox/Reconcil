@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0x6fb1b08a39601303a466de1815fd1a70f9fc65f5&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x6fb1b08a39601303a466de1815fd1a70f9fc65f5",
+        "decimals": "18",
+        "name": "AFK",
+        "symbol": "AFK",
+        "totalSupply": "10000000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

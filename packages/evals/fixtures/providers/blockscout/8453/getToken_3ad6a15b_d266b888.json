@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=getToken&contractaddress=0x3ad6a15ba43c226ac40eb3de8c5e5ad72cda6587&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x3ad6a15ba43c226ac40eb3de8c5e5ad72cda6587",
+        "decimals": "6",
+        "name": "EỤRC",
+        "symbol": "EỤRC",
+        "totalSupply": "",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

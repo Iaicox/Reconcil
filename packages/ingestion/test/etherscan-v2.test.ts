@@ -172,6 +172,14 @@ describe('getErc20Transfers', () => {
     ]);
   });
 
+  it('maps null tokenName/tokenSymbol (metadata-less spam tokens) to empty strings', async () => {
+    const row = { ...TOKEN_ROW, tokenName: null, tokenSymbol: null };
+    const { transport } = stub({ status: '1', message: 'OK', result: [row] });
+    const page = await adapter(transport).getErc20Transfers(Q);
+    expect(page.items[0]?.tokenName).toBe('');
+    expect(page.items[0]?.tokenSymbol).toBe('');
+  });
+
   it('maps a missing logIndex to null (spec §11)', async () => {
     const rowNoLogIndex = Object.fromEntries(
       Object.entries(TOKEN_ROW).filter(([k]) => k !== 'logIndex'),
@@ -183,6 +191,25 @@ describe('getErc20Transfers', () => {
 });
 
 describe('getHead', () => {
+  it('maps an account-envelope error on a proxy action to provider_error (free tier refusing a chain)', async () => {
+    const providerText = 'Free API access is not supported for this chain.';
+    const { transport } = stub({ status: '0', message: 'NOTOK', result: providerText });
+    await expect(adapter(transport).getHead(8453)).rejects.toMatchObject({
+      name: 'ProviderError',
+      kind: 'provider_error',
+      message: expect.not.stringContaining('Free API'),
+    });
+  });
+
+  it('maps a non-hex proxy result to malformed instead of crashing BigInt()', async () => {
+    const { transport } = stub({ jsonrpc: '2.0', id: 1, result: 'not-a-quantity' });
+    await expect(adapter(transport).getHead(1)).rejects.toMatchObject({
+      name: 'ProviderError',
+      kind: 'malformed',
+      message: expect.not.stringContaining('not-a-quantity'),
+    });
+  });
+
   it('parses the proxy hex block number', async () => {
     const { transport, calls } = stub({ jsonrpc: '2.0', id: 83, result: '0x1233abc' });
     const head = await adapter(transport).getHead(1);
