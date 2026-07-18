@@ -392,6 +392,11 @@ export const externalRecords = pgTable(
     // Idempotent re-import of the same CSV, partitioned per client (ADR-006): two
     // clients of one firm may legitimately use the same invoice number. NULLS NOT
     // DISTINCT so single-company rows (client_id IS NULL) still dedupe.
+    // Caveat: dedupe holds only while client_id resolution is deterministic across
+    // imports. Re-importing a file after rows were re-attributed (client_id NULL →
+    // client X) inserts duplicates instead of skipping — the import path must
+    // resolve client_id identically on every run, or match on the
+    // pre-attribution key before insert.
     unique('external_records_import_idempotency')
       .on(t.tenantId, t.clientId, t.kind, t.source, t.externalRef)
       .nullsNotDistinct(),
