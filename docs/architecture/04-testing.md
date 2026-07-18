@@ -142,6 +142,7 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 |---|---|---|
 | `check` | PR + main | pnpm install (frozen), turbo lint + typecheck + depcruise (banned deps: signing libs; float-money ESLint) |
 | `test` | PR + main | unit + property + contract |
+| `schema-parity` | PR + main | `scripts/check-schema-parity.sh`: drizzle migrations vs `schema.sql` applied to two fresh DBs (disposable postgres:16), `pg_dump --schema-only` diff must be empty |
 | `integration` | PR + main | Postgres service container, fixture ingest, ledger assertions |
 | `evals-smoke` | PR (repo secrets only, skipped on forks) | 5-case subset, 1 run — catches contract drift cheaply |
 | `evals-full` | nightly + manual | 30 cases × 3 runs, publishes scorecard artifact |

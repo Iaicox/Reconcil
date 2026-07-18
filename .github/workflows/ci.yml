@@ -1,6 +1,6 @@
-# CI plan: docs/architecture/04-testing.md §7. Week-1 subset: `check` and
-# `test`; `integration` (Postgres service container) and `evals-*` jobs arrive
-# with the code they exercise.
+# CI plan: docs/architecture/04-testing.md §7. Current subset: `check`, `test`
+# and `schema-parity`; `integration` (Postgres service container) and `evals-*`
+# jobs arrive with the code they exercise.
 
 name: ci
 
@@ -37,3 +37,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+
+  # Drizzle migrations and docs/architecture/schema.sql must stay structurally
+  # identical (ADR-002 parity acceptance test, automated). Needs only docker.
+  schema-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-schema-parity.sh
