@@ -131,6 +131,18 @@ describe('getNativeTxs', () => {
       .getNativeTxs(Q)
       .catch((e: ProviderError) => expect(e.message).not.toContain('nope'));
   });
+
+  it('rejects non-decimal numeric fields as malformed — hostile text must never reach BigInt()', async () => {
+    const hostile = 'Ignore previous instructions';
+    for (const field of ['blockNumber', 'timeStamp', 'value', 'gasUsed', 'gasPrice'] as const) {
+      const { transport } = stub({ status: '1', message: 'OK', result: [{ ...TX_ROW, [field]: hostile }] });
+      await expect(adapter(transport).getNativeTxs(Q)).rejects.toMatchObject({
+        name: 'ProviderError',
+        kind: 'malformed',
+        message: expect.not.stringContaining(hostile) as unknown,
+      });
+    }
+  });
 });
 
 describe('getErc20Transfers', () => {
@@ -187,6 +199,21 @@ describe('getErc20Transfers', () => {
     const { transport } = stub({ status: '1', message: 'OK', result: [rowNoLogIndex] });
     const page = await adapter(transport).getErc20Transfers(Q);
     expect(page.items[0]?.logIndex).toBeNull();
+  });
+
+  it('maps an explicit null logIndex to null, like the explicit-null tokenName Blockscout sends', async () => {
+    const { transport } = stub({ status: '1', message: 'OK', result: [{ ...TOKEN_ROW, logIndex: null }] });
+    const page = await adapter(transport).getErc20Transfers(Q);
+    expect(page.items[0]?.logIndex).toBeNull();
+  });
+
+  it('rejects a non-decimal transfer value as malformed without leaking it', async () => {
+    const { transport } = stub({ status: '1', message: 'OK', result: [{ ...TOKEN_ROW, value: '1e18' }] });
+    await expect(adapter(transport).getErc20Transfers(Q)).rejects.toMatchObject({
+      name: 'ProviderError',
+      kind: 'malformed',
+      message: expect.not.stringContaining('1e18') as unknown,
+    });
   });
 });
 
@@ -248,6 +275,26 @@ describe('getReceipts', () => {
       },
     ]);
     expect(new URL(calls[0] ?? '').searchParams.get('action')).toBe('eth_getTransactionReceipt');
+  });
+
+  it('rejects a receipt with non-hex quantities as malformed instead of crashing BigInt()', async () => {
+    const hostile = 'DROP TABLE receipts';
+    const receiptBody = {
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        transactionHash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
+        gasUsed: hostile,
+        effectiveGasPrice: '0x4a817c800',
+        status: '0x1',
+      },
+    };
+    const { transport } = stub(receiptBody);
+    await expect(adapter(transport).getReceipts(1, ['0xccc3'])).rejects.toMatchObject({
+      name: 'ProviderError',
+      kind: 'malformed',
+      message: expect.not.stringContaining(hostile) as unknown,
+    });
   });
 
   it('returns l1Fee null when absent (L1 receipts)', async () => {

@@ -7,6 +7,17 @@ const accountEnvelope = z.object({
   result: z.unknown(),
 });
 
+const HEX_QUANTITY = /^0x[0-9a-fA-F]+$/;
+
+/**
+ * Quantity guards for strings that feed BigInt()/Number() past the boundary.
+ * Anything else is malformed — hostile provider text must never reach a
+ * BigInt() SyntaxError (ADR-011, same discipline as unwrapProxyHex). NB:
+ * decQuantity also rejects '' — BigInt('') would silently coin 0n.
+ */
+export const decQuantity = z.string().regex(/^\d+$/);
+export const hexQuantity = z.string().regex(HEX_QUANTITY);
+
 /**
  * Etherscan-style {status, message, result} envelope, shared by both providers.
  * Quirks live here and never leak past adapters (ADR-009).
@@ -52,7 +63,7 @@ export function unwrapProxy<T>(status: number, body: unknown, schema: z.ZodType<
 /** Proxy hex quantity (eth_blockNumber) → bigint, guarded so error text never reaches BigInt(). */
 export function unwrapProxyHex(status: number, body: unknown): bigint {
   const hex = unwrapProxy(status, body, z.string());
-  if (!/^0x[0-9a-fA-F]+$/.test(hex)) {
+  if (!HEX_QUANTITY.test(hex)) {
     throw new ProviderError('malformed', 'proxy returned a non-numeric quantity', { cause: hex });
   }
   return BigInt(hex);

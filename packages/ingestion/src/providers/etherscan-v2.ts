@@ -8,29 +8,40 @@ import type {
   RawNativeTx,
   RawReceipt,
 } from '../types.js';
-import { parseRows, unwrapAccountEnvelope, unwrapProxy, unwrapProxyHex } from './envelope.js';
+import {
+  decQuantity,
+  hexQuantity,
+  parseRows,
+  unwrapAccountEnvelope,
+  unwrapProxy,
+  unwrapProxyHex,
+} from './envelope.js';
 
+// Numeric fields feed BigInt()/Number() in normalize() — decQuantity/hexQuantity
+// reject non-numeric text here as malformed (see envelope.ts).
 const txRow = z.object({
-  blockNumber: z.string(),
-  timeStamp: z.string(),
+  blockNumber: decQuantity,
+  timeStamp: decQuantity,
   hash: z.string(),
   from: z.string(),
   to: z.string(),
-  value: z.string(),
-  gasUsed: z.string(),
-  gasPrice: z.string(),
+  value: decQuantity,
+  gasUsed: decQuantity,
+  gasPrice: decQuantity,
   isError: z.enum(['0', '1']),
 });
 
 const tokenRow = z.object({
-  blockNumber: z.string(),
-  timeStamp: z.string(),
+  blockNumber: decQuantity,
+  timeStamp: decQuantity,
   hash: z.string(),
-  logIndex: z.string().optional(),
+  // nullish: neither provider sends logIndex today (spec §11), and Blockscout
+  // uses explicit nulls for absent values (cf. tokenName below)
+  logIndex: decQuantity.nullish(),
   from: z.string(),
   to: z.string(),
   contractAddress: z.string(),
-  value: z.string(),
+  value: decQuantity,
   // Blockscout returns null name/symbol for metadata-less spam tokens
   // (observed in edge-spam fixtures, 2026-07-17)
   tokenName: z.string().nullable(),
@@ -40,10 +51,10 @@ const tokenRow = z.object({
 
 const receiptResult = z.object({
   transactionHash: z.string(),
-  gasUsed: z.string(),
-  effectiveGasPrice: z.string(),
+  gasUsed: hexQuantity,
+  effectiveGasPrice: hexQuantity,
   status: z.enum(['0x0', '0x1']),
-  l1Fee: z.string().optional(),
+  l1Fee: hexQuantity.optional(),
 });
 
 export function mapTxRows(rows: z.infer<typeof txRow>[]): RawNativeTx[] {

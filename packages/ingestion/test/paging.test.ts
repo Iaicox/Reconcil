@@ -46,4 +46,9 @@ describe('collectAllPages', () => {
     const all = await collectAllPages(fetchPage, Q);
     expect(all).toHaveLength(2);
   });
+
+  it('throws when a full page sits entirely in one block — advancing would silently drop rows', async () => {
+    const { fetchPage } = pager([[{ blockNumber: '7' }, { blockNumber: '7' }]]);
+    await expect(collectAllPages(fetchPage, Q)).rejects.toThrow(/single block/i);
+  });
 });

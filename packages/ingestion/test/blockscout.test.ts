@@ -90,6 +90,29 @@ describe('capabilities (Blockscout has them all)', () => {
     expect(u.searchParams.get('block')).toBe('100');
   });
 
+  it('treats an empty tokenbalance result as malformed, never as balance 0', async () => {
+    // Observed reality: base.blockscout.com answers status:"1" result:"" for
+    // historical blocks it cannot serve (13 of 21 recorded Base tokenbalance
+    // fixtures), while a true zero balance is "0". BigInt('') would coin 0n —
+    // a fabricated figure (P1: a number without provenance is a bug).
+    const { transport } = stub({ status: '1', message: 'OK', result: '' });
+    await expect(
+      adapter(transport).getErc20BalanceAt(1, Q.address, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 100n),
+    ).rejects.toMatchObject({ name: 'ProviderError', kind: 'malformed' });
+  });
+
+  it('rejects a non-decimal tokenbalance result as malformed without leaking it', async () => {
+    const hostile = 'upgrade your plan at https://evil.example';
+    const { transport } = stub({ status: '1', message: 'OK', result: hostile });
+    await expect(
+      adapter(transport).getErc20BalanceAt(1, Q.address, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 100n),
+    ).rejects.toMatchObject({
+      name: 'ProviderError',
+      kind: 'malformed',
+      message: expect.not.stringContaining('evil.example') as unknown,
+    });
+  });
+
   it('getTokenMeta maps getToken result', async () => {
     const { transport, calls } = stub({
       status: '1',

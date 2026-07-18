@@ -59,6 +59,9 @@ async function replay(kind: string, chainId: string, address: string, window: { 
 
 /** normalize() native+gas events only — erc20 has no provider logIndex (spec §11). */
 function normalizeNative(r: Replayed, chainId: string, address: string, kind: string): NormalizedEvent[] {
+  if (FEE[chainId] !== 'txlist') {
+    throw new Error(`normalizeNative is txlist-only; chain ${chainId} needs receipts (worker slice)`);
+  }
   return normalize(
     { native: { items: r.native } },
     { chainId: Number(chainId), trackedAddress: address, feeStrategy: 'txlist', provider: kind },

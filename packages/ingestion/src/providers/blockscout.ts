@@ -10,7 +10,7 @@ import type {
   RawTokenMeta,
 } from '../types.js';
 import { ProviderError } from '../types.js';
-import { parseRows, unwrapAccountEnvelope, unwrapProxy, unwrapProxyHex } from './envelope.js';
+import { decQuantity, parseRows, unwrapAccountEnvelope, unwrapProxy, unwrapProxyHex } from './envelope.js';
 import { mapReceipt, mapTokenRows, mapTxRows, receiptResult, tokenRow, txRow } from './etherscan-v2.js';
 
 const tokenMetaResult = z.object({
@@ -131,7 +131,10 @@ export function blockscoutAdapter(opts: {
         address,
         block: block.toString(),
       });
-      return BigInt(parseRows(z.string(), unwrapAccountEnvelope(status, body)));
+      // decQuantity: base.blockscout.com answers status:"1" result:"" for
+      // historical blocks it cannot serve (true zero balances come back as "0")
+      // — an empty string must fail loudly, never coin 0n via BigInt('').
+      return BigInt(parseRows(decQuantity, unwrapAccountEnvelope(status, body)));
     },
 
     async getReceipts(chainId: number, txHashes: string[]): Promise<RawReceipt[]> {

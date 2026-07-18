@@ -62,7 +62,8 @@ export interface RawReceipt {
 
 /** Per 03-ingestion §5 / ADR-009: optional methods are capabilities. */
 export interface ChainDataProvider {
-  readonly kind: 'etherscan-v2' | 'blockscout' | string;
+  // (string & {}) keeps the known literals in autocomplete without collapsing to string
+  readonly kind: 'etherscan-v2' | 'blockscout' | (string & {});
   getHead(chainId: number): Promise<bigint>;
   getNativeTxs(q: PageQuery): Promise<Page<RawNativeTx>>;
   getErc20Transfers(q: PageQuery): Promise<Page<RawErc20Transfer>>;
