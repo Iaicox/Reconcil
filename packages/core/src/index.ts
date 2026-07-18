@@ -19,3 +19,5 @@ export {
   type ProviderConfig,
   type FeeStrategy,
 } from './chains.config.js';
+
+export { createLogger, serializeError, type Logger } from './logger.js';
