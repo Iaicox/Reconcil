@@ -103,10 +103,13 @@ describe('native transfers + gas synthesis (txlist strategy)', () => {
 describe('receipts-opstack strategy', () => {
   const receipt: RawReceipt = {
     transactionHash: '0xaaa1000000000000000000000000000000000000000000000000000000000001',
+    from: TRACKED.toLowerCase(),
+    to: OTHER,
     gasUsed: '21000',
     effectiveGasPrice: '1000000000',
     l1Fee: '31337',
     status: '1',
+    logs: [],
   };
   const baseCtx: NormalizeContext = {
     chainId: 8453,

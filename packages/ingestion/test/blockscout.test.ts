@@ -151,18 +151,24 @@ describe('capabilities (Blockscout has them all)', () => {
       id: 1,
       result: {
         transactionHash: '0xDDD4000000000000000000000000000000000000000000000000000000000004',
+        from: '0xABCD000000000000000000000000000000000001',
+        to: '0xDEF0000000000000000000000000000000000002',
         gasUsed: '0x5208',
         effectiveGasPrice: '0x3b9aca00',
         status: '0x1',
+        logs: [],
       },
     });
     const receipts = await adapter(transport).getReceipts(1, ['0xddd4']);
     expect(receipts[0]).toEqual({
       transactionHash: '0xddd4000000000000000000000000000000000000000000000000000000000004',
+      from: '0xabcd000000000000000000000000000000000001',
+      to: '0xdef0000000000000000000000000000000000002',
       gasUsed: '21000',
       effectiveGasPrice: '1000000000',
       l1Fee: null,
       status: '1',
+      logs: [],
     });
   });
 });

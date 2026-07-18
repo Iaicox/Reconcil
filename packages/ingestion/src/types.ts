@@ -52,12 +52,22 @@ export interface RawTokenMeta {
   decimals: string;
 }
 
+export interface RawLog {
+  logIndex: number; // decoded from hex at the adapter boundary
+  address: string; // emitting contract (lowercase)
+  topics: string[]; // topic0 = event sig; ERC-20 Transfer has exactly 3 topics
+  data: string; // 0x-hex; ERC-20 Transfer value
+}
+
 export interface RawReceipt {
   transactionHash: string;
+  from: string; // tx-level sender (lowercase) → chain_events.tx_from
+  to: string | null; // tx-level target (lowercase) → chain_events.tx_to; null on contract creation
   gasUsed: string; // decimal string (adapters convert hex)
   effectiveGasPrice: string; // decimal string
   l1Fee: string | null; // decimal string; null on non-OP-stack chains
   status: '0' | '1';
+  logs: RawLog[];
 }
 
 /** Per 03-ingestion §5 / ADR-009: optional methods are capabilities. */
