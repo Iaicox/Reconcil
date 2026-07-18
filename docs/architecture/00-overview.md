@@ -99,7 +99,7 @@ core imports nothing internal. Nothing imports apps.
 ```
 
 `packages/core` is the shared kernel: domain types, Zod schemas, money math
-(bigint/decimal, branded types), chain config registry, the sanitizer. It has no I/O.
+(bigint/decimal, branded types), chain config registry, the sanitizer, and a structured stdout logger. It has no network, database, or filesystem I/O.
 
 ## 4. Monorepo layout
 
