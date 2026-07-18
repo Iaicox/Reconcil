@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=getToken&contractaddress=0x1192c36152daf74ff3a8d2fed68a4ba950958c6a&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x1192c36152daf74ff3a8d2fed68a4ba950958c6a",
+        "decimals": "9",
+        "name": "RIBBIT ZYGO THE FROG",
+        "symbol": "RIBBIT",
+        "totalSupply": "1000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

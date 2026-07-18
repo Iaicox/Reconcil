@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0xc80b4457fccd49e7c3a2f5566dd1b827d85f6c98&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0xc80b4457fccd49e7c3a2f5566dd1b827d85f6c98",
+        "decimals": "18",
+        "name": "ha138.com",
+        "symbol": "Duhash.games",
+        "totalSupply": "100000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

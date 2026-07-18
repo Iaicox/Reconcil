@@ -22,7 +22,7 @@ implementation-ready state. Start here.
 | [002](adr/ADR-002-orm-drizzle.md) | ORM: Drizzle (over Prisma) |
 | [003](adr/ADR-003-http-minimal-fastify.md) | HTTP: minimal Fastify host, no REST in MVP (NestJS rejected) |
 | [004](adr/ADR-004-money-representation.md) | Money: `NUMERIC(78,0)` base units, strings on the wire, float ban |
-| [005](adr/ADR-005-event-store.md) | Event store: append-only, `(chain, tx, log_index)` idempotency, gas-as-event, finality lag |
+| [005](adr/ADR-005-event-store.md) | Event store: append-only, `(chain, tx, log_index, token_id)` idempotency, gas-as-event, finality lag |
 | [006](adr/ADR-006-tenancy.md) | Tenancy: global chain data + tenant-owned tracking; repository scoping |
 | [007](adr/ADR-007-pricing-snapshots.md) | Pricing: daily UTC snapshots, DefiLlama/CoinGecko + ECB, FK-pinned |
 | [008](adr/ADR-008-queues-and-backfill.md) | Jobs: BullMQ topology; full-history backfill + anchored-window fallback |

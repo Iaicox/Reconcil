@@ -1,0 +1,75 @@
+[
+  {
+    "address": "0x5bea6572ccb4c67911ccb5ebcf3d22e3c94f23d7",
+    "role": "smb-stables",
+    "capturedAt": "2026-07-17T12:00:39.840Z",
+    "chains": {
+      "1": {
+        "fromBlock": "0",
+        "toBlock": "25552205",
+        "counts": {
+          "etherscan-v2": {
+            "native": 49,
+            "erc20": 111
+          },
+          "blockscout": {
+            "native": 49,
+            "erc20": 111
+          }
+        }
+      },
+      "8453": {
+        "fromBlock": "0",
+        "toBlock": "48749547",
+        "counts": {
+          "blockscout": {
+            "native": 166,
+            "erc20": 332
+          }
+        }
+      }
+    }
+  },
+  {
+    "address": "0x6eb804cb565536ace8a289d73a26b339cc6d2e9f",
+    "role": "freelancer",
+    "capturedAt": "2026-07-17T11:55:12.774Z",
+    "chains": {
+      "1": {
+        "fromBlock": "0",
+        "toBlock": "25552177",
+        "counts": {
+          "etherscan-v2": {
+            "native": 208,
+            "erc20": 253
+          },
+          "blockscout": {
+            "native": 208,
+            "erc20": 253
+          }
+        }
+      }
+    }
+  },
+  {
+    "address": "0xf321de563a4420afdf15e68ace4d9254c0963905",
+    "role": "edge-spam",
+    "capturedAt": "2026-07-17T12:04:01.887Z",
+    "chains": {
+      "1": {
+        "fromBlock": "0",
+        "toBlock": "25552210",
+        "counts": {
+          "etherscan-v2": {
+            "native": 4319,
+            "erc20": 5963
+          },
+          "blockscout": {
+            "native": 4319,
+            "erc20": 5963
+          }
+        }
+      }
+    }
+  }
+]

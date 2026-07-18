@@ -1,0 +1,13 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=eth_get_balance&address=0x5bea6572ccb4c67911ccb5ebcf3d22e3c94f23d7&block=25552205&module=account"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "jsonrpc": "2.0",
+      "result": "0x99cd09e922a46",
+      "id": 0
+    }
+  }
+}

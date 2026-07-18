@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0x5151936023c340f3ac1561e6db92b85cc91070ea&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x5151936023c340f3ac1561e6db92b85cc91070ea",
+        "decimals": "6",
+        "name": "USD Coin",
+        "symbol": "USDC",
+        "totalSupply": "49149918236041286",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

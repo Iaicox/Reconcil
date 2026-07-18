@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0xd9a3679764855e03b6030db48ae36cea8a2a7526&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0xd9a3679764855e03b6030db48ae36cea8a2a7526",
+        "decimals": "6",
+        "name": "U5DТ",
+        "symbol": " U5DТ ",
+        "totalSupply": "1000000000000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

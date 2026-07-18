@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0xe75ae445601fcb52fb8c167b6a4131d54d37e377&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0xe75ae445601fcb52fb8c167b6a4131d54d37e377",
+        "decimals": "6",
+        "name": "USDT",
+        "symbol": "USDT",
+        "totalSupply": "1000000000000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

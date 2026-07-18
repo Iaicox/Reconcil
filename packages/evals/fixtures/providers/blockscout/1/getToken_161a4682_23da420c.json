@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0x161a4682a69a0cf35713268f1348a068d745a5d2&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x161a4682a69a0cf35713268f1348a068d745a5d2",
+        "decimals": "18",
+        "name": "Stars",
+        "symbol": "Stars",
+        "totalSupply": "100000000000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

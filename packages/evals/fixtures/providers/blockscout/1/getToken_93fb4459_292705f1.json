@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0x93fb4459f48f379ba865eb55dddc292c702ff569&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x93fb4459f48f379ba865eb55dddc292c702ff569",
+        "decimals": "18",
+        "name": "Trump Dog",
+        "symbol": "DOG",
+        "totalSupply": "4987690987000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=eth_block_number&module=block"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "jsonrpc": "2.0",
+      "result": "0x2e7de43",
+      "id": 1
+    }
+  }
+}

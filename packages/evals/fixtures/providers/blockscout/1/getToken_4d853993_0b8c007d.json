@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0x4d853993a72d6e92c8b5107e12b2b74a0ace192c&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x4d853993a72d6e92c8b5107e12b2b74a0ace192c",
+        "decimals": "6",
+        "name": "ՍՏⅮⅭ",
+        "symbol": "υƧꓓꓚ",
+        "totalSupply": "5860899123000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

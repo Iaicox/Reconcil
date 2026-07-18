@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://base.blockscout.com/api?action=getToken&contractaddress=0x930bbbaa866c1a8f47b8ddb7db499f6debdc841d&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0x930bbbaa866c1a8f47b8ddb7db499f6debdc841d",
+        "decimals": "9",
+        "name": "Veera",
+        "symbol": "VEERA",
+        "totalSupply": "1000000000000000000000",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}

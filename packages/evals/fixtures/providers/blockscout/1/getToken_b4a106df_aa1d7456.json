@@ -1,0 +1,21 @@
+{
+  "request": {
+    "url": "https://eth.blockscout.com/api?action=getToken&contractaddress=0xb4a106dfd190ac2eb5b289b819679ce21276f24d&module=token"
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "message": "OK",
+      "result": {
+        "cataloged": true,
+        "contractAddress": "0xb4a106dfd190ac2eb5b289b819679ce21276f24d",
+        "decimals": "6",
+        "name": "Tether USD",
+        "symbol": "USDT",
+        "totalSupply": "93775654692250534",
+        "type": "ERC-20"
+      },
+      "status": "1"
+    }
+  }
+}
