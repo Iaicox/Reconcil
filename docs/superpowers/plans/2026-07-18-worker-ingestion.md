@@ -716,10 +716,15 @@ import type { RawErc20Transfer, RawReceipt } from '../src/types.js';
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const pad = (addr: string): string => '0x' + addr.slice(2).padStart(64, '0');
 const val = (n: bigint): string => '0x' + n.toString(16);
+// Full 20-byte (40-hex) addresses: a real address survives pad()→topicAddr()
+// round-trip (topicAddr takes the low 20 bytes). Short stubs like '0xaaa' would
+// not — topicAddr('0x00…00aaa') is '0x00…00aaa', never '0xaaa'.
+const AAA = '0x' + 'a'.repeat(40);
+const BBB = '0x' + 'b'.repeat(40);
 
 const row = (over: Partial<RawErc20Transfer>): RawErc20Transfer => ({
   blockNumber: '100', timeStamp: '1700000000', hash: '0xtx', logIndex: null,
-  from: '0xaaa', to: '0xbbb', contractAddress: '0xtok', value: '5',
+  from: AAA, to: BBB, contractAddress: '0xtok', value: '5',
   tokenName: 'T', tokenSymbol: 'T', tokenDecimal: '18', ...over,
 });
 
@@ -731,7 +736,7 @@ const receipt = (logs: RawReceipt['logs']): RawReceipt => ({
 describe('assignErc20Metadata', () => {
   it('assigns the matching log index and tx-level from/to', () => {
     const rec = receipt([
-      { logIndex: 7, address: '0xtok', topics: [TRANSFER, pad('0xaaa'), pad('0xbbb')], data: val(5n) },
+      { logIndex: 7, address: '0xtok', topics: [TRANSFER, pad(AAA), pad(BBB)], data: val(5n) },
     ]);
     const [out] = assignErc20Metadata([row({})], new Map([['0xtx', rec]]));
     expect(out!.logIndex).toBe('7');
@@ -741,8 +746,8 @@ describe('assignErc20Metadata', () => {
 
   it('gives duplicate identical transfers distinct indexes in ascending order', () => {
     const rec = receipt([
-      { logIndex: 9, address: '0xtok', topics: [TRANSFER, pad('0xaaa'), pad('0xbbb')], data: val(5n) },
-      { logIndex: 4, address: '0xtok', topics: [TRANSFER, pad('0xaaa'), pad('0xbbb')], data: val(5n) },
+      { logIndex: 9, address: '0xtok', topics: [TRANSFER, pad(AAA), pad(BBB)], data: val(5n) },
+      { logIndex: 4, address: '0xtok', topics: [TRANSFER, pad(AAA), pad(BBB)], data: val(5n) },
     ]);
     const out = assignErc20Metadata([row({}), row({})], new Map([['0xtx', rec]]));
     expect(out.map((r) => r.logIndex).sort()).toEqual(['4', '9']);
@@ -750,8 +755,8 @@ describe('assignErc20Metadata', () => {
 
   it('ignores ERC-721 Transfer logs (4 topics)', () => {
     const rec = receipt([
-      { logIndex: 1, address: '0xtok', topics: [TRANSFER, pad('0xaaa'), pad('0xbbb'), pad('0x01')], data: '0x' },
-      { logIndex: 2, address: '0xtok', topics: [TRANSFER, pad('0xaaa'), pad('0xbbb')], data: val(5n) },
+      { logIndex: 1, address: '0xtok', topics: [TRANSFER, pad(AAA), pad(BBB), pad('0x01')], data: '0x' },
+      { logIndex: 2, address: '0xtok', topics: [TRANSFER, pad(AAA), pad(BBB)], data: val(5n) },
     ]);
     const [out] = assignErc20Metadata([row({})], new Map([['0xtx', rec]]));
     expect(out!.logIndex).toBe('2');
@@ -762,7 +767,7 @@ describe('assignErc20Metadata', () => {
   });
 
   it('throws when no log matches the transfer', () => {
-    const rec = receipt([{ logIndex: 0, address: '0xother', topics: [TRANSFER, pad('0xaaa'), pad('0xbbb')], data: val(5n) }]);
+    const rec = receipt([{ logIndex: 0, address: '0xother', topics: [TRANSFER, pad(AAA), pad(BBB)], data: val(5n) }]);
     expect(() => assignErc20Metadata([row({})], new Map([['0xtx', rec]]))).toThrow(/no matching/i);
   });
 });
@@ -872,6 +877,9 @@ import { assignErc20Metadata } from '../src/logindex.js';
 describe('normalize — tx-level fields and erc20 enrichment', () => {
   const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
   const pad = (a: string): string => '0x' + a.slice(2).padStart(64, '0');
+  // Full 20-byte addresses so pad()→topicAddr() round-trips (see Task 5).
+  const AAA = '0x' + 'a'.repeat(40);
+  const BBB = '0x' + 'b'.repeat(40);
 
   it('native + gas carry txFrom/txTo and raw', () => {
     const tx = {
@@ -890,17 +898,17 @@ describe('normalize — tx-level fields and erc20 enrichment', () => {
   it('erc20 events take logIndex + txFrom/txTo from the receipt and expose token metadata', () => {
     const row = {
       blockNumber: '10', timeStamp: '1700000000', hash: '0xtx', logIndex: null,
-      from: '0xaaa', to: '0xbbb', contractAddress: '0xTOK', value: '5',
+      from: AAA, to: BBB, contractAddress: '0xTOK', value: '5',
       tokenName: 'Acme', tokenSymbol: 'ACME', tokenDecimal: '6',
     };
     const receipt = {
       transactionHash: '0xtx', from: '0xsender', to: '0xrouter', gasUsed: '1', effectiveGasPrice: '1',
       l1Fee: null, status: '1' as const,
-      logs: [{ logIndex: 3, address: '0xtok', topics: [TRANSFER, pad('0xaaa'), pad('0xbbb')], data: '0x05' }],
+      logs: [{ logIndex: 3, address: '0xtok', topics: [TRANSFER, pad(AAA), pad(BBB)], data: '0x05' }],
     };
     const enriched = assignErc20Metadata([row], new Map([['0xtx', receipt]]));
     const [e] = normalize({ erc20: { items: enriched } }, {
-      chainId: 1, trackedAddress: '0xaaa', feeStrategy: 'txlist', provider: 'etherscan-v2',
+      chainId: 1, trackedAddress: AAA, feeStrategy: 'txlist', provider: 'etherscan-v2',
     });
     expect(e!.logIndex).toBe(3);
     expect(e!.txFrom).toBe('0xsender');
