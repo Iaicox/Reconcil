@@ -2,8 +2,10 @@
  * Config + env → providers (ADR-009). Ordered failover: etherscan-v2 primary,
  * blockscout secondary — this also routes Base indexer calls, since the etherscan
  * free tier errors on chain 8453 and the failover falls through (spec §7).
- * Receipts route to the public RPC on receipts-opstack chains, to the indexer
- * otherwise.
+ * Receipts route to the public RPC on receipts-opstack chains, and to the
+ * primary adapter's own receipt endpoint otherwise (not the failover indexer) —
+ * receipt-level provider failover is out of scope this slice; BullMQ retry
+ * covers transient receipt errors (D8).
  */
 import { chainById } from '@pet-crypto/core';
 import { ProviderError, type ChainDataProvider, type FetchJson, type PageQuery, type RawReceipt } from '../types.js';
