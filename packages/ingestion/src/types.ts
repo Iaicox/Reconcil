@@ -91,7 +91,9 @@ export interface NormalizedEvent {
   chainId: number;
   txHash: string; // lowercase
   logIndex: number; // ≥0 log | −1 native | −2 gas (ADR-005)
-  token: { kind: 'native' } | { kind: 'erc20'; contract: string };
+  token:
+    | { kind: 'native' }
+    | { kind: 'erc20'; contract: string; decimals: string; symbolRaw: string; nameRaw: string };
   eventKind: 'erc20_transfer' | 'native_transfer' | 'gas_fee';
   fromAddr: string; // lowercase
   toAddr: string; // lowercase; gas_fee → zero address
@@ -99,6 +101,9 @@ export interface NormalizedEvent {
   blockNumber: bigint;
   blockTime: Date;
   provider: string;
+  txFrom: string; // lowercase; tx-level sender
+  txTo: string | null; // lowercase; null on contract creation
+  raw: unknown; // source provider row → chain_events.raw (server-side only, NOT NULL)
 }
 
 export type ProviderErrorKind = 'http' | 'rate_limited' | 'malformed' | 'provider_error';
