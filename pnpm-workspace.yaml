@@ -16,6 +16,7 @@ allowBuilds:
 catalog:
   "@types/node": ^22.10.0
   eslint: ^10.0.0
+  fast-check: ^4.9.0
   tsx: ^4.19.0
   typescript: ~6.0.3
   vitest: ^4.1.0
