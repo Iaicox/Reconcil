@@ -74,6 +74,20 @@ export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Pro
 
   const full = itemCount >= PAGE_LIMIT;
   const newCursor = full && lastBlock !== undefined ? Number(BigInt(lastBlock) - 1n) : Number(safe);
+  // Overlap-by-one pagination (cursor = last − 1) is block-granular: it cannot
+  // split a single block. A full page whose cursor does not advance means one
+  // block holds ≥ PAGE_LIMIT tracked-relevant items — re-fetching the same window
+  // would loop forever, burning provider calls. Fail loudly instead (→ BullMQ
+  // retry → DLQ, surfaced via the checkpoint status) rather than silently spin;
+  // the eth_getLogs index-pagination that resolves this is deferred (03-ingestion
+  // §11 Risks, ADR-005).
+  if (full && newCursor <= cp.lastProcessedBlock) {
+    throw new Error(
+      `ingest stalled: a single block holds >= ${String(PAGE_LIMIT)} relevant ${target.stream} ` +
+        `items (chain ${String(target.chainId)}, block ${lastBlock ?? '?'}); ` +
+        `block-granular pagination cannot advance`,
+    );
+  }
   const status = full ? 'backfilling' : 'live';
   const inserted = await commitPage(deps.db, target, events, { lastProcessedBlock: newCursor, status }, chain);
   return { status, lastProcessedBlock: newCursor, inserted, unseenContracts };

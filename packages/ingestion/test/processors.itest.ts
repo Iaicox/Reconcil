@@ -67,6 +67,10 @@ const nativeFull: NativeFn = async (q) => {
   const from = Number(q.fromBlock);
   return { items: bigTxs.filter((t) => Number(t.blockNumber) >= from).slice(0, 1000) };
 };
+// A full page (PAGE_LIMIT) of relevant txs all in ONE block (500) — the
+// degenerate case block-granular overlap pagination cannot advance past.
+const spamBlock = Array.from({ length: 1000 }, (_, i) => ({ ...nativeTx(500), hash: `0xspam${i.toString(16)}` }));
+const nativeSpamBlock: NativeFn = async (q) => ({ items: Number(q.fromBlock) <= 500 ? spamBlock : [] });
 // A single tx at block 500 (for the tail tick).
 const nativeAt500: NativeFn = async (q) => ({ items: Number(q.fromBlock) <= 500 ? [nativeTx(500)] : [] });
 // One erc20 transfer at block 200, with matching receipts.
@@ -196,6 +200,19 @@ describe('processors', () => {
     expect(res.lastProcessedBlock).toBe(SAFE);
     const { rows } = await pool.query('SELECT count(*)::int AS n FROM chain_events');
     expect(rows[0].n).toBe(0);
+  });
+
+  it('fails loudly when one block holds a full page of relevant txs (no forward progress)', async () => {
+    // Cursor at 499 ⇒ fromBlock = 500; the page is 1000 items all in block 500 ⇒
+    // newCursor = 500 − 1 = 499 = the current cursor. Overlap-by-one can't split a
+    // block, so re-fetching would loop forever — ingestOnce must throw, not spin.
+    await reset('native', 499, 'backfilling');
+    await expect(
+      runBackfillPage(deps(() => bundleOf({ native: nativeSpamBlock })), { chainId: 1, address: ADDR, stream: 'native' }),
+    ).rejects.toThrow(/stalled|cannot advance/i);
+    // Nothing committed; the cursor did not move (the whole page is one transaction).
+    expect((await getCheckpoint(db, 1, ADDR, 'native'))?.lastProcessedBlock).toBe(499);
+    expect((await pool.query('SELECT count(*)::int AS n FROM chain_events')).rows[0].n).toBe(0);
   });
 
   it('tail: a live stream over a >PAGE_LIMIT gap is handed back for backfill, then recovers', async () => {

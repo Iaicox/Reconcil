@@ -7,7 +7,7 @@ import type { ChainConfig } from '@pet-crypto/core';
 import { chainEvents, ingestionCheckpoints, tokens, type Db } from '@pet-crypto/db';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { NormalizedEvent } from '../types.js';
-import { toChainEventRow } from './event-writer.js';
+import { insertEventRows, toChainEventRow } from './event-writer.js';
 import { tokenInsertValues, tokenKey } from './token-repo.js';
 
 export interface CheckpointRow {
@@ -74,17 +74,9 @@ export async function commitPage(
       rows.push(toChainEventRow(ev, tokenId));
     }
 
-    let inserted = 0;
-    if (rows.length > 0) {
-      const out = await tx
-        .insert(chainEvents)
-        .values(rows)
-        .onConflictDoNothing({
-          target: [chainEvents.chainId, chainEvents.txHash, chainEvents.logIndex, chainEvents.tokenId],
-        })
-        .returning({ id: chainEvents.id });
-      inserted = out.length;
-    }
+    // Same idempotent insert as the standalone writer — shared so the append-only
+    // conflict key (ADR-005) has one definition; runs inside this transaction.
+    const inserted = await insertEventRows(tx, rows);
 
     await tx
       .update(ingestionCheckpoints)

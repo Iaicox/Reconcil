@@ -147,12 +147,15 @@ describe('receipts-opstack strategy', () => {
 describe('erc20 transfers', () => {
   it('maps to erc20_transfer with the receipt-derived logIndex, lowercase contract, and tx-level fields', () => {
     const row = erc20({});
+    // `raw` stores the untouched provider row — the receipt-derived logIndex/
+    // txFrom/txTo are first-class columns, not part of the source payload.
+    const { logIndex, txFrom, txTo, ...rawRow } = row;
     const events = normalize({ erc20: { items: [row] } }, CTX);
     expect(events).toEqual([
       {
         chainId: 1,
         txHash: '0xbbb2000000000000000000000000000000000000000000000000000000000002',
-        logIndex: 42,
+        logIndex: Number(logIndex),
         eventKind: 'erc20_transfer',
         token: {
           kind: 'erc20',
@@ -167,9 +170,9 @@ describe('erc20 transfers', () => {
         blockNumber: 19000001n,
         blockTime: new Date(1700000100 * 1000),
         provider: 'etherscan-v2',
-        txFrom: TRACKED.toLowerCase(),
-        txTo: '0xrouter',
-        raw: row,
+        txFrom,
+        txTo,
+        raw: rawRow,
       },
     ]);
   });

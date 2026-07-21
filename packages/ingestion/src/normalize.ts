@@ -70,10 +70,14 @@ export function normalize(
   }
 
   for (const t of input.erc20?.items ?? []) {
+    // Peel off the receipt-derived fields so `raw` holds the untouched provider
+    // row (its documented contract) — logIndex/txFrom/txTo are already first-class
+    // columns, not part of the source payload.
+    const { logIndex, txFrom, txTo, ...rawRow } = t;
     events.push({
       chainId: ctx.chainId,
       txHash: t.hash.toLowerCase(),
-      logIndex: Number(t.logIndex),
+      logIndex: Number(logIndex),
       eventKind: 'erc20_transfer',
       token: {
         kind: 'erc20',
@@ -88,9 +92,9 @@ export function normalize(
       blockNumber: BigInt(t.blockNumber),
       blockTime: new Date(Number(t.timeStamp) * 1000),
       provider: ctx.provider,
-      txFrom: t.txFrom,
-      txTo: t.txTo,
-      raw: t,
+      txFrom,
+      txTo,
+      raw: rawRow,
     });
   }
 

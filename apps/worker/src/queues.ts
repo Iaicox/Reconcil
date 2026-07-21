@@ -1,8 +1,10 @@
 /**
- * Queue topology (ADR-008 §1-2): tail (high priority, one repeatable tick per
- * chain) beats backfill (low priority, one page window per target). Retry:
- * exponential 1 min → 1 h cap, 8 attempts, then DLQ (removeOnFail: false keeps
- * the failed job for inspection).
+ * Queue topology (ADR-008 §1-2): tail (one repeatable tick per chain) and
+ * backfill (one page window per target) are SEPARATE queues, each with its own
+ * worker and concurrency cap. That isolation — not BullMQ job priority, which
+ * only orders jobs within a single queue — is what keeps live ticks from
+ * starving behind a long backfill. Retry: exponential 1 min → 1 h cap, 8
+ * attempts, then DLQ (removeOnFail: false keeps the failed job for inspection).
  */
 import { Redis } from 'ioredis';
 import type { JobsOptions } from 'bullmq';
@@ -23,7 +25,6 @@ export function backoffStrategy(attemptsMade: number): number {
 export const backfillJobOptions: JobsOptions = {
   attempts: 8,
   backoff: { type: 'custom' },
-  priority: 10, // lower number = higher priority; tail uses 1
   removeOnComplete: 1000,
   removeOnFail: false,
 };
@@ -31,7 +32,6 @@ export const backfillJobOptions: JobsOptions = {
 export const tailJobOptions: JobsOptions = {
   attempts: 8,
   backoff: { type: 'custom' },
-  priority: 1,
   removeOnComplete: 1000,
   removeOnFail: false,
 };
