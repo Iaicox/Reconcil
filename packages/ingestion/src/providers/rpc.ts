@@ -41,6 +41,12 @@ export async function rpcGetReceipts(rpc: RpcCall, hashes: string[]): Promise<Ra
   const out: RawReceipt[] = [];
   for (const hash of hashes) {
     const result = await rpc('eth_getTransactionReceipt', [hash]);
+    // A node returns null for an unknown/dropped/pending tx. Queries stay
+    // ≤ safeHead so this should not occur — surface a clear error (hash in the
+    // never-logged cause, ADR-011) rather than a generic Zod parse failure.
+    if (result === null) {
+      throw new ProviderError('provider_error', 'no receipt (dropped/pending tx or queried past safeHead)', { cause: hash });
+    }
     out.push(mapReceipt(parseRows(receiptResult, result)));
   }
   return out;

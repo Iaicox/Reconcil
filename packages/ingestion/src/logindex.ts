@@ -5,6 +5,10 @@
  * consuming logs in ascending logIndex so duplicate identical transfers get
  * distinct indexes. Missing receipt / unmatched row throws — synthetic ordinals
  * (option 4) stay rejected. Pure: no I/O.
+ *
+ * NOTE: a row that never matches (fee-on-transfer / rebasing token, where the log
+ * `data` differs from the indexer `value`) fails the whole page loud → the job
+ * DLQs and the stream wedges. Per-row quarantine is deferred (03-ingestion §9).
  */
 import type { RawErc20Transfer, RawLog, RawReceipt } from './types.js';
 

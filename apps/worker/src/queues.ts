@@ -22,14 +22,9 @@ export function backoffStrategy(attemptsMade: number): number {
   return Math.min(60_000 * 2 ** Math.max(0, attemptsMade - 1), 3_600_000);
 }
 
-export const backfillJobOptions: JobsOptions = {
-  attempts: 8,
-  backoff: { type: 'custom' },
-  removeOnComplete: 1000,
-  removeOnFail: false,
-};
-
-export const tailJobOptions: JobsOptions = {
+// Shared by both queues — identical today. Re-split into per-queue policies when
+// one needs to diverge (anchored windows, per-queue rate limits in later slices).
+export const jobOptions: JobsOptions = {
   attempts: 8,
   backoff: { type: 'custom' },
   removeOnComplete: 1000,

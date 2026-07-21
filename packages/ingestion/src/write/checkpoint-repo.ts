@@ -10,9 +10,10 @@ import type { NormalizedEvent } from '../types.js';
 import { insertEventRows, toChainEventRow } from './event-writer.js';
 import { tokenInsertValues, tokenKey } from './token-repo.js';
 
+export type CheckpointStatus = 'queued' | 'backfilling' | 'live' | 'paused' | 'error';
 export interface CheckpointRow {
   chainId: number; address: string; stream: 'native' | 'erc20';
-  status: string; lastProcessedBlock: number;
+  status: CheckpointStatus; lastProcessedBlock: number;
 }
 export interface CommitTarget { chainId: number; address: string; stream: 'native' | 'erc20'; }
 

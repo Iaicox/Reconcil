@@ -13,7 +13,7 @@ import {
 } from '@pet-crypto/ingestion';
 import { loadConfig } from './config.js';
 import {
-  BACKFILL_QUEUE, TAIL_QUEUE, backfillJobOptions, backoffStrategy, makeConnection, tailJobOptions,
+  BACKFILL_QUEUE, TAIL_QUEUE, backoffStrategy, jobOptions, makeConnection,
 } from './queues.js';
 
 const logger = createLogger({ name: 'worker' });
@@ -44,8 +44,10 @@ async function main(): Promise<void> {
     BACKFILL_QUEUE,
     async (job) => {
       const res = await runBackfillPage(deps, job.data);
-      // Full page ⇒ enqueue the next window (ADR-008 §3).
-      if (res.status === 'backfilling') await backfillQueue.add('page', job.data, backfillJobOptions);
+      // Full page ⇒ enqueue the next window (ADR-008 §3). res.unseenContracts (the
+      // erc20 contracts this page referenced) is unused until the token-resolve
+      // queue lands — it will consume it then.
+      if (res.status === 'backfilling') await backfillQueue.add('page', job.data, jobOptions);
       return res;
     },
     { connection, concurrency: 5, settings: { backoffStrategy } },
@@ -59,7 +61,7 @@ async function main(): Promise<void> {
       // then exclude it from future ticks, so drain it via the backfill queue
       // (ADR-008 §3). Without this the stream strands silently.
       const backfilling = await runTailTick(deps, job.data);
-      for (const target of backfilling) await backfillQueue.add('page', target, backfillJobOptions);
+      for (const target of backfilling) await backfillQueue.add('page', target, jobOptions);
     },
     { connection, concurrency: chains.length, settings: { backoffStrategy } },
   );
@@ -75,7 +77,7 @@ async function main(): Promise<void> {
   // Repeatable tail tick per chain (Redis loss recovers on boot — ADR-008).
   for (const chain of chains) {
     await tailQueue.add('tick', { chainId: chain.chainId },
-      { ...tailJobOptions, repeat: { every: chain.pollIntervalSec * 1000 }, jobId: `tail-${String(chain.chainId)}` });
+      { ...jobOptions, repeat: { every: chain.pollIntervalSec * 1000 }, jobId: `tail-${String(chain.chainId)}` });
   }
   logger.info('worker up', { chains: chains.map((c) => c.chainId) });
 
