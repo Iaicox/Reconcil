@@ -1,6 +1,7 @@
 /**
  * Shared kernel: domain types, Zod schemas, money math (bigint + branded
- * types), chain config registry, sanitizer. No I/O by design (00-overview §3).
+ * types), chain config registry, sanitizer, structured stdout logger. No
+ * network/DB/filesystem I/O by design (00-overview §3).
  */
 
 declare const brand: unique symbol;
@@ -19,3 +20,5 @@ export {
   type ProviderConfig,
   type FeeStrategy,
 } from './chains.config.js';
+
+export { createLogger, serializeError, type Logger } from './logger.js';

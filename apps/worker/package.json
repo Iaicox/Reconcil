@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src",
+    "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
     "dev": "tsx src/main.ts"
   },
@@ -16,10 +16,15 @@
     "@pet-crypto/core": "workspace:*",
     "@pet-crypto/db": "workspace:*",
     "@pet-crypto/ingestion": "workspace:*",
-    "@pet-crypto/pricing": "workspace:*"
+    "@pet-crypto/pricing": "workspace:*",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.0",
+    "pg": "^8.22.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/pg": "^8.20.0",
     "eslint": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

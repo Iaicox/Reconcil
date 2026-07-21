@@ -5,7 +5,11 @@ packages:
   - packages/*
 
 allowBuilds:
+  cpu-features: false
   esbuild: true
+  msgpackr-extract: false
+  protobufjs: false
+  ssh2: false
 
 # typescript is capped at 6.x: 7.x is the native (tsgo) port and typescript-eslint
 # peers require <6.1. @types/node tracks the Node 22 runtime (engines, Dockerfile).

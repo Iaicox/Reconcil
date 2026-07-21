@@ -16,16 +16,21 @@
     "typecheck": "tsc -b",
     "lint": "eslint src test scripts",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "capture": "node --env-file-if-exists=../../.env --import tsx scripts/capture.ts"
   },
   "dependencies": {
     "@pet-crypto/core": "workspace:*",
     "@pet-crypto/db": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^11.0.0",
     "@types/node": "catalog:",
+    "@types/pg": "^8.20.0",
     "eslint": "catalog:",
+    "pg": "^8.22.0",
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

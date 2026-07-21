@@ -1,10 +1,10 @@
 import type {
   NormalizedEvent,
   Page,
-  RawErc20Transfer,
   RawNativeTx,
   RawReceipt,
 } from './types.js';
+import type { Erc20WithMeta } from './logindex.js';
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -22,7 +22,7 @@ export interface NormalizeContext {
  * Cross-page dedup is the DB idempotency key's job (ADR-005) — not done here.
  */
 export function normalize(
-  input: { native?: Page<RawNativeTx>; erc20?: Page<RawErc20Transfer> },
+  input: { native?: Page<RawNativeTx>; erc20?: Page<Erc20WithMeta> },
   ctx: NormalizeContext,
 ): NormalizedEvent[] {
   const tracked = ctx.trackedAddress.toLowerCase();
@@ -31,6 +31,8 @@ export function normalize(
   for (const tx of input.native?.items ?? []) {
     const from = tx.from.toLowerCase();
     const toAddr = tx.to === null ? ZERO_ADDRESS : tx.to.toLowerCase();
+    const txFrom = from; // tx-level sender = row.from
+    const txTo = tx.to === null ? null : tx.to.toLowerCase();
     const common = {
       chainId: ctx.chainId,
       txHash: tx.hash.toLowerCase(),
@@ -38,6 +40,9 @@ export function normalize(
       blockNumber: BigInt(tx.blockNumber),
       blockTime: new Date(Number(tx.timeStamp) * 1000),
       provider: ctx.provider,
+      txFrom,
+      txTo,
+      raw: tx,
     };
 
     // Failed txs move no value — but the gas below is still real.
@@ -65,23 +70,31 @@ export function normalize(
   }
 
   for (const t of input.erc20?.items ?? []) {
-    if (t.logIndex === null) {
-      throw new Error('missing logIndex for erc20 transfer — resolve spec §11 before ingesting', {
-        cause: t.hash.toLowerCase(),
-      });
-    }
+    // Peel off the receipt-derived fields so `raw` holds the untouched provider
+    // row (its documented contract) — logIndex/txFrom/txTo are already first-class
+    // columns, not part of the source payload.
+    const { logIndex, txFrom, txTo, ...rawRow } = t;
     events.push({
       chainId: ctx.chainId,
       txHash: t.hash.toLowerCase(),
-      logIndex: Number(t.logIndex),
+      logIndex: Number(logIndex),
       eventKind: 'erc20_transfer',
-      token: { kind: 'erc20', contract: t.contractAddress.toLowerCase() },
+      token: {
+        kind: 'erc20',
+        contract: t.contractAddress.toLowerCase(),
+        decimals: t.tokenDecimal,
+        symbolRaw: t.tokenSymbol,
+        nameRaw: t.tokenName,
+      },
       fromAddr: t.from.toLowerCase(),
       toAddr: t.to.toLowerCase(),
       amountRaw: BigInt(t.value),
       blockNumber: BigInt(t.blockNumber),
       blockTime: new Date(Number(t.timeStamp) * 1000),
       provider: ctx.provider,
+      txFrom,
+      txTo,
+      raw: rawRow,
     });
   }
 

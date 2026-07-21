@@ -52,12 +52,22 @@ export interface RawTokenMeta {
   decimals: string;
 }
 
+export interface RawLog {
+  logIndex: number; // decoded from hex at the adapter boundary
+  address: string; // emitting contract (lowercase)
+  topics: string[]; // topic0 = event sig; ERC-20 Transfer has exactly 3 topics
+  data: string; // 0x-hex; ERC-20 Transfer value
+}
+
 export interface RawReceipt {
   transactionHash: string;
+  from: string; // tx-level sender (lowercase) → chain_events.tx_from
+  to: string | null; // tx-level target (lowercase) → chain_events.tx_to; null on contract creation
   gasUsed: string; // decimal string (adapters convert hex)
   effectiveGasPrice: string; // decimal string
   l1Fee: string | null; // decimal string; null on non-OP-stack chains
   status: '0' | '1';
+  logs: RawLog[];
 }
 
 /** Per 03-ingestion §5 / ADR-009: optional methods are capabilities. */
@@ -81,7 +91,9 @@ export interface NormalizedEvent {
   chainId: number;
   txHash: string; // lowercase
   logIndex: number; // ≥0 log | −1 native | −2 gas (ADR-005)
-  token: { kind: 'native' } | { kind: 'erc20'; contract: string };
+  token:
+    | { kind: 'native' }
+    | { kind: 'erc20'; contract: string; decimals: string; symbolRaw: string; nameRaw: string };
   eventKind: 'erc20_transfer' | 'native_transfer' | 'gas_fee';
   fromAddr: string; // lowercase
   toAddr: string; // lowercase; gas_fee → zero address
@@ -89,6 +101,9 @@ export interface NormalizedEvent {
   blockNumber: bigint;
   blockTime: Date;
   provider: string;
+  txFrom: string; // lowercase; tx-level sender
+  txTo: string | null; // lowercase; null on contract creation
+  raw: unknown; // source provider row → chain_events.raw (server-side only, NOT NULL)
 }
 
 export type ProviderErrorKind = 'http' | 'rate_limited' | 'malformed' | 'provider_error';

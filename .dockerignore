@@ -2,6 +2,10 @@ node_modules
 **/node_modules
 dist
 **/dist
+# tsc -b incremental state: exclude it too, else COPY brings stale build-info
+# while dist is excluded, and tsc -b skips emitting (empty dist in the image).
+*.tsbuildinfo
+**/*.tsbuildinfo
 .turbo
 **/.turbo
 coverage

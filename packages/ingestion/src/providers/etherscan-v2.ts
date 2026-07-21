@@ -49,12 +49,22 @@ const tokenRow = z.object({
   tokenDecimal: z.string(),
 });
 
+const logEntry = z.object({
+  logIndex: hexQuantity,
+  address: z.string(),
+  topics: z.array(z.string()),
+  data: z.string(),
+});
+
 const receiptResult = z.object({
   transactionHash: z.string(),
+  from: z.string(),
+  to: z.string().nullable(),
   gasUsed: hexQuantity,
   effectiveGasPrice: hexQuantity,
   status: z.enum(['0x0', '0x1']),
   l1Fee: hexQuantity.optional(),
+  logs: z.array(logEntry),
 });
 
 export function mapTxRows(rows: z.infer<typeof txRow>[]): RawNativeTx[] {
@@ -90,10 +100,18 @@ export function mapTokenRows(rows: z.infer<typeof tokenRow>[]): RawErc20Transfer
 export function mapReceipt(r: z.infer<typeof receiptResult>): RawReceipt {
   return {
     transactionHash: r.transactionHash.toLowerCase(),
+    from: r.from.toLowerCase(),
+    to: r.to === null ? null : r.to.toLowerCase(),
     gasUsed: BigInt(r.gasUsed).toString(),
     effectiveGasPrice: BigInt(r.effectiveGasPrice).toString(),
     l1Fee: r.l1Fee === undefined ? null : BigInt(r.l1Fee).toString(),
     status: r.status === '0x1' ? '1' : '0',
+    logs: r.logs.map((l) => ({
+      logIndex: Number(BigInt(l.logIndex)),
+      address: l.address.toLowerCase(),
+      topics: l.topics,
+      data: l.data,
+    })),
   };
 }
 

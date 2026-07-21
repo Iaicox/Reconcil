@@ -14,8 +14,9 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src",
+    "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:check": "drizzle-kit check"
@@ -26,6 +27,7 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^11.0.0",
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",

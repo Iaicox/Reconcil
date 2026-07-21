@@ -31,4 +31,9 @@ describe('chains.config', () => {
   it('chainById throws on unknown chain', () => {
     expect(() => chainById(999)).toThrow(/unknown chain/i);
   });
+
+  it('base carries a public-RPC env var for opstack receipts; ethereum does not', () => {
+    expect(chainById(8453).rpcUrlEnv).toBe('BASE_RPC_URL');
+    expect(chainById(1).rpcUrlEnv).toBeUndefined();
+  });
 });

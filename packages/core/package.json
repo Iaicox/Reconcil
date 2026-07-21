@@ -2,7 +2,7 @@
   "name": "@pet-crypto/core",
   "version": "0.0.0",
   "private": true,
-  "description": "Shared kernel: domain types, zod schemas, Money, sanitizer, chains config. No I/O.",
+  "description": "Shared kernel: domain types, zod schemas, Money, sanitizer, chains config, structured logger. No network/DB I/O.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -21,6 +21,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

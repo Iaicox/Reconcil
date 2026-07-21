@@ -26,6 +26,13 @@ stateDiagram-v2
     paused --> live : manual
 ```
 
+> **`anchoring` is deferred** (worker-ingestion slice, 2026-07-18): the current
+> ingester does full-history backfill only, and `ingestion_checkpoints.status`
+> has no `anchoring` value (see `schema.sql`). The `queued → anchoring` and
+> `anchoring → backfilling` transitions and the anchored-window / `opening_balance`
+> path land with the anchored-backfill slice; until then a wallet goes
+> `queued → backfilling` regardless of size.
+
 Streams are independent: `native` (provider tx list) and `erc20` (provider transfer
 list) are different endpoints with different pagination, so each has its own cursor.
 A wallet is "live" when **all** its streams are live; `ledger_status` reports per-stream.
@@ -205,3 +212,35 @@ run; deterministic reads, eventually complete data.
 | Provider returns inconsistent page | Zod validation fails → job retry, page quarantined into DLQ payload for inspection |
 | Same event, different provider values | First write wins; integrity job flags balance drift; conflict logged for manual review (never silently overwritten) |
 | Redis lost | Queues rebuild from checkpoints: repeatables re-register on worker boot; state lives in Postgres |
+| Unmatchable erc20 transfer | `assignErc20Metadata` throws → page aborts → job DLQs; the stream wedges until an operator intervenes (deferred quarantine, below) |
+
+> **Deferred robustness (worker-ingestion slice, 2026-07-18).** Four operational
+> gaps are known and deliberately deferred to the `ledger_track_wallet` / provider
+> / rate-limit slices. None is a correctness bug; they are recorded here so the
+> risk is tracked rather than silent.
+>
+> 1. **Poison page — one unmatchable erc20 transfer wedges a wallet's stream.**
+>    `assignErc20Metadata` fails loud (throws) on a missing receipt, or on a
+>    transfer whose indexer-reported `value` has no matching Transfer log — e.g.
+>    a fee-on-transfer or rebasing token, where the on-chain log `data` differs
+>    from the reported value. The throw aborts the whole atomic page; the backfill
+>    job DLQs after 8 retries; and because the backfill self-chains, the cursor
+>    never advances past that block, halting the wallet's erc20 stream. The
+>    synthetic-ordinal fallback (§11 option 4) is rejected by design. The fix is a
+>    per-row quarantine (skip + record the row, advance the cursor) landing with
+>    token-resolve; until then a single weird token can stall one wallet.
+> 2. **Per-hash sequential receipt fetch.** `rpcGetReceipts` / `getReceipts` do
+>    one HTTP round-trip per hash — up to `PAGE_LIMIT` (1000) sequential calls per
+>    erc20 page. JSON-RPC batch requests / bounded concurrency are the throughput
+>    fix; the deferred Redis token-bucket + circuit breaker governs the rate.
+> 3. **Receipt fetching has no failover (asymmetric with the indexer).** Indexer
+>    *list* calls fail over (etherscan → blockscout), but non-opstack receipts go
+>    straight to the primary (`buildProviderBundle`). If the primary is the
+>    persistently-failing provider, the list succeeds via the secondary while
+>    receipts fail → page fails. Moot for Base (receipts via RPC); symmetric
+>    failover lands with the provider slice.
+> 4. **Backfill re-enqueue is not atomic with the cursor advance.** The next-page
+>    job is enqueued after `commitPage` commits; a crash in that window loses the
+>    job and recovery leans on BullMQ stalled-job re-processing. A boot-time
+>    reconciler that re-drives `status='backfilling'` streams with no in-flight
+>    job lands with the `ledger_track_wallet` seeding work.

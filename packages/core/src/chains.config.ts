@@ -19,6 +19,7 @@ export interface ChainConfig {
   readonly pollIntervalSec: number;
   readonly feeStrategy: FeeStrategy;
   readonly providers: readonly ProviderConfig[];
+  readonly rpcUrlEnv?: string; // public JSON-RPC endpoint env var (OP-stack receipts, 03-ingestion §7)
 }
 
 export const chains: readonly ChainConfig[] = [
@@ -41,6 +42,7 @@ export const chains: readonly ChainConfig[] = [
     finalityDepth: 600n,
     pollIntervalSec: 30,
     feeStrategy: 'receipts-opstack',
+    rpcUrlEnv: 'BASE_RPC_URL',
     providers: [
       { kind: 'etherscan-v2', baseUrl: 'https://api.etherscan.io/v2/api', apiKeyEnv: 'ETHERSCAN_API_KEY' },
       { kind: 'blockscout', baseUrl: 'https://base.blockscout.com/api' },

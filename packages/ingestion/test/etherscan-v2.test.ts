@@ -254,10 +254,13 @@ describe('getReceipts', () => {
       id: 1,
       result: {
         transactionHash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
+        from: '0xABCD000000000000000000000000000000000001',
+        to: '0xDEF0000000000000000000000000000000000002',
         gasUsed: '0xfde8', // 65000
         effectiveGasPrice: '0x4a817c800', // 20000000000
         status: '0x1',
         l1Fee: '0x2710', // 10000
+        logs: [],
       },
     };
     const { transport, calls } = stub(receiptBody);
@@ -268,10 +271,13 @@ describe('getReceipts', () => {
       {
         transactionHash:
           '0xccc3000000000000000000000000000000000000000000000000000000000003',
+        from: '0xabcd000000000000000000000000000000000001',
+        to: '0xdef0000000000000000000000000000000000002',
         gasUsed: '65000',
         effectiveGasPrice: '20000000000',
         l1Fee: '10000',
         status: '1',
+        logs: [],
       },
     ]);
     expect(new URL(calls[0] ?? '').searchParams.get('action')).toBe('eth_getTransactionReceipt');
@@ -284,9 +290,12 @@ describe('getReceipts', () => {
       id: 1,
       result: {
         transactionHash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
+        from: '0xABCD000000000000000000000000000000000001',
+        to: '0xDEF0000000000000000000000000000000000002',
         gasUsed: hostile,
         effectiveGasPrice: '0x4a817c800',
         status: '0x1',
+        logs: [],
       },
     };
     const { transport } = stub(receiptBody);
@@ -303,9 +312,12 @@ describe('getReceipts', () => {
       id: 1,
       result: {
         transactionHash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
+        from: '0xABCD000000000000000000000000000000000001',
+        to: '0xDEF0000000000000000000000000000000000002',
         gasUsed: '0x5208',
         effectiveGasPrice: '0x4a817c800',
         status: '0x1',
+        logs: [],
       },
     };
     const { transport } = stub(receiptBody);

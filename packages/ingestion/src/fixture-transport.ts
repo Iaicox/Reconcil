@@ -55,10 +55,14 @@ export function recordingTransport(inner: FetchJson, dir: string): FetchJson {
   };
 }
 
+// Cap each request so a hung connection can't pin a worker slot indefinitely;
+// the timeout rejects the fetch, which fails the job for retry.
+const FETCH_TIMEOUT_MS = 30_000;
+
 /** Production transport over global fetch (Node ≥ 22). Non-JSON bodies pass through as text. */
 export function realFetchJson(): FetchJson {
   return async (url) => {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     const text = await res.text();
     let body: unknown;
     try {
