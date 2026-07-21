@@ -35,8 +35,11 @@ export async function listEvents(db: Db, p: ListEventsParams): Promise<ListEvent
       )))
     : undefined;
   const verifiedCond = p.includeUnverified ? undefined : eq(tokens.verified, true);
+  // Scale the display threshold to base units. `10::numeric ^ decimals` is
+  // numeric-exact for any decimals; float `power(10, …)` would only be exact by
+  // luck for small exponents (ADR-004: never let money touch a float).
   const minCond = p.minAmount !== undefined
-    ? sql`${chainEvents.amountRaw} >= ${p.minAmount}::numeric * power(10, ${tokens.decimals})::numeric`
+    ? sql`${chainEvents.amountRaw} >= ${p.minAmount}::numeric * (10::numeric ^ ${tokens.decimals})`
     : undefined;
 
   const filters: (SQL | undefined)[] = [

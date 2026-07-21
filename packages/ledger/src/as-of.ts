@@ -1,7 +1,9 @@
 /**
- * Resolve an `as_of` date to the per-chain last finalized ingested block (the
- * citable anchor echoed in `as_of_effective`, contracts §6.1). "Balance on
- * May 31" is well-defined: the max block whose time ≤ end of that UTC day.
+ * Resolve an `as_of` date to the per-chain citable anchor echoed in
+ * `as_of_effective` (contracts §6.1): the max block of *this wallet's own
+ * activity* whose time ≤ end of that UTC day — not the ingestion head from
+ * checkpoints. "Balance on May 31" is well-defined against that anchor; block
+ * number and block time are maxed independently (monotonic on real chains).
  */
 import { chainEvents, type Db } from '@pet-crypto/db';
 import { and, inArray, lte, or, sql } from 'drizzle-orm';

@@ -28,16 +28,27 @@ export async function computeBalances(db: Db, p: BalancesParams): Promise<Balanc
 
   // Two index-friendly aggregates (chain_events_to_idx / _from_idx). An internal
   // transfer lands in both — inflow for the recipient, outflow for the sender.
-  const inflow = await db
-    .select({ addr: chainEvents.toAddr, tokenId: chainEvents.tokenId, sum: sumRaw })
-    .from(chainEvents)
-    .where(and(inArray(chainEvents.toAddr, addresses), timeC, chainC))
-    .groupBy(chainEvents.toAddr, chainEvents.tokenId);
-  const outflow = await db
-    .select({ addr: chainEvents.fromAddr, tokenId: chainEvents.tokenId, sum: sumRaw })
-    .from(chainEvents)
-    .where(and(inArray(chainEvents.fromAddr, addresses), timeC, chainC))
-    .groupBy(chainEvents.fromAddr, chainEvents.tokenId);
+  // Aggregates, backing, and the as-of anchor are independent — run them in one
+  // round-trip wave; only token-meta must wait on the resolved token set below.
+  const [inflow, outflow, backing, asOf] = await Promise.all([
+    db
+      .select({ addr: chainEvents.toAddr, tokenId: chainEvents.tokenId, sum: sumRaw })
+      .from(chainEvents)
+      .where(and(inArray(chainEvents.toAddr, addresses), timeC, chainC))
+      .groupBy(chainEvents.toAddr, chainEvents.tokenId),
+    db
+      .select({ addr: chainEvents.fromAddr, tokenId: chainEvents.tokenId, sum: sumRaw })
+      .from(chainEvents)
+      .where(and(inArray(chainEvents.fromAddr, addresses), timeC, chainC))
+      .groupBy(chainEvents.fromAddr, chainEvents.tokenId),
+    collectBacking(db, addresses, timeC, chainC),
+    resolveAsOf(db, {
+      addresses,
+      ...(chainIds ? { chainIds } : {}),
+      ...(cutoff ? { cutoff } : {}),
+      ...(p.asOf ? { asOfDate: p.asOf } : {}),
+    }),
+  ]);
 
   const net = new Map<string, { address: string; tokenId: number; amount: bigint }>();
   const bump = (addr: string, tokenId: number, delta: bigint): void => {
@@ -50,7 +61,6 @@ export async function computeBalances(db: Db, p: BalancesParams): Promise<Balanc
 
   const tokenIds = [...new Set([...net.values()].map((v) => v.tokenId))];
   const metaById = await loadTokenMeta(db, tokenIds);
-  const backing = await collectBacking(db, addresses, timeC, chainC);
 
   const rows: BalanceRow[] = [];
   for (const { address, tokenId, amount } of net.values()) {
@@ -69,16 +79,20 @@ export async function computeBalances(db: Db, p: BalancesParams): Promise<Balanc
   }
   rows.sort((a, b) => a.address.localeCompare(b.address) || a.token.tokenId - b.token.tokenId);
 
-  const asOf = await resolveAsOf(db, {
-    addresses,
-    ...(chainIds ? { chainIds } : {}),
-    ...(cutoff ? { cutoff } : {}),
-    ...(p.asOf ? { asOfDate: p.asOf } : {}),
-  });
   return { asOf, rows };
 }
 
-/** Backing refs per (wallet, token): an internal transfer backs both wallets. */
+/**
+ * Backing refs per (wallet, token): an internal transfer backs both wallets.
+ *
+ * FOLLOW-UP (whale scale, 10k+ events): this pulls the wallet's full time/chain-
+ * scoped history into Node to produce ≤64 refs + an exact totalCount per bucket.
+ * The aggregates above are already pure SQL; only this citation path streams the
+ * whole set. Replace with a windowed query — `count(*)` per bucket for totalCount
+ * and `row_number() over (partition by …) <= 64` for the refs — so a large wallet
+ * stops shipping its entire event set on every balances call. Bounded for MVP
+ * correctness; period-scoped callers (flows/gas/counterparties) are lighter.
+ */
 async function collectBacking(
   db: Db,
   addresses: string[],
