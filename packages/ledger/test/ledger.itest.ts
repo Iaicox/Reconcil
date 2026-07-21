@@ -348,6 +348,36 @@ describe('listEvents — pagination and filters', () => {
     const res = await listEvents(db, { scope: { addresses: [OWNED] }, minAmount: '1' });
     expect(res.events.map((x) => x.amountRaw).sort()).toEqual(['1000000000000000000', '2000000000000000000']);
   });
+
+  it('rejects a malformed min_amount with a clean domain error, not a raw pg cast error', async () => {
+    const e = events();
+    e.push({ eventKind: 'erc20_transfer', tokenId: TOK0.tokenId, amountRaw: 5n, fromAddr: EXT, toAddr: OWNED });
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT], tokens: [TOK0], chainIds: [1] });
+    const scope = { addresses: [OWNED] };
+    await expect(listEvents(db, { scope, minAmount: 'abc' })).rejects.toThrow(RangeError);
+    await expect(listEvents(db, { scope, minAmount: 'not a number' })).rejects.toThrow(/min_amount/);
+    // A well-formed threshold still works (the guard is shape-only).
+    const ok = await listEvents(db, { scope, minAmount: '1' });
+    expect(ok.events.map((x) => x.amountRaw)).toEqual(['5']);
+  });
+
+  it('returns total_count on the first page only, omitted on cursor pages', async () => {
+    const e = events();
+    for (let i = 0; i < 5; i++) {
+      e.push({ eventKind: 'native_transfer', tokenId: NATIVE.tokenId, amountRaw: 1n, fromAddr: EXT, toAddr: OWNED });
+    }
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT], tokens: [NATIVE], chainIds: [1] });
+    const scope = { addresses: [OWNED] };
+
+    const first = await listEvents(db, { scope, limit: 2 });
+    expect(first.totalCount).toBe(5);
+    expect(first.nextCursor).toBeDefined();
+
+    // Cursor pages skip the full COUNT(*) re-scan; the client caches total_count.
+    const second = await listEvents(db, { scope, limit: 2, cursor: first.nextCursor! });
+    expect(second.totalCount).toBeUndefined();
+    expect(second.events).toHaveLength(2);
+  });
 });
 
 describe('computeCounterparties — SQL ≡ fold', () => {
@@ -467,5 +497,31 @@ describe('getLedgerStatus', () => {
     expect(c2.anchored).toBe(false);
     expect(c2.streams[0]).toMatchObject({ status: 'error', lastError: 'boom' });
     expect(c2.streams[0]?.lastBlockTime).toBeUndefined();
+  });
+
+  it('resolves lastBlockTime from from- and to-side activity across chains', async () => {
+    // The as-of anchor is the max block_time over events where the wallet is the
+    // sender OR the recipient. Isolate each side on its own chain so a per-side
+    // (from∪to) grouped scan is proven, not just the to-side the case above covers.
+    const NATIVE_BASE: TokenSpec = { tokenId: 6, chainId: 8453, address: null, decimals: 18, standard: 'native' };
+    const e = events();
+    // chain 1: OWNED is only a SENDER (from-side)
+    e.push({ eventKind: 'native_transfer', chainId: 1, tokenId: NATIVE.tokenId, amountRaw: 1n, fromAddr: OWNED, toAddr: EXT, blockNumber: 10, blockTime: new Date('2026-02-01T00:00:00Z') });
+    // chain 8453: OWNED is only a RECIPIENT (to-side)
+    e.push({ eventKind: 'native_transfer', chainId: 8453, tokenId: NATIVE_BASE.tokenId, amountRaw: 1n, fromAddr: EXT, toAddr: OWNED, blockNumber: 20, blockTime: new Date('2026-04-01T00:00:00Z') });
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT], tokens: [NATIVE, NATIVE_BASE], chainIds: [1, 8453] });
+    await pool.query('TRUNCATE ingestion_checkpoints');
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO ingestion_checkpoints (chain_id, address, stream, status, last_processed_block, updated_at) VALUES
+        (1, $1, 'native', 'live', 100, $2),
+        (8453, $1, 'native', 'live', 100, $2)`,
+      [OWNED, now],
+    );
+
+    const cov = await getLedgerStatus(db, { addresses: [OWNED] });
+    const byChain = new Map(cov.map((c) => [c.chainId, c]));
+    expect(byChain.get(1)!.streams[0]?.lastBlockTime).toBe('2026-02-01T00:00:00.000Z');
+    expect(byChain.get(8453)!.streams[0]?.lastBlockTime).toBe('2026-04-01T00:00:00.000Z');
   });
 });

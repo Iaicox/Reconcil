@@ -22,6 +22,14 @@ export async function listEvents(db: Db, p: ListEventsParams): Promise<ListEvent
   if (addresses.length === 0) return { events: [], totalCount: 0 };
   const limit = Math.min(Math.max(1, p.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
 
+  // Domain-error boundary: mcp-tools owns full input validation, but guard the one
+  // per-row numeric threshold here so a malformed value fails as a clean domain
+  // error, never as a raw Postgres cast error deep in the query. `min_amount` is a
+  // bound param (no injection) scaled per-token in SQL; this checks its shape only.
+  if (p.minAmount !== undefined && !/^\d+(\.\d+)?$/.test(p.minAmount)) {
+    throw new RangeError(`min_amount must be a non-negative decimal string, got: ${p.minAmount}`);
+  }
+
   const scopeCond = or(inArray(chainEvents.fromAddr, addresses), inArray(chainEvents.toAddr, addresses));
   const periodCond = p.period ? (() => { const { from, to } = periodRange(p.period!); return timeBetween(from, to); })() : undefined;
   const kindCond = p.kinds && p.kinds.length > 0 ? inArray(chainEvents.eventKind, p.kinds) : undefined;
@@ -80,12 +88,18 @@ export async function listEvents(db: Db, p: ListEventsParams): Promise<ListEvent
     .orderBy(chainEvents.chainId, chainEvents.blockNumber, chainEvents.logIndex, chainEvents.id)
     .limit(limit + 1);
 
-  const counted = await db
-    .select({ n: sql<number>`count(*)::int` })
-    .from(chainEvents)
-    .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
-    .where(and(...filters));
-  const totalCount = counted[0]?.n ?? 0;
+  // `total_count` is a full COUNT(*) over the filter — costly on a deep drilldown.
+  // Compute it only on the first page (no cursor); paginating callers cache it
+  // (contracts §6.1) rather than re-scanning on every `nextCursor`.
+  let totalCount: number | undefined;
+  if (!p.cursor) {
+    const counted = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(chainEvents)
+      .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
+      .where(and(...filters));
+    totalCount = counted[0]?.n ?? 0;
+  }
 
   const S = new Set(addresses);
   const page = rows.slice(0, limit);
@@ -118,7 +132,8 @@ export async function listEvents(db: Db, p: ListEventsParams): Promise<ListEvent
     };
   });
 
-  const result: ListEventsResult = { events, totalCount };
+  const result: ListEventsResult = { events };
+  if (totalCount !== undefined) result.totalCount = totalCount;
   if (rows.length > limit) {
     const last = page[page.length - 1]!;
     result.nextCursor = encodeCursor({ chainId: last.chainId, blockNumber: last.blockNumber, logIndex: last.logIndex, id: last.id });

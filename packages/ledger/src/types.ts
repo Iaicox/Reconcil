@@ -163,7 +163,7 @@ export interface EventListItem {
 export interface ListEventsResult {
   events: EventListItem[];
   nextCursor?: string;
-  totalCount: number;
+  totalCount?: number; // first page only (cursor absent); callers cache it
 }
 
 export interface CounterpartiesParams {

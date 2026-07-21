@@ -5,7 +5,7 @@
  * `backfillProgress` is best-effort/omitted (a stored head is an ingestion change).
  */
 import { chainEvents, ingestionCheckpoints, type Db } from '@pet-crypto/db';
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, inArray, sql } from 'drizzle-orm';
 
 import type { StatusParams, StreamStatus, WalletCoverage } from './types.js';
 
@@ -27,17 +27,32 @@ export async function getLedgerStatus(db: Db, p: StatusParams): Promise<WalletCo
       ),
     );
 
-  // Last ingested block time per (chain, address) — one small query per key
-  // (N wallets × chains is tiny); powers the "as of" timestamp in status.
-  const lastTimeByKey = new Map<string, Date>();
-  const keys = new Map<string, { chainId: number; address: string }>();
-  for (const c of checkpoints) keys.set(`${c.chainId}|${c.address}`, { chainId: c.chainId, address: c.address });
-  for (const [key, { chainId, address }] of keys) {
-    const [row] = await db
-      .select({ t: sql<Date | null>`max(${chainEvents.blockTime})` })
+  // Last ingested block time per (chain, address): max(block_time) over events
+  // where the wallet is sender OR recipient, powering the "as of" timestamp.
+  // Two index-friendly grouped scans (from-side via _from_idx, to-side via
+  // _to_idx) merged by later time — one query per side, independent of the
+  // wallet-set size, rather than a max() query per (chain, address) key.
+  const maxTime = sql<string | Date | null>`max(${chainEvents.blockTime})`;
+  const chainSet = [...new Set(checkpoints.map((c) => c.chainId))];
+  const [fromRows, toRows] = await Promise.all([
+    db
+      .select({ chainId: chainEvents.chainId, addr: chainEvents.fromAddr, t: maxTime })
       .from(chainEvents)
-      .where(and(eq(chainEvents.chainId, chainId), or(eq(chainEvents.fromAddr, address), eq(chainEvents.toAddr, address))));
-    if (row?.t) lastTimeByKey.set(key, new Date(row.t));
+      .where(and(inArray(chainEvents.chainId, chainSet), inArray(chainEvents.fromAddr, addresses)))
+      .groupBy(chainEvents.chainId, chainEvents.fromAddr),
+    db
+      .select({ chainId: chainEvents.chainId, addr: chainEvents.toAddr, t: maxTime })
+      .from(chainEvents)
+      .where(and(inArray(chainEvents.chainId, chainSet), inArray(chainEvents.toAddr, addresses)))
+      .groupBy(chainEvents.chainId, chainEvents.toAddr),
+  ]);
+  const lastTimeByKey = new Map<string, Date>();
+  for (const r of [...fromRows, ...toRows]) {
+    if (r.t === null) continue;
+    const key = `${r.chainId}|${r.addr}`;
+    const t = new Date(r.t);
+    const cur = lastTimeByKey.get(key);
+    if (!cur || t > cur) lastTimeByKey.set(key, t);
   }
 
   const groups = new Map<string, WalletCoverage>();
