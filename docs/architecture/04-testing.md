@@ -38,6 +38,33 @@ a small freelancer wallet (ETH + USDC, < 200 txs), an SMB wallet with heavy stab
 activity on both chains, and an edge wallet full of spam airdrops. Expectations are
 hand-verified against a block explorer once, then guarded by tests forever.
 
+> **Golden wallet reconciliation — deferred to the evals slice (weeks 4–5).** The
+> `wallets/*.expect.json` above are consumed by the eval harness (`pnpm evals run`, §5): it
+> seeds a DB by replaying the recorded provider fixtures through the real ingestion pipeline
+> (the native replay already exists — `packages/ingestion/test/golden.test.ts`), then runs
+> ledger over it. Two assertion levels — (1) ledger `computeBalances/Flows/Gas/Counterparties`
+> equal the hand-verified expectations; (2) computed **native balance at a block equals the
+> recorded `eth_get_balance`** provider response at that block — the "balances match provider
+> spot-checks" bullet (R3 integrity job). It lives in `packages/evals` (which composes
+> ingestion + ledger), **not** `packages/ledger`: the two are siblings (both → db, core), and
+> ledger's math is already covered by SQL≡fold on generated worlds + the property invariants
+> (§3). **Unblockers before it can be authored:** (a) erc20 rows must reach `chain_events` —
+> recorded `tokentx` fixtures carry no provider `log_index`; the worker derives it from RPC
+> receipts (`packages/ingestion/src/logindex.ts`), which needs the network-gated erc20/receipts
+> capture (BASE_RPC_URL + live Etherscan + Base-RPC POST-body fixture recording) deferred with
+> the worker slice; until then only native+gas reconcile. (b) The internal-tx gap
+> (05-risks-open-questions.md R3): `txlist` omits contract-initiated native inflows, so a native
+> balance may not equal `eth_get_balance` — resolve by confirming from the recorded fixtures that
+> the chosen wallet has no material internal inflows (native txlist − gas == recorded balance)
+> and asserting only those, or add a `txlistinternal` stream (post-gate). (c) Base (8453) gas
+> needs OP-stack RPC receipts (03-ingestion.md §6 `receipts-opstack`), the same capture gap.
+> (d) A one-time block-explorer hand-verification pass to freeze the expectations.
+>
+> Interim de-risk (cheap, no network): from the recorded `freelancer` `txlist` + `eth_get_balance`
+> fixtures, check whether native reconciles (native in − out − gas == recorded balance) to learn
+> whether internal txs are material — i.e. whether a native provider spot-check is viable once
+> erc20 lands, or whether `txlistinternal` is required first.
+
 Two **synthetic families**: a scenario builder constructs event sets with known aggregates
 (exact expected values by construction) — including the whale-pagination case (10k+
 events crossing page boundaries) and the injection corpus (§6).

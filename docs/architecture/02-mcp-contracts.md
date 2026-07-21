@@ -248,13 +248,16 @@ output: { events: Array<{ chain_id: number; tx_hash: string; log_index: number;
                           kind: string; block_number: number; block_time: string;
                           token: TokenView; amount: DecimalString; amount_raw: string;
                           from: AddressView; to: AddressView; direction: 'in'|'out'|'internal' }>;
-          next_cursor?: string; total_count: number }
+          next_cursor?: string; total_count?: number }    // total_count: first page only
 
 interface AddressView { address: string; entity?: { entity_id: string; name: string; curated: boolean } }
 ```
 
 Citations are trivially the returned events themselves. Every `event_ref_summary.drilldown`
-in the system resolves to a call of this tool with equivalent filters (C3).
+in the system resolves to a call of this tool with equivalent filters (C3). `total_count` is a
+full count over the filter, returned on the **first page only** (when `cursor` is absent);
+paginating callers cache it, so cursor-driven pages omit it rather than re-scanning on every
+`next_cursor`. Citations are unaffected — a drilldown resolves to a `list_events` call regardless.
 
 ### 6.2 `ledger_*` — coverage, tracking, audit
 

@@ -4,14 +4,7 @@
  * network/DB/filesystem I/O by design (00-overview §3).
  */
 
-declare const brand: unique symbol;
-
-/**
- * Nominal typing helper for domain primitives (Address, TxHash, RawAmount, …).
- * Money is never a plain `number` (ADR-004); brands make raw/display and
- * unit/currency mix-ups a compile error.
- */
-export type Brand<T, TBrand extends string> = T & { readonly [brand]: TBrand };
+export type { Brand } from './brand.js';
 
 export {
   chains,
@@ -22,3 +15,5 @@ export {
 } from './chains.config.js';
 
 export { createLogger, serializeError, type Logger } from './logger.js';
+
+export { formatUnits, parseUnits, type RawAmount, type DecimalString } from './money.js';
