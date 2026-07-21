@@ -26,6 +26,10 @@ async function main(): Promise<void> {
   logger.info('migrations applied');
 
   const connection = makeConnection(cfg.REDIS_URL);
+  // Without an 'error' listener Node throws on the first Redis error and crashes
+  // past the shutdown handlers, printing the raw Error (hostile cause) to stderr
+  // (ADR-011). Route it through serializeError instead.
+  connection.on('error', (err) => { logger.error('redis connection error', { err: serializeError(err) }); });
   const deps: ProcessorDeps = {
     db,
     bundleFor: (chainId) =>
@@ -53,7 +57,11 @@ async function main(): Promise<void> {
     { connection, concurrency: chains.length, settings: { backoffStrategy } },
   );
 
+  for (const q of [backfillQueue, tailQueue]) {
+    q.on('error', (err) => { logger.error('queue error', { queue: q.name, err: serializeError(err) }); });
+  }
   for (const w of [backfillWorker, tailWorker]) {
+    w.on('error', (err) => { logger.error('worker error', { queue: w.name, err: serializeError(err) }); });
     w.on('failed', (job, err) => { logger.error('job failed', { queue: w.name, jobId: job?.id, err: serializeError(err) }); });
   }
 
