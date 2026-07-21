@@ -1068,11 +1068,11 @@ describe('write layer', () => {
   });
 
   it('inv.6 — write-chunk size does not change the ledger', async () => {
-    await pool.query('TRUNCATE chain_events');
+    await pool.query('TRUNCATE chain_events CASCADE'); // matches FKs chain_events.id; CASCADE required (matches is empty here)
     const events = Array.from({ length: 250 }, (_, i) => nativeEvent(1000 + i, -1));
     // resolve one native token id, build rows once
     const chunkInsert = async (size: number): Promise<string[]> => {
-      await pool.query('TRUNCATE chain_events');
+      await pool.query('TRUNCATE chain_events CASCADE'); // matches FKs chain_events.id; CASCADE required (matches is empty here)
       const tid = (await pool.query(`SELECT id FROM tokens WHERE chain_id=1 AND address IS NULL`)).rows[0].id as number;
       const rows = events.map((e) => toChainEventRow(e, tid));
       for (let i = 0; i < rows.length; i += size) await insertEventRows(db, rows.slice(i, i + size));
@@ -1221,12 +1221,15 @@ export async function commitPage(
       if (tokenId === undefined) {
         const values = tokenInsertValues(ev, chain);
         await tx.insert(tokens).values(values).onConflictDoNothing({ target: [tokens.chainId, tokens.address] });
+        // $inferInsert widens address to string|null|undefined; narrow to
+        // string|null so the else-branch is string under exactOptionalPropertyTypes.
+        const addr = values.address ?? null;
         const [t] = await tx
           .select({ id: tokens.id })
           .from(tokens)
-          .where(values.address === null
+          .where(addr === null
             ? and(eq(tokens.chainId, ev.chainId), isNull(tokens.address))
-            : and(eq(tokens.chainId, ev.chainId), eq(tokens.address, values.address)))
+            : and(eq(tokens.chainId, ev.chainId), eq(tokens.address, addr)))
           .limit(1);
         if (!t) throw new Error('token upsert failed to resolve id');
         tokenId = t.id;
