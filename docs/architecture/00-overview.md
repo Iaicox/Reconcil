@@ -166,6 +166,12 @@ with per-tenant bearer keys. Compose remains the source of truth; Railway config
 | 6–8 | `recon`, `exporters` (journal drafts), recon tools | Invoice CSV → suggested matches → confirm → balanced QBO/Xero journal draft, on fixtures and one real wallet. |
 | 9–12 | Nothing new (validation) | Interviews use the working demo; only bug fixes and eval additions. |
 
+> Weeks 1–3 note: the *"balances match provider spot-checks (integrity job)"* bullet is the golden
+> wallet reconciliation, specced in `04-testing.md` §2 and **deferred to the evals slice (weeks
+> 4–5)** — it composes ingestion + ledger and is gated on the network-gated erc20/receipts capture
+> and the internal-tx gap (`05-risks-open-questions.md` R3). The ledger slice ships its math
+> verified by SQL≡fold on generated worlds + property invariants (`04-testing.md` §3).
+
 ## 7. Key mechanisms (pointers)
 
 - Money representation and rounding: `01-data-model.md` §2, ADR-004.

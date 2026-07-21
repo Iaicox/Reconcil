@@ -35,7 +35,9 @@ returns.
 balances and *tells the user* when they drift (`ledger_status`, warnings); coverage
 warnings are contractual (C5); a "supported wallet types" doc states EOA-only MVP;
 the `log_index` sentinel space already reserves room for internal transfers, and
-Etherscan's `txlistinternal` makes them a post-gate stream, not a redesign.
+Etherscan's `txlistinternal` makes them a post-gate stream, not a redesign. The
+provider-vs-computed reconciliation test itself is specced in `04-testing.md` §2, deferred to the
+evals slice and gated on the erc20/receipts capture.
 **Positioning:** honesty-as-feature — the tool says when it cannot be trusted, unlike a
 spreadsheet.
 
