@@ -197,4 +197,23 @@ describe('processors', () => {
     const { rows } = await pool.query('SELECT count(*)::int AS n FROM chain_events');
     expect(rows[0].n).toBe(0);
   });
+
+  it('tail: a live stream over a >PAGE_LIMIT gap is handed back for backfill, then recovers', async () => {
+    // A live stream with a large window ahead (e.g. post-downtime). The tick's
+    // first page is full (1000) ⇒ ingestOnce flips it to 'backfilling'.
+    await reset('native', 0, 'live');
+    const bundle = (): ProviderBundle => bundleOf({ native: nativeFull });
+    const stragglers = await runTailTick(deps(bundle), { chainId: 1 });
+    // Tail must return it so the host enqueues a backfill page — otherwise the
+    // status='live' filter would exclude it from every future tick and it strands.
+    expect(stragglers).toEqual([{ chainId: 1, address: ADDR, stream: 'native' }]);
+    expect((await getCheckpoint(db, 1, ADDR, 'native'))?.status).toBe('backfilling');
+    // Draining via backfill (what the host does with the returned target) recovers to live.
+    let res = await runBackfillPage(deps(bundle), { chainId: 1, address: ADDR, stream: 'native' });
+    while (res.status === 'backfilling') {
+      res = await runBackfillPage(deps(bundle), { chainId: 1, address: ADDR, stream: 'native' });
+    }
+    expect((await getCheckpoint(db, 1, ADDR, 'native'))?.status).toBe('live');
+    expect((await kinds()).native_transfer).toBe(1000);
+  });
 });

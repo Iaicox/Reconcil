@@ -17,6 +17,17 @@ export interface Erc20WithMeta extends RawErc20Transfer {
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 const topicAddr = (topic: string): string => ('0x' + topic.slice(-40)).toLowerCase();
 
+// log.data is hostile hex (ADR-011). A malformed value must skip the log as a
+// non-match (so a valid sibling log can still match) — never throw and poison
+// the whole page.
+const dataEq = (data: string, value: bigint): boolean => {
+  try {
+    return BigInt(data) === value;
+  } catch {
+    return false;
+  }
+};
+
 export function assignErc20Metadata(
   rows: RawErc20Transfer[],
   receiptsByHash: ReadonlyMap<string, RawReceipt>,
@@ -46,7 +57,7 @@ export function assignErc20Metadata(
     const to = r.to.toLowerCase();
     const value = BigInt(r.value);
     const match = candidates.find(
-      (l) => topicAddr(l.topics[1]!) === from && topicAddr(l.topics[2]!) === to && BigInt(l.data) === value,
+      (l) => topicAddr(l.topics[1]!) === from && topicAddr(l.topics[2]!) === to && dataEq(l.data, value),
     );
     if (!match) throw new Error('no matching Transfer log for erc20 transfer', { cause: hash });
 

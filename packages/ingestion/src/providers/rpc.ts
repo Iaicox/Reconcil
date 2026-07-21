@@ -9,13 +9,25 @@ import { parseRows } from './envelope.js';
 
 export type RpcCall = (method: string, params: unknown[]) => Promise<unknown>;
 
+// Cap each RPC round-trip so a wedged upstream connection can't pin a worker
+// slot forever (BullMQ retries failed calls, not hung ones).
+const RPC_TIMEOUT_MS = 30_000;
+
 export function httpRpcCall(url: string): RpcCall {
   return async (method, params) => {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+        signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+      });
+    } catch (err) {
+      // Timeout (AbortSignal) or a transport failure — surface as ProviderError
+      // so retry/backoff handles it. `cause` (never logged) keeps the detail.
+      throw new ProviderError('http', 'rpc request failed or timed out', { cause: err });
+    }
     if (res.status === 429) throw new ProviderError('rate_limited', 'HTTP 429');
     if (!res.ok) throw new ProviderError('http', `HTTP ${String(res.status)}`);
     const json = (await res.json()) as { result?: unknown; error?: unknown };
