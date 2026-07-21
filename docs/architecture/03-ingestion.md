@@ -26,6 +26,13 @@ stateDiagram-v2
     paused --> live : manual
 ```
 
+> **`anchoring` is deferred** (worker-ingestion slice, 2026-07-18): the current
+> ingester does full-history backfill only, and `ingestion_checkpoints.status`
+> has no `anchoring` value (see `schema.sql`). The `queued → anchoring` and
+> `anchoring → backfilling` transitions and the anchored-window / `opening_balance`
+> path land with the anchored-backfill slice; until then a wallet goes
+> `queued → backfilling` regardless of size.
+
 Streams are independent: `native` (provider tx list) and `erc20` (provider transfer
 list) are different endpoints with different pagination, so each has its own cursor.
 A wallet is "live" when **all** its streams are live; `ledger_status` reports per-stream.
