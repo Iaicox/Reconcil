@@ -93,7 +93,9 @@ describe('processors', () => {
   // Each test starts from an empty ledger and a known cursor. TRUNCATE ... CASCADE
   // because matches.chain_event_id FKs chain_events.id (matches is empty here).
   const reset = async (stream: 'native' | 'erc20', block: number, status: string): Promise<void> => {
-    await pool.query('TRUNCATE chain_events CASCADE');
+    // Truncate checkpoints too so a leftover stream from a prior test can't be
+    // incidentally re-processed (e.g. by runTailTick's chain-wide scan).
+    await pool.query('TRUNCATE chain_events, ingestion_checkpoints CASCADE');
     await seedCheckpoint(db, 1, ADDR, stream);
     await pool.query(
       `UPDATE ingestion_checkpoints SET last_processed_block=$1, status=$2 WHERE chain_id=1 AND address=$3 AND stream=$4`,
@@ -178,5 +180,21 @@ describe('processors', () => {
     expect(byKind.gas_fee).toBe(1);
     const cp = await getCheckpoint(db, 1, ADDR, 'native');
     expect(cp).toMatchObject({ status: 'live', lastProcessedBlock: SAFE });
+  });
+
+  it('never queries the provider past safeHead (ADR-005 fast-path)', async () => {
+    // Cursor already at safeHead ⇒ fromBlock = safe + 1 > safe. The provider mock
+    // throws if queried, so this test fails if the `fromBlock > safe` guard is removed.
+    await reset('native', SAFE, 'live');
+    const throwIfQueried: NativeFn = async () => { throw new Error('provider queried past safeHead'); };
+    const res = await runBackfillPage(
+      deps(() => bundleOf({ native: throwIfQueried })),
+      { chainId: 1, address: ADDR, stream: 'native' },
+    );
+    expect(res.status).toBe('live');
+    expect(res.inserted).toBe(0);
+    expect(res.lastProcessedBlock).toBe(SAFE);
+    const { rows } = await pool.query('SELECT count(*)::int AS n FROM chain_events');
+    expect(rows[0].n).toBe(0);
   });
 });
