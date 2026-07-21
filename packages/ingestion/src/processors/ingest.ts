@@ -66,6 +66,9 @@ export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Pro
     events = normalize({ erc20: { items: enriched } }, {
       chainId: target.chainId, trackedAddress: target.address, feeStrategy: chain.feeStrategy, provider: bundle.indexer.kind,
     });
+    // Every erc20 contract referenced in this page (deduped) — NOT filtered to
+    // contracts unknown to `tokens`. The deferred token-resolve queue does that
+    // filtering; here we just surface the candidates it will consume.
     unseenContracts = uniq(page.items.map((t) => t.contractAddress.toLowerCase()));
   }
 
