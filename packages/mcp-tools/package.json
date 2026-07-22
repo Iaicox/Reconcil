@@ -14,8 +14,9 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@pet-crypto/core": "workspace:*",
@@ -24,10 +25,16 @@
     "@pet-crypto/ledger": "workspace:*",
     "@pet-crypto/pricing": "workspace:*",
     "@pet-crypto/recon": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^11.0.0",
+    "@types/node": "catalog:",
+    "@types/pg": "^8.20.0",
     "eslint": "catalog:",
+    "fast-check": "catalog:",
+    "pg": "^8.22.0",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

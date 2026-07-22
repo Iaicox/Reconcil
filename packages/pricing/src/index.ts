@@ -7,7 +7,7 @@
 export { valueQuantities, valueOne, type ValuedOne } from './value.js';
 export { resolvePrices, pickSnapshot, priceKey } from './resolve.js';
 export { resolveFxRates, pickLatestRate } from './fx.js';
-export { multiply, divide, roundHalfUp, numberToDecimalString } from './decimal.js';
+export { multiply, divide, roundHalfUp, sumDecimals, numberToDecimalString } from './decimal.js';
 export type {
   Currency, ValuationPolicy, Valuation, ValueNeed, ValuedNeed, SnapshotRow, FxRow,
   FxResolved, PriceRef, FxRef, PricingWarning, PricingWarningCode, ValuationResult,

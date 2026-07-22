@@ -17,3 +17,7 @@ export {
 export { createLogger, serializeError, type Logger } from './logger.js';
 
 export { formatUnits, parseUnits, type RawAmount, type DecimalString } from './money.js';
+
+export { sanitize, type Sanitized } from './sanitizer.js';
+
+export * from './schemas.js';

@@ -25,6 +25,11 @@ export function divide(a: string, b: string): DecimalString {
   return toStr(new D(a).div(b));
 }
 
+/** Exact sum of decimal strings (fiat totals). Empty → '0'. */
+export function sumDecimals(values: string[]): DecimalString {
+  return toStr(values.reduce((acc, v) => acc.plus(v), new D(0)));
+}
+
 /** Round to `dp` decimal places, half-up — an export-boundary operation only. */
 export function roundHalfUp(value: string, dp: number): DecimalString {
   return new D(value).toFixed(dp) as DecimalString;
