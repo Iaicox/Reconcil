@@ -24,6 +24,7 @@ export async function computeStablecoinMovements(db: Db, p: StablecoinParams): P
     restrictTokenIds: ids,
     ...(p.chainIds ? { chainIds: p.chainIds } : {}),
     ...(p.direction ? { direction: p.direction } : {}),
+    ...(p.groupBy ? { groupBy: p.groupBy } : {}),
   };
   return computeFlows(db, params);
 }

@@ -18,6 +18,7 @@ import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { collectPricingRefs, toWireValuation } from '../pricing-refs.js';
 import { selectRefs } from '../refs.js';
 import { resolveScope } from '../scope.js';
 import { toTokenView } from '../token-view.js';
@@ -65,17 +66,10 @@ export async function analyticsBalances(
       pegCurrency: r.token.pegCurrency,
       symbol: r.token.symbolDisplay,
     }));
-    const v = input.valuation;
-    const valuation = v.policy !== undefined ? { currency: v.currency, policy: v.policy } : { currency: v.currency };
-    const valued = await valueQuantities(ctx.db, needs, valuation);
-    fiatByIndex = valued.values.map((v) => v.fiatValue);
-    for (const p of valued.priceRefs) {
-      priceRefs.push({ snapshot_id: p.snapshotId, token: p.token, date: p.date, currency: p.currency, source: p.source, price: p.price });
-    }
-    for (const f of valued.fxRefs) {
-      fxRefs.push({ fx_rate_id: f.fxRateId, date: f.date, base: f.base, quote: f.quote, rate: f.rate, source: f.source });
-    }
-    for (const w of valued.warnings) warnings.push({ code: w.code, message: w.message, ...(w.context ? { context: w.context } : {}) });
+    const valued = await valueQuantities(ctx.db, needs, toWireValuation(input.valuation));
+    fiatByIndex = valued.values.map((r) => r.fiatValue);
+    const c = collectPricingRefs(valued);
+    priceRefs.push(...c.priceRefs); fxRefs.push(...c.fxRefs); warnings.push(...c.warnings);
   }
 
   // --- data -----------------------------------------------------------------

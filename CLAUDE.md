@@ -71,7 +71,10 @@ with full rationale.
   read-only by construction (MiCA); a dependency-cruiser CI rule will enforce it. (ADR-011)
 - **On-chain and imported strings are hostile input.** Only sanitized `*_display` values
   may reach tool responses, and only under `untrusted` keys; `*_raw` and provider `raw`
-  JSONB never leave the server. (ADR-011)
+  JSONB never leave the server. This ban is about hostile **string** fields
+  (`symbol`/`name`/memo, provider payloads); the trusted numeric `amount_raw` (uint256
+  base units as a decimal string, e.g. on `analytics_list_events` events) is not hostile
+  input and does cross the wire. (ADR-011)
 - **Tenant identity comes from the transport session, never from tool arguments.**
   All repository methods are tenant-scoped; chain data tables are global by design.
   (ADR-006, ADR-012)

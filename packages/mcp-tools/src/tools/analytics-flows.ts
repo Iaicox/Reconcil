@@ -25,6 +25,8 @@ import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { collectPricingRefs, toWireValuation } from '../pricing-refs.js';
+import { repDate } from '../rep-date.js';
 import { selectRefs } from '../refs.js';
 import { resolveScope } from '../scope.js';
 import { persistToolCall } from '../tool-calls.js';
@@ -77,18 +79,15 @@ export async function analyticsFlows(
       const common = { tokenId: r.tokenId, date, isStablecoin: r.token.isStablecoin, pegCurrency: r.token.pegCurrency, symbol: r.token.symbolDisplay };
       needs.push({ ...common, amount: r.inflow }, { ...common, amount: r.outflow });
     }
-    const v = input.valuation;
-    const valuation = v.policy !== undefined ? { currency: v.currency, policy: v.policy } : { currency: v.currency };
-    const valued = await valueQuantities(ctx.db, needs, valuation);
+    const valued = await valueQuantities(ctx.db, needs, toWireValuation(input.valuation));
     // A row's inflow/outflow share (token, date) → the same snapshot: both priced or both missing.
     fiatByRow = allRows.map((_, i) => {
       const inV = valued.values[i * 2]?.fiatValue;
       const outV = valued.values[i * 2 + 1]?.fiatValue;
       return inV !== undefined && outV !== undefined ? { inflow: inV, outflow: outV } : undefined;
     });
-    for (const p of valued.priceRefs) priceRefs.push({ snapshot_id: p.snapshotId, token: p.token, date: p.date, currency: p.currency, source: p.source, price: p.price });
-    for (const f of valued.fxRefs) fxRefs.push({ fx_rate_id: f.fxRateId, date: f.date, base: f.base, quote: f.quote, rate: f.rate, source: f.source });
-    for (const w of valued.warnings) warnings.push({ code: w.code, message: w.message, ...(w.context ? { context: w.context } : {}) });
+    const c = collectPricingRefs(valued);
+    priceRefs.push(...c.priceRefs); fxRefs.push(...c.fxRefs); warnings.push(...c.warnings);
   }
 
   // --- data -----------------------------------------------------------------
@@ -128,19 +127,6 @@ export async function analyticsFlows(
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });
-}
-
-/** Representative valuation date for a row: day bucket → that day; month → month end; else period end. */
-function repDate(group: Record<string, string>, periodTo: string): string {
-  if (group.day !== undefined) return group.day;
-  if (group.month !== undefined) return lastDayOfMonth(group.month);
-  return periodTo;
-}
-
-function lastDayOfMonth(ym: string): string {
-  const [y, m] = ym.split('-').map(Number);
-  const day = new Date(Date.UTC(y!, m!, 0)).getUTCDate(); // day 0 of next month = last day of this
-  return `${ym}-${String(day).padStart(2, '0')}`;
 }
 
 async function resolveTokenIds(db: Db, t: { chain_id: number; address: string | null }): Promise<number[]> {

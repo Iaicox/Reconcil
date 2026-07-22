@@ -338,6 +338,60 @@ describe('computeFlows — group_by', () => {
   });
 });
 
+describe('computeGas — group_by', () => {
+  const YEAR: Period = { from: '2026-01-01', to: '2026-12-31' };
+  const JAN = new Date('2026-01-15T00:00:00Z');
+  const JUN = new Date('2026-06-15T00:00:00Z');
+  const SINK = '0x0000000000000000000000000000000000000000';
+
+  // Gas payers are the `from` side: OWNED pays 5 (Jan) + 3 (Jun); OWNED2 pays 2 (Jan).
+  async function seedGasGrouped(): Promise<void> {
+    const e = events();
+    e.push({ eventKind: 'gas_fee', tokenId: NATIVE.tokenId, amountRaw: 5n, fromAddr: OWNED, toAddr: SINK, blockTime: JAN });
+    e.push({ eventKind: 'gas_fee', tokenId: NATIVE.tokenId, amountRaw: 3n, fromAddr: OWNED, toAddr: SINK, blockTime: JUN });
+    e.push({ eventKind: 'gas_fee', tokenId: NATIVE.tokenId, amountRaw: 2n, fromAddr: OWNED2, toAddr: SINK, blockTime: JAN });
+    await seedWorld({ events: e.list, owned: [OWNED, OWNED2], external: [EXT], tokens: [NATIVE], chainIds: [1] });
+  }
+  const scope = { addresses: [OWNED, OWNED2] };
+
+  it('defaults to one per-chain row with chain always in the group', async () => {
+    await seedGasGrouped();
+    const res = await computeGas(db, { scope, period: YEAR });
+    expect(res).toHaveLength(1);
+    expect(res[0]).toMatchObject({ group: { chain: '1' }, nativeAmountRaw: '10', txCount: 3 });
+    expect(res[0]?.backing.totalCount).toBe(3);
+  });
+
+  it('subdivides by month (chain stays an implicit dimension)', async () => {
+    await seedGasGrouped();
+    const res = await computeGas(db, { scope, period: YEAR, groupBy: ['month'] });
+    const byMonth = new Map(res.map((r) => [r.group.month, r]));
+    expect([...byMonth.keys()].sort()).toEqual(['2026-01', '2026-06']);
+    expect(byMonth.get('2026-01')).toMatchObject({ group: { chain: '1', month: '2026-01' }, nativeAmountRaw: '7', txCount: 2 });
+    expect(byMonth.get('2026-06')).toMatchObject({ group: { chain: '1', month: '2026-06' }, nativeAmountRaw: '3', txCount: 1 });
+    for (const r of res) expect(r.backing.totalCount).toBe(r.txCount);
+  });
+
+  it('subdivides by wallet (the payer)', async () => {
+    await seedGasGrouped();
+    const res = await computeGas(db, { scope, period: YEAR, groupBy: ['wallet'] });
+    const byWallet = new Map(res.map((r) => [r.group.wallet, r]));
+    expect(byWallet.get(OWNED)).toMatchObject({ nativeAmountRaw: '8', txCount: 2 });
+    expect(byWallet.get(OWNED2)).toMatchObject({ nativeAmountRaw: '2', txCount: 1 });
+  });
+
+  it('subdivides by (wallet, month) composite and buckets backing per group', async () => {
+    await seedGasGrouped();
+    const res = await computeGas(db, { scope, period: YEAR, groupBy: ['wallet', 'month'] });
+    const key = (r: { group: Record<string, string> }): string => `${r.group.wallet}|${r.group.month}`;
+    const byKey = new Map(res.map((r) => [key(r), r]));
+    expect(byKey.get(`${OWNED}|2026-01`)).toMatchObject({ nativeAmountRaw: '5', txCount: 1 });
+    expect(byKey.get(`${OWNED}|2026-06`)).toMatchObject({ nativeAmountRaw: '3', txCount: 1 });
+    expect(byKey.get(`${OWNED2}|2026-01`)).toMatchObject({ nativeAmountRaw: '2', txCount: 1 });
+    for (const r of res) expect(r.backing.totalCount).toBe(r.txCount);
+  });
+});
+
 describe('listEvents — pagination and filters', () => {
   it('is page-boundary independent: limits {10,100,1000} yield the identical ordered set', async () => {
     const e = events();
@@ -528,6 +582,19 @@ describe('computeStablecoinMovements', () => {
     await seedStable();
     const usd = await computeStablecoinMovements(db, { scope: { addresses: [OWNED] }, period, pegCurrency: 'USD' });
     expect(usd.rows.map((r) => r.tokenId)).toEqual([USDC_S.tokenId]);
+  });
+
+  it('forwards group_by to the flow fold (subdivides by month)', async () => {
+    const e = events();
+    e.push({ eventKind: 'erc20_transfer', tokenId: USDC_S.tokenId, amountRaw: 1_000_000n, fromAddr: EXT, toAddr: OWNED, blockTime: new Date('2026-01-15T00:00:00Z') });
+    e.push({ eventKind: 'erc20_transfer', tokenId: USDC_S.tokenId, amountRaw: 3_000_000n, fromAddr: EXT, toAddr: OWNED, blockTime: new Date('2026-06-15T00:00:00Z') });
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT], tokens: [NATIVE, USDC_S], chainIds: [1] });
+
+    const res = await computeStablecoinMovements(db, { scope: { addresses: [OWNED] }, period, groupBy: ['month'] });
+    const byMonth = new Map(res.rows.map((r) => [r.group.month, r]));
+    expect([...byMonth.keys()].sort()).toEqual(['2026-01', '2026-06']);
+    expect(byMonth.get('2026-01')).toMatchObject({ group: { month: '2026-01' }, inflowRaw: '1000000' });
+    expect(byMonth.get('2026-06')).toMatchObject({ group: { month: '2026-06' }, inflowRaw: '3000000' });
   });
 });
 

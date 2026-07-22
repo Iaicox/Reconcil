@@ -101,6 +101,7 @@ export interface StablecoinParams {
   pegCurrency?: 'USD' | 'EUR';
   chainIds?: number[];
   direction?: FlowDirection;
+  groupBy?: FlowGroupBy[]; // forwarded to computeFlows; tool boundary restricts to token/counterparty/month
 }
 
 export interface FlowRow {
@@ -122,10 +123,18 @@ export interface FlowsResult {
   internal: FlowRow[]; // self-transfers between two in-scope wallets
 }
 
+/**
+ * Gas grouping. `chain` is always applied (the native fee token is per-chain, so
+ * raw sums are meaningful only per chain — cf. `token` in flows); `wallet` (payer)
+ * and `month` subdivide.
+ */
+export type GasGroupBy = 'wallet' | 'chain' | 'month';
+
 export interface GasParams {
   scope: LedgerScope;
   period: Period;
   chainIds?: number[];
+  groupBy?: GasGroupBy[]; // default ['chain']; 'chain' is always applied
 }
 
 export interface GasRow {
