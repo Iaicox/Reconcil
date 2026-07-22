@@ -21,7 +21,10 @@ export const scopeSchema = z
   .strict();
 export type Scope = z.infer<typeof scopeSchema>;
 
-export const periodSchema = z.object({ from: z.string(), to: z.string() }).strict();
+/** ISO calendar date on the wire (UTC day); malformed dates fail as INVALID_INPUT. */
+export const isoDateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be an ISO date (YYYY-MM-DD)');
+
+export const periodSchema = z.object({ from: isoDateString, to: isoDateString }).strict();
 export type Period = z.infer<typeof periodSchema>;
 
 export const valuationSchema = z
@@ -124,3 +127,50 @@ export const analyticsBalancesOutput = z.object({
   totals: z.array(z.object({ currency: z.string(), value: decimalString })).optional(),
 });
 export type AnalyticsBalancesOutput = z.infer<typeof analyticsBalancesOutput>;
+
+// ---- analytics_flows (§6.1) -------------------------------------------------
+
+export const flowDirectionSchema = z.enum(['in', 'out', 'both']);
+export type FlowDirection = z.infer<typeof flowDirectionSchema>;
+
+/**
+ * Grouping dimensions. `token` is always applied (raw amounts are per-token,
+ * ADR-004); the others subdivide a token's flow. See 02-mcp-contracts §6.1.
+ */
+export const flowGroupBySchema = z.enum(['token', 'counterparty', 'day', 'month']);
+export type FlowGroupBy = z.infer<typeof flowGroupBySchema>;
+
+/** Restrict to a single token; `address: null` = native. */
+export const tokenFilterSchema = z.object({ chain_id: z.number(), address: z.string().nullable() }).strict();
+export type TokenFilter = z.infer<typeof tokenFilterSchema>;
+
+export const analyticsFlowsInput = z
+  .object({
+    scope: scopeSchema.optional(),
+    period: periodSchema,
+    chain_ids: z.array(z.number()).optional(),
+    direction: flowDirectionSchema.optional(),
+    token: tokenFilterSchema.optional(),
+    group_by: z.array(flowGroupBySchema).optional(),
+    include_unverified: z.boolean().optional(),
+    valuation: valuationSchema.optional(),
+  })
+  .strict();
+export type AnalyticsFlowsInput = z.infer<typeof analyticsFlowsInput>;
+
+/** One flow bucket. `group` carries the sanitized dimension labels (C6). */
+export const flowRowSchema = z.object({
+  group: z.record(z.string(), z.string()),
+  inflow: decimalString,
+  outflow: decimalString,
+  net: decimalString,
+  tx_count: z.number(),
+  fiat: z.object({ inflow: decimalString, outflow: decimalString }).optional(),
+});
+export type FlowRowView = z.infer<typeof flowRowSchema>;
+
+export const analyticsFlowsOutput = z.object({
+  rows: z.array(flowRowSchema),
+  internal_transfers: z.array(flowRowSchema),
+});
+export type AnalyticsFlowsOutput = z.infer<typeof analyticsFlowsOutput>;

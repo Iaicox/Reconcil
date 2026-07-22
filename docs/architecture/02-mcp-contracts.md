@@ -183,14 +183,24 @@ input:  { scope?: Scope; period: Period; chain_ids?: number[];
           token?: { chain_id: number; address: string | null };
           group_by?: ('token' | 'counterparty' | 'day' | 'month')[];  // default ['token']
           include_unverified?: boolean; valuation?: Valuation }
-output: { rows: Array<{ group: Record<string, string>;           // e.g. {token:'USDC', month:'2026-06'}
-                        inflow: DecimalString; outflow: DecimalString; net: DecimalString;
-                        tx_count: number; fiat?: { inflow: DecimalString; outflow: DecimalString } }> }
+type FlowRow = { group: Record<string, string>;         // e.g. {token:'USDC', chain_id:'1', month:'2026-06'}
+                 inflow: DecimalString; outflow: DecimalString; net: DecimalString;
+                 tx_count: number; fiat?: { inflow: DecimalString; outflow: DecimalString } };
+output: { rows: FlowRow[]; internal_transfers: FlowRow[] }
 ```
 
-Self-transfers between two tracked wallets of the same scope are reported in a separate
-`internal_transfers` row group, not as external flow (classic accounting pitfall —
-covered by a dedicated eval case).
+`token` is an **implicit grouping dimension**: `inflow`/`outflow` are base-unit sums, meaningful
+only per token (a 6-decimal and an 18-decimal raw amount can't be added — ADR-004), so every row
+is per-token and `group_by` merely *subdivides* it (`group_by: ['month']` → one row per
+(token, month), both echoed in `group`). `group` always carries **`chain_id`** alongside `token`,
+so same-symbol tokens on different chains stay distinct. Self-transfers between two tracked wallets
+of the same scope are reported in the sibling **`internal_transfers`** array — same row shape —
+never as external flow (classic accounting pitfall, covered by a dedicated eval case);
+`internal_transfers` are **not** filtered by `direction` (a self-transfer is neither inflow nor
+outflow). Flow `fiat` values use a **representative date per row** (the `day` bucket → that day;
+`month` → that month's last day — for a partial final month this can sit just past `period.to`, by
+design; otherwise → `period.to`); each value is pinned by `price_refs`/`fx_refs` (C4), and a missing
+snapshot omits `fiat` + raises `PRICE_MISSING` (never interpolated).
 
 **`analytics_gas`** — fee spend.
 

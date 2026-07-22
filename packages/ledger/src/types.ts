@@ -78,6 +78,13 @@ export interface Period {
 
 export type FlowDirection = 'in' | 'out' | 'both';
 
+/**
+ * Flow grouping dimensions. `token` is always applied — raw inflow/outflow are
+ * base-unit sums, meaningful only per token (ADR-004) — so the others *subdivide*
+ * a token's flow rather than replace it.
+ */
+export type FlowGroupBy = 'token' | 'counterparty' | 'day' | 'month';
+
 export interface FlowsParams {
   scope: LedgerScope;
   period: Period;
@@ -85,6 +92,7 @@ export interface FlowsParams {
   direction?: FlowDirection; // default 'both'
   includeUnverified?: boolean; // default false
   restrictTokenIds?: number[]; // internal: narrow to a token-id set (stablecoins)
+  groupBy?: FlowGroupBy[]; // default ['token']; 'token' is always applied
 }
 
 export interface StablecoinParams {
