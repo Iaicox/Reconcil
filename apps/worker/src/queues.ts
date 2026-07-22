@@ -11,6 +11,11 @@ import type { JobsOptions } from 'bullmq';
 
 export const TAIL_QUEUE = 'tail';
 export const BACKFILL_QUEUE = 'backfill';
+export const PRICES_QUEUE = 'prices';
+
+// Prices are daily UTC closes (ADR-007) — one fill tick per day is enough; it
+// backfills every not-yet-priced (token, date) each run, so a missed tick self-heals.
+export const PRICE_TICK_EVERY_MS = 24 * 60 * 60 * 1000;
 
 // BullMQ requires maxRetriesPerRequest: null on the connection it owns.
 export function makeConnection(url: string): Redis {

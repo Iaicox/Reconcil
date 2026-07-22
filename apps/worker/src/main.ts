@@ -11,9 +11,13 @@ import { createDb, runMigrations } from '@pet-crypto/db';
 import {
   buildProviderBundle, realFetchJson, runBackfillPage, runTailTick, type ProcessorDeps,
 } from '@pet-crypto/ingestion';
+import {
+  buildPriceProviderBundle, realFetchJson as realPriceFetchJson, throttled, runPriceFill,
+} from '@pet-crypto/pricing';
 import { loadConfig } from './config.js';
 import {
-  BACKFILL_QUEUE, TAIL_QUEUE, backoffStrategy, jobOptions, makeConnection,
+  BACKFILL_QUEUE, PRICES_QUEUE, PRICE_TICK_EVERY_MS, TAIL_QUEUE,
+  backoffStrategy, jobOptions, makeConnection,
 } from './queues.js';
 
 const logger = createLogger({ name: 'worker' });
@@ -39,6 +43,19 @@ async function main(): Promise<void> {
 
   const backfillQueue = new Queue(BACKFILL_QUEUE, { connection });
   const tailQueue = new Queue(TAIL_QUEUE, { connection });
+  const pricesQueue = new Queue(PRICES_QUEUE, { connection });
+
+  // Prices (ADR-007): daily fill of every not-yet-priced (token, date) + ECB FX,
+  // idempotent so a re-run/missed tick self-heals. Throttled so a large first fill
+  // doesn't burst public price endpoints into 429s.
+  const priceBundle = buildPriceProviderBundle({
+    env: process.env, fetchJson: throttled(realPriceFetchJson(), 250),
+  });
+  const pricesWorker = new Worker(
+    PRICES_QUEUE,
+    async () => runPriceFill({ db, bundle: priceBundle, logger }),
+    { connection, concurrency: 1, settings: { backoffStrategy } },
+  );
 
   const backfillWorker = new Worker(
     BACKFILL_QUEUE,
@@ -66,10 +83,10 @@ async function main(): Promise<void> {
     { connection, concurrency: chains.length, settings: { backoffStrategy } },
   );
 
-  for (const q of [backfillQueue, tailQueue]) {
+  for (const q of [backfillQueue, tailQueue, pricesQueue]) {
     q.on('error', (err) => { logger.error('queue error', { queue: q.name, err: serializeError(err) }); });
   }
-  for (const w of [backfillWorker, tailWorker]) {
+  for (const w of [backfillWorker, tailWorker, pricesWorker]) {
     w.on('error', (err) => { logger.error('worker error', { queue: w.name, err: serializeError(err) }); });
     w.on('failed', (job, err) => { logger.error('job failed', { queue: w.name, jobId: job?.id, err: serializeError(err) }); });
   }
@@ -79,6 +96,8 @@ async function main(): Promise<void> {
     await tailQueue.add('tick', { chainId: chain.chainId },
       { ...jobOptions, repeat: { every: chain.pollIntervalSec * 1000 }, jobId: `tail-${String(chain.chainId)}` });
   }
+  // Daily price fill (ADR-007) — one repeatable tick, idempotent per run.
+  await pricesQueue.add('fill', {}, { ...jobOptions, repeat: { every: PRICE_TICK_EVERY_MS }, jobId: 'prices-fill' });
   logger.info('worker up', { chains: chains.map((c) => c.chainId) });
 
   let shuttingDown = false;
@@ -93,8 +112,10 @@ async function main(): Promise<void> {
     try {
       await backfillWorker.close();
       await tailWorker.close();
+      await pricesWorker.close();
       await backfillQueue.close();
       await tailQueue.close();
+      await pricesQueue.close();
       await connection.quit();
       await pool.end();
       process.exit(0);

@@ -24,7 +24,12 @@ export function formatUnits(raw: bigint, decimals: number): DecimalString {
   const digits = (neg ? -raw : raw).toString().padStart(decimals + 1, '0');
   const cut = digits.length - decimals;
   const intPart = digits.slice(0, cut);
-  const frac = digits.slice(cut).replace(/0+$/, '');
+  // Strip trailing zeros without a regex: `/0+$/` is a polynomial-ReDoS shape
+  // (harmless on bounded uint256 input, but a linear trim avoids the whole class).
+  const fracRaw = digits.slice(cut);
+  let end = fracRaw.length;
+  while (end > 0 && fracRaw.charCodeAt(end - 1) === 48) end -= 1; // 48 = '0'
+  const frac = fracRaw.slice(0, end);
   const body = frac === '' ? intPart : `${intPart}.${frac}`;
   return (neg && body !== '0' ? `-${body}` : body) as DecimalString;
 }
