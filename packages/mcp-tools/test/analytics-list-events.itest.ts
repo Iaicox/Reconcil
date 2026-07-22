@@ -78,8 +78,10 @@ describe('analytics_list_events — listing, filters, pagination, citations', ()
     const def = await analyticsListEvents(ctx(), {});
     expect(def.data.total_count).toBe(5); // SPAM excluded
     expect(def.data.events.some((e) => e.token.symbol === 'SPAM')).toBe(false);
+    expect(def.warnings.map((w) => w.code)).toContain('UNVERIFIED_EXCLUDED'); // parity with balances/flows
     const all = await analyticsListEvents(ctx(), { include_unverified: true });
     expect(all.data.total_count).toBe(6);
+    expect(all.warnings.map((w) => w.code)).not.toContain('UNVERIFIED_EXCLUDED');
   });
 
   it('labels direction in/out/internal relative to the scope', async () => {

@@ -74,6 +74,10 @@ export async function analyticsListEvents(
   const warnings: Warning[] = [];
   const { coverageRefs, coverageWarnings } = mapCoverage(coverage);
   warnings.push(...coverageWarnings);
+  if (!(input.include_unverified ?? false)) {
+    // parity with analytics_balances/flows: the default spam filter hides unverified tokens
+    warnings.push({ code: 'UNVERIFIED_EXCLUDED', message: 'unverified (spam-suspected) tokens were excluded; pass include_unverified to include them' });
+  }
 
   // --- citations: the returned page IS the backing set (C1/C3). Wrap the page
   // as one backing; selectRefs inlines it (≤ cap) or summarizes with a drilldown

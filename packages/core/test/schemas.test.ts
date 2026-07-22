@@ -70,5 +70,8 @@ describe('contract schemas', () => {
     expect(analyticsListEventsInput.safeParse({ kinds: ['erc20_transfer', 'gas_fee'] }).success).toBe(true);
     expect(analyticsListEventsInput.safeParse({ kinds: ['bogus'] }).success).toBe(false);
     expect(analyticsListEventsInput.safeParse({ bogus: 1 }).success).toBe(false);
+    // min_amount is non-negative at the boundary (mirrors the ledger guard)
+    expect(analyticsListEventsInput.safeParse({ min_amount: '5' }).success).toBe(true);
+    expect(analyticsListEventsInput.safeParse({ min_amount: '-5' }).success).toBe(false);
   });
 });

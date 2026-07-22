@@ -282,6 +282,15 @@ in the system resolves to a call of this tool with equivalent filters (C3). `tot
 full count over the filter, returned on the **first page only** (when `cursor` is absent);
 paginating callers cache it, so cursor-driven pages omit it rather than re-scanning on every
 `next_cursor`. Citations are unaffected — a drilldown resolves to a `list_events` call regardless.
+Because `list_events` is itself the enumeration primitive, when a single page's backing exceeds
+the ref cap the `event_ref_summary.drilldown` points back at this same tool: it returns the first
+page (`event_ref_summary.count` = full `total_count`), and **full enumeration follows
+`next_cursor`** — the drilldown is a paginating call, not a single-response dump.
+
+The wire field `amount_raw` carries the token's **base units** (uint256 as a decimal string) — a
+trusted numeric, distinct from the hostile `*_raw` *string* fields (symbol/name/memo, provider
+`raw` JSONB) that the sanitization red line keeps server-side (§7, ADR-011). It never carries
+attacker-controlled text.
 
 ### 6.2 `ledger_*` — coverage, tracking, audit
 

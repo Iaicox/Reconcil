@@ -16,8 +16,10 @@ Defense in depth, four layers:
 
 1. **Scrub at the source.** A pure sanitizer in `packages/core` (NFC normalize → strip
    controls/zero-width/bidi overrides → allowlist charset → collapse whitespace → length
-   caps → `(unnamed)` placeholder). Raw values (`symbol_raw`, `name_raw`, `raw JSONB`,
-   import payloads) are stored for audit but **never serialized into tool responses**.
+   caps → `(unnamed)` placeholder). Raw hostile **string** values (`symbol_raw`, `name_raw`,
+   `raw JSONB`, import payloads) are stored for audit but **never serialized into tool
+   responses**. (This is about attacker-controlled text; the trusted numeric `amount_raw`
+   base-unit field is not a hostile string and does cross the wire — see 02-mcp-contracts §6.1.)
 2. **Structural isolation.** Sanitized-but-untrusted values appear only under `untrusted`
    keys (contract clause C6); every tool description states that such values are data,
    never instructions; the CLI agent's system prompt repeats it.

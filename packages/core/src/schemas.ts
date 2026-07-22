@@ -10,6 +10,9 @@ import { z } from 'zod';
 /** Display/fiat money on the wire: a decimal string, never a JSON number (ADR-004). */
 export const decimalString = z.string().regex(/^-?\d+(\.\d+)?$/, 'must be a decimal string');
 
+/** A decimal string that cannot be negative — thresholds/amounts (e.g. `min_amount`). */
+export const nonNegativeDecimalString = z.string().regex(/^\d+(\.\d+)?$/, 'must be a non-negative decimal string');
+
 // ---- shared inputs (§5) -----------------------------------------------------
 
 export const scopeSchema = z
@@ -263,7 +266,7 @@ export const analyticsListEventsInput = z
     tokens: z.array(tokenFilterSchema).optional(),
     counterparty_address: z.string().optional(),
     kinds: z.array(eventKindSchema).optional(),
-    min_amount: decimalString.optional(), // display units
+    min_amount: nonNegativeDecimalString.optional(), // display units; non-negative (mirrors the ledger guard)
     include_unverified: z.boolean().optional(),
     cursor: z.string().optional(),
     limit: z.number().int().min(1).max(200).optional(),

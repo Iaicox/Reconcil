@@ -24,6 +24,7 @@ import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { collectPricingRefs } from '../pricing-refs.js';
 import { repDate } from '../rep-date.js';
 import { selectRefs } from '../refs.js';
 import { resolveScope } from '../scope.js';
@@ -82,9 +83,8 @@ export async function analyticsStablecoinMovements(
       (i % 2 === 0 ? inflows : outflows).push(v.fiatValue);
     });
     pegSubtotals.push({ peg_currency: peg, inflow: sumDecimals(inflows), outflow: sumDecimals(outflows) });
-    for (const p of valued.priceRefs) priceRefs.push({ snapshot_id: p.snapshotId, token: p.token, date: p.date, currency: p.currency, source: p.source, price: p.price });
-    for (const f of valued.fxRefs) fxRefs.push({ fx_rate_id: f.fxRateId, date: f.date, base: f.base, quote: f.quote, rate: f.rate, source: f.source });
-    for (const w of valued.warnings) warnings.push({ code: w.code, message: w.message, ...(w.context ? { context: w.context } : {}) });
+    const c = collectPricingRefs(valued);
+    priceRefs.push(...c.priceRefs); fxRefs.push(...c.fxRefs); warnings.push(...c.warnings);
   }
 
   // --- data (flows shape; row-level fiat omitted) ---------------------------

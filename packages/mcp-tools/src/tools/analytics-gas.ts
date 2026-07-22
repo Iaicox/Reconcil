@@ -21,6 +21,7 @@ import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { collectPricingRefs, toWireValuation } from '../pricing-refs.js';
 import { repDate } from '../rep-date.js';
 import { selectRefs } from '../refs.js';
 import { resolveScope } from '../scope.js';
@@ -63,13 +64,10 @@ export async function analyticsGas(
       pegCurrency: r.token.pegCurrency,
       symbol: r.token.symbolDisplay,
     }));
-    const v = input.valuation;
-    const valuation = v.policy !== undefined ? { currency: v.currency, policy: v.policy } : { currency: v.currency };
-    const valued = await valueQuantities(ctx.db, needs, valuation);
+    const valued = await valueQuantities(ctx.db, needs, toWireValuation(input.valuation));
     fiatByRow = gasRows.map((_, i) => valued.values[i]?.fiatValue);
-    for (const p of valued.priceRefs) priceRefs.push({ snapshot_id: p.snapshotId, token: p.token, date: p.date, currency: p.currency, source: p.source, price: p.price });
-    for (const f of valued.fxRefs) fxRefs.push({ fx_rate_id: f.fxRateId, date: f.date, base: f.base, quote: f.quote, rate: f.rate, source: f.source });
-    for (const w of valued.warnings) warnings.push({ code: w.code, message: w.message, ...(w.context ? { context: w.context } : {}) });
+    const c = collectPricingRefs(valued);
+    priceRefs.push(...c.priceRefs); fxRefs.push(...c.fxRefs); warnings.push(...c.warnings);
   }
 
   // --- data -----------------------------------------------------------------
@@ -104,12 +102,18 @@ export async function analyticsGas(
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });
 }
 
-/** Backing drilldown → analytics_list_events restricted to gas_fee events. */
+/**
+ * Backing drilldown → analytics_list_events restricted to gas_fee events.
+ * `include_unverified: true` because computeGas applies no verified filter (the
+ * native fee token is always shown); without it the drilldown's default spam
+ * filter could under-enumerate a (hypothetical) unverified native.
+ */
 function drilldownArgs(input: AnalyticsGasInput): Record<string, unknown> {
   return {
     ...(input.scope !== undefined ? { scope: input.scope } : {}),
     ...(input.chain_ids ? { chain_ids: input.chain_ids } : {}),
     period: input.period,
     kinds: ['gas_fee'],
+    include_unverified: true,
   };
 }
