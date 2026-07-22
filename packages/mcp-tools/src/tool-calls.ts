@@ -14,6 +14,7 @@ import { ulid } from './ulid.js';
 
 /** Deterministic stringify (sorted keys, undefined dropped) for a stable digest. */
 export function canonicalStringify(v: unknown): string {
+  if (typeof v === 'bigint') return JSON.stringify(v.toString()); // JSON.stringify(bigint) throws
   if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
   if (Array.isArray(v)) return `[${v.map(canonicalStringify).join(',')}]`;
   const obj = v as Record<string, unknown>;

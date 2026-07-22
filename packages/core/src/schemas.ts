@@ -90,6 +90,7 @@ export const tokenViewSchema = z.object({
   symbol: z.string(), // sanitized *_display
   decimals: z.number(),
   is_stablecoin: z.boolean(),
+  peg_currency: z.string().optional(), // present when is_stablecoin
   verified: z.boolean(),
   untrusted: z.object({ symbol_raw_sanitized: z.string() }).optional(), // only when symbol is empty
 });
@@ -99,7 +100,7 @@ export const analyticsBalancesInput = z
   .object({
     scope: scopeSchema.optional(),
     chain_ids: z.array(z.number()).optional(),
-    as_of: z.string().optional(), // ISO date (UTC)
+    as_of: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'as_of must be an ISO date (YYYY-MM-DD)').optional(),
     include_unverified: z.boolean().optional(),
     valuation: valuationSchema.optional(),
   })

@@ -38,11 +38,15 @@ export async function analyticsBalances(
   const { addresses } = await resolveScope(ctx, input.scope);
   const includeUnverified = input.include_unverified ?? false;
 
-  const balances = await computeBalances(ctx.db, {
-    scope: { addresses, ...(input.chain_ids ? { chainIds: input.chain_ids } : {}) },
-    ...(input.as_of ? { asOf: input.as_of } : {}),
-    includeUnverified,
-  });
+  // computeBalances and getLedgerStatus (coverage, C5) are independent — one round-trip wave.
+  const [balances, coverage] = await Promise.all([
+    computeBalances(ctx.db, {
+      scope: { addresses, ...(input.chain_ids ? { chainIds: input.chain_ids } : {}) },
+      ...(input.as_of ? { asOf: input.as_of } : {}),
+      includeUnverified,
+    }),
+    getLedgerStatus(ctx.db, { addresses, ...(input.chain_ids ? { chainIds: input.chain_ids } : {}) }),
+  ]);
 
   const dateByChain = new Map<number, string>();
   for (const a of balances.asOf) dateByChain.set(a.chainId, a.date);
@@ -91,7 +95,9 @@ export async function analyticsBalances(
   let totals: { currency: string; value: string }[] | undefined;
   if (input.valuation) {
     const fiats = outBalances.map((b) => b.fiat_value).filter((x): x is string => x !== undefined);
-    totals = [{ currency: input.valuation.currency, value: sumDecimals(fiats) }];
+    // Omit totals when nothing priced — a '0' total would misread as "zero value"
+    // rather than "unpriced" (the PRICE_MISSING warning already carries that).
+    if (fiats.length > 0) totals = [{ currency: input.valuation.currency, value: sumDecimals(fiats) }];
   }
 
   const asOfEffective = {
@@ -102,7 +108,6 @@ export async function analyticsBalances(
   const data: AnalyticsBalancesOutput = { as_of_effective: asOfEffective, balances: outBalances, ...(totals ? { totals } : {}) };
 
   // --- coverage + warnings (C5) --------------------------------------------
-  const coverage = await getLedgerStatus(ctx.db, { addresses, ...(input.chain_ids ? { chainIds: input.chain_ids } : {}) });
   const { coverageRefs, coverageWarnings } = mapCoverage(coverage);
   warnings.push(...coverageWarnings);
   if (!includeUnverified) {
@@ -128,21 +133,27 @@ export async function analyticsBalances(
           },
         };
 
-  // --- persist BEFORE responding (C2), then validate the contract shape -----
-  const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
-  });
+  // --- validate the contract shape, THEN persist (C2), then respond --------
+  // Validate first so a bug-produced bad result can't leave an orphan tool_calls
+  // row it never returns; C2 still holds — persist precedes the response.
   try {
     analyticsBalancesOutput.parse(data);
   } catch (err) {
     throw new ToolError('INTERNAL', `analytics_balances produced an output that violates its contract: ${String(err)}`);
   }
+  const toolCallId = await persistToolCall(ctx, {
+    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
+  });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });
 }
 
-// Only sanitized `*_display` reaches responses (C6). ledger already surfaces the
-// sanitized symbol; the raw value never leaves the server.
+// Only sanitized `*_display` reaches responses (C6); the raw value never leaves the server.
+// FOLLOW-UP (cross-package): when symbolDisplay is empty the contract wants
+// `untrusted.symbol_raw_sanitized` (§6.1) and a SANITIZED_HEAVY warning — both need
+// TokenMeta to carry the sanitized RAW symbol + its `heavy` flag, which ledger/core
+// don't surface yet (needs a persisted heavy flag + a raw-fallback on the token
+// registry). Until then a nameless token shows symbol ''.
 function toTokenView(t: TokenMeta): TokenView {
   return {
     chain_id: t.chainId,
@@ -150,6 +161,7 @@ function toTokenView(t: TokenMeta): TokenView {
     symbol: t.symbolDisplay ?? '',
     decimals: t.decimals,
     is_stablecoin: t.isStablecoin,
+    ...(t.pegCurrency !== null ? { peg_currency: t.pegCurrency } : {}),
     verified: t.verified,
   };
 }

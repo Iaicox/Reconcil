@@ -61,17 +61,26 @@ async function seedEvent(tokenId: number, amount: bigint): Promise<void> {
     txFrom: EXT, txTo: OWNED, provider: 'fixture', raw: {},
   });
 }
-async function seedCheckpoint(address: string, stream: string, status: string): Promise<void> {
+async function seedCheckpoint(
+  address: string, stream: string, status: string,
+  opts: { anchorBlock?: number; updatedAt?: string } = {},
+): Promise<void> {
   await pool.query(
-    `INSERT INTO ingestion_checkpoints (chain_id, address, stream, status, last_processed_block, updated_at)
-     VALUES (1, $1, $2, $3, 100, now())`,
-    [address, stream, status],
+    `INSERT INTO ingestion_checkpoints (chain_id, address, stream, status, last_processed_block, anchor_block, updated_at)
+     VALUES (1, $1, $2, $3, 100, $4, $5)`,
+    [address, stream, status, opts.anchorBlock ?? null, opts.updatedAt ?? new Date().toISOString()],
   );
 }
 async function seedSnapshot(tokenId: number, price: string): Promise<void> {
   await pool.query(
     `INSERT INTO price_snapshots (token_id, price_date, currency, price, source) VALUES ($1,$2,'USD',$3,'defillama')`,
     [tokenId, DATE, price],
+  );
+}
+async function seedFx(rate: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO fx_rates (rate_date, base_currency, quote_currency, rate, source) VALUES ($1,'EUR','USD',$2,'ecb')`,
+    [DATE, rate],
   );
 }
 
@@ -150,5 +159,51 @@ describe('analytics_balances — envelope, citations, warnings, tenancy', () => 
   it('rejects malformed input with INVALID_INPUT', async () => {
     await seedWorld();
     await expect(analyticsBalances(ctx(), { bogus: 1 })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    // as_of must be an ISO date, not an arbitrary string
+    await expect(analyticsBalances(ctx(), { as_of: 'yesterday' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  it('summarizes backing as event_ref_summary + drilldown past the ref cap (C3)', async () => {
+    await seedTenant(TENANT, 'acme');
+    await seedWallet('00000000-0000-0000-0000-0000000000a1', TENANT, OWNED);
+    await seedToken(1, { decimals: 18, symbol: 'ETH', address: null });
+    for (let i = 0; i < 65; i += 1) await seedEvent(1, 1_000000000000000000n); // 65 > REF_CAP (64)
+    await seedCheckpoint(OWNED, 'native', 'live');
+
+    const env = await analyticsBalances(ctx(), {});
+    expect(env.citations.event_refs).toBeUndefined();
+    expect(env.citations.event_ref_summary?.count).toBeGreaterThan(64);
+    expect(env.citations.event_ref_summary?.sample.length).toBeLessThanOrEqual(10);
+    expect(env.citations.event_ref_summary?.drilldown.tool).toBe('analytics_list_events');
+  });
+
+  it('surfaces coverage warnings: incomplete, anchored, stale (C5)', async () => {
+    await seedTenant(TENANT, 'acme');
+    await seedWallet('00000000-0000-0000-0000-0000000000a1', TENANT, OWNED);
+    await seedToken(1, { decimals: 18, symbol: 'ETH', address: null });
+    await seedEvent(1, 1_000000000000000000n);
+    const stale = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    await seedCheckpoint(OWNED, 'native', 'backfilling', { anchorBlock: 10, updatedAt: stale });
+
+    const env = await analyticsBalances(ctx(), {});
+    expect(env.warnings.map((w) => w.code)).toEqual(
+      expect.arrayContaining(['COVERAGE_INCOMPLETE', 'ANCHORED_BASELINE', 'DATA_STALE']),
+    );
+  });
+
+  it('values in EUR via the ECB rate with fx_refs and an explicit as_of', async () => {
+    await seedTenant(TENANT, 'acme');
+    await seedWallet('00000000-0000-0000-0000-0000000000a1', TENANT, OWNED);
+    await seedToken(1, { decimals: 18, symbol: 'ETH', address: null });
+    await seedEvent(1, 3_000000000000000000n);
+    await seedCheckpoint(OWNED, 'native', 'live');
+    await seedSnapshot(1, '2000'); // USD price; EUR valuation needs FX
+    await seedFx('1.08');
+
+    const env = await analyticsBalances(ctx(), { valuation: { currency: 'EUR' }, as_of: DATE });
+    const eth = env.data.balances.find((b) => b.token.symbol === 'ETH');
+    expect(eth?.fiat_value?.startsWith('5555.55')).toBe(true); // 3 × 2000 ÷ 1.08
+    expect(env.citations.fx_refs).toHaveLength(1);
+    expect(env.data.totals).toEqual([{ currency: 'EUR', value: eth?.fiat_value }]);
   });
 });
