@@ -47,8 +47,8 @@ jobs:
       - run: bash scripts/check-schema-parity.sh
 
   # Testcontainers spins its own Postgres per suite (needs only Docker, present on
-  # ubuntu-latest). Runs the db + ingestion + ledger *.itest.ts suites that the
-  # hermetic `test` job excludes.
+  # ubuntu-latest). Runs the db + ingestion + ledger + pricing *.itest.ts suites
+  # that the hermetic `test` job excludes.
   integration:
     runs-on: ubuntu-latest
     steps:
@@ -63,3 +63,4 @@ jobs:
       - run: pnpm --filter @pet-crypto/db test:integration
       - run: pnpm --filter @pet-crypto/ingestion test:integration
       - run: pnpm --filter @pet-crypto/ledger test:integration
+      - run: pnpm --filter @pet-crypto/pricing test:integration

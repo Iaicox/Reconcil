@@ -26,6 +26,11 @@ Both raw and scaled exist, each exactly once:
   (`RawAmount`, `DecimalString`); ESLint forbids arithmetic on money via `number`.
 - **Fiat: unconstrained NUMERIC**, full precision internally; rounding (half-up, 2dp)
   only at export boundaries, with a rounding-residue line guaranteeing balanced journals.
+- **The decimal library is [decimal.js](https://mikemcl.github.io/decimal.js/)**, chosen
+  with the pricing slice where division first appears (fiat = qty × price × fx). It is a
+  private clone at `precision: 40, rounding: ROUND_HALF_UP` (`packages/pricing/src/decimal.ts`),
+  so global config elsewhere can't perturb money math; `core/money.ts` stays lib-free
+  (bigint↔string scaling is exact/terminating). Division/FX is confined to pricing (ADR-007).
 
 ## Alternatives considered
 

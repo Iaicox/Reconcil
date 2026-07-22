@@ -2,7 +2,7 @@
   "name": "@pet-crypto/pricing",
   "version": "0.0.0",
   "private": true,
-  "description": "DefiLlama/CoinGecko/ECB adapters, daily snapshot service, pinned snapshot IDs.",
+  "description": "DefiLlama/CoinGecko/ECB adapters, daily snapshot service, valuation with pinned snapshot IDs.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -14,15 +14,25 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test scripts",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "capture": "tsx scripts/capture-prices.ts"
   },
   "dependencies": {
     "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*"
+    "@pet-crypto/db": "workspace:*",
+    "decimal.js": "catalog:",
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^11.0.0",
+    "@types/node": "catalog:",
+    "@types/pg": "^8.20.0",
     "eslint": "catalog:",
+    "fast-check": "catalog:",
+    "pg": "^8.22.0",
+    "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

@@ -9,6 +9,7 @@ const schema = z.object({
   REDIS_URL: z.string().min(1),
   ETHERSCAN_API_KEY: z.string().min(1).optional(),
   BASE_RPC_URL: z.string().min(1).optional(),
+  COINGECKO_API_KEY: z.string().min(1).optional(), // pricing secondary source; DefiLlama/ECB keyless
 });
 
 export type WorkerConfig = z.infer<typeof schema>;

@@ -21,7 +21,8 @@ No network in any test: providers are replayed from recorded fixtures.
 ```
 packages/evals/fixtures/
 ├── providers/                 # recorded provider HTTP responses (scrubbed), replayed
-│   └── etherscan-v2/…json     # by a FixtureProvider implementing ChainDataProvider
+│   ├── etherscan-v2/…json     # by a FixtureProvider implementing ChainDataProvider
+│   └── prices/…json           # DefiLlama/CoinGecko/ECB closes (pricing capture, ADR-007)
 ├── wallets/
 │   ├── freelancer.expect.json # hand-verified expectations: balances per date, flows,
 │   ├── smb-stables.expect.json#   gas totals, counterparty turnover
