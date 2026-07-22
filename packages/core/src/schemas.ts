@@ -174,3 +174,122 @@ export const analyticsFlowsOutput = z.object({
   internal_transfers: z.array(flowRowSchema),
 });
 export type AnalyticsFlowsOutput = z.infer<typeof analyticsFlowsOutput>;
+
+// ---- analytics_gas (§6.1) ---------------------------------------------------
+
+/**
+ * Gas grouping. `chain` is implicit (the native fee token is per-chain, so rows
+ * are always per-chain exactly as flow rows are always per-token, ADR-004);
+ * `wallet`/`month` subdivide. See 02-mcp-contracts §6.1.
+ */
+export const gasGroupBySchema = z.enum(['wallet', 'chain', 'month']);
+export type GasGroupBy = z.infer<typeof gasGroupBySchema>;
+
+export const analyticsGasInput = z
+  .object({
+    scope: scopeSchema.optional(),
+    period: periodSchema,
+    chain_ids: z.array(z.number()).optional(),
+    group_by: z.array(gasGroupBySchema).optional(),
+    valuation: valuationSchema.optional(),
+  })
+  .strict();
+export type AnalyticsGasInput = z.infer<typeof analyticsGasInput>;
+
+/** One gas bucket. `group` always carries `chain`; `wallet`/`month` when grouped. */
+export const gasRowSchema = z.object({
+  group: z.record(z.string(), z.string()),
+  native_amount: decimalString,
+  tx_count: z.number(),
+  fiat_value: decimalString.optional(),
+});
+export type GasRowView = z.infer<typeof gasRowSchema>;
+
+export const analyticsGasOutput = z.object({ rows: z.array(gasRowSchema) });
+export type AnalyticsGasOutput = z.infer<typeof analyticsGasOutput>;
+
+// ---- analytics_stablecoin_movements (§6.1) ----------------------------------
+
+/** Stablecoin flow grouping (no `day` — accountant question is monthly). */
+export const stablecoinGroupBySchema = z.enum(['token', 'counterparty', 'month']);
+export type StablecoinGroupBy = z.infer<typeof stablecoinGroupBySchema>;
+
+export const analyticsStablecoinInput = z
+  .object({
+    scope: scopeSchema.optional(),
+    period: periodSchema,
+    peg_currency: z.enum(['USD', 'EUR']).optional(),
+    group_by: z.array(stablecoinGroupBySchema).optional(),
+  })
+  .strict();
+export type AnalyticsStablecoinInput = z.infer<typeof analyticsStablecoinInput>;
+
+/**
+ * Per-peg subtotal: face-value fiat sums over a peg's stablecoins, computed under
+ * peg policy (each value pinned by a synthetic `source='peg'` price_ref, C4).
+ * `inflow`/`outflow` are in `peg_currency`.
+ */
+export const pegSubtotalSchema = z.object({
+  peg_currency: z.string(),
+  inflow: decimalString,
+  outflow: decimalString,
+});
+export type PegSubtotal = z.infer<typeof pegSubtotalSchema>;
+
+export const analyticsStablecoinOutput = z.object({
+  rows: z.array(flowRowSchema),
+  internal_transfers: z.array(flowRowSchema),
+  peg_subtotals: z.array(pegSubtotalSchema),
+});
+export type AnalyticsStablecoinOutput = z.infer<typeof analyticsStablecoinOutput>;
+
+// ---- analytics_list_events (§6.1) -------------------------------------------
+
+export const eventKindSchema = z.enum(['native_transfer', 'erc20_transfer', 'gas_fee', 'opening_balance']);
+export type EventKindWire = z.infer<typeof eventKindSchema>;
+
+/** A resolved endpoint; `entity` present only once the address book labels it. */
+export const addressViewSchema = z.object({
+  address: z.string(),
+  entity: z.object({ entity_id: z.string(), name: z.string(), curated: z.boolean() }).optional(),
+});
+export type AddressView = z.infer<typeof addressViewSchema>;
+
+export const analyticsListEventsInput = z
+  .object({
+    scope: scopeSchema.optional(),
+    period: periodSchema.optional(),
+    chain_ids: z.array(z.number()).optional(),
+    tokens: z.array(tokenFilterSchema).optional(),
+    counterparty_address: z.string().optional(),
+    kinds: z.array(eventKindSchema).optional(),
+    min_amount: decimalString.optional(), // display units
+    include_unverified: z.boolean().optional(),
+    cursor: z.string().optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+export type AnalyticsListEventsInput = z.infer<typeof analyticsListEventsInput>;
+
+export const eventListItemSchema = z.object({
+  chain_id: z.number(),
+  tx_hash: z.string(),
+  log_index: z.number(),
+  kind: eventKindSchema,
+  block_number: z.number(),
+  block_time: z.string(),
+  token: tokenViewSchema,
+  amount: decimalString,
+  amount_raw: z.string(),
+  from: addressViewSchema,
+  to: addressViewSchema,
+  direction: z.enum(['in', 'out', 'internal']),
+});
+export type EventListItemView = z.infer<typeof eventListItemSchema>;
+
+export const analyticsListEventsOutput = z.object({
+  events: z.array(eventListItemSchema),
+  next_cursor: z.string().optional(),
+  total_count: z.number().optional(), // first page only (cursor absent)
+});
+export type AnalyticsListEventsOutput = z.infer<typeof analyticsListEventsOutput>;

@@ -25,6 +25,7 @@ import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { repDate } from '../rep-date.js';
 import { selectRefs } from '../refs.js';
 import { resolveScope } from '../scope.js';
 import { persistToolCall } from '../tool-calls.js';
@@ -128,19 +129,6 @@ export async function analyticsFlows(
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });
-}
-
-/** Representative valuation date for a row: day bucket → that day; month → month end; else period end. */
-function repDate(group: Record<string, string>, periodTo: string): string {
-  if (group.day !== undefined) return group.day;
-  if (group.month !== undefined) return lastDayOfMonth(group.month);
-  return periodTo;
-}
-
-function lastDayOfMonth(ym: string): string {
-  const [y, m] = ym.split('-').map(Number);
-  const day = new Date(Date.UTC(y!, m!, 0)).getUTCDate(); // day 0 of next month = last day of this
-  return `${ym}-${String(day).padStart(2, '0')}`;
 }
 
 async function resolveTokenIds(db: Db, t: { chain_id: number; address: string | null }): Promise<number[]> {

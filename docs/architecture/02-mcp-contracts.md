@@ -211,7 +211,13 @@ output: { rows: Array<{ group: Record<string, string>; native_amount: DecimalStr
                         tx_count: number; fiat_value?: DecimalString }> }
 ```
 
-Sums `gas_fee` events only — same fold, same citations as any other flow.
+Sums `gas_fee` events only — same fold, same citations as any other flow. `chain` is an
+**implicit grouping dimension** (like `token` in `analytics_flows`): the native fee token is
+per-chain, so raw sums are meaningful only per chain — every row is per-chain and `group_by`
+merely *subdivides* it (`wallet` = the payer, `month`). `group` therefore always carries
+`chain`; passing `'chain'` in `group_by` is a no-op. Fee `fiat_value` uses the same
+representative-date rule as flow rows (month bucket → month end, else `period.to`), pinned by
+`price_refs`/`fx_refs` (C4).
 
 **`analytics_counterparties`** — turnover per counterparty.
 
@@ -238,11 +244,19 @@ names (P1).
 ```ts
 input:  { scope?: Scope; period: Period; peg_currency?: 'USD' | 'EUR';
           group_by?: ('token' | 'counterparty' | 'month')[] }
-output: same shape as analytics_flows, plus per-peg subtotals
+output: { rows: FlowRow[]; internal_transfers: FlowRow[];      // analytics_flows shape
+          peg_subtotals: Array<{ peg_currency: string;         // 'USD' | 'EUR'
+                                 inflow: DecimalString; outflow: DecimalString }> }
 ```
 
-Sugar over `analytics_flows` (`is_stablecoin = true`); exists because it is the single
-most common accountant question and deserves a stable contract.
+Sugar over `analytics_flows` (`is_stablecoin = true`, verified only); exists because it is the
+single most common accountant question and deserves a stable contract. There is **no
+`valuation` input**: row-level `fiat` is omitted, and the value story is the `peg_subtotals` —
+face-value fiat sums per peg (`inflow`/`outflow` in `peg_currency`) over the **external** flows,
+computed under **peg policy** (a USD-pegged stablecoin is worth its face in USD). Each subtotal
+is therefore pinned by a synthetic `source='peg'` `price_ref` (C4); a missing peg snapshot omits
+that component and raises `PRICE_MISSING` (never interpolated). Self-transfers stay in
+`internal_transfers` and are excluded from subtotals (they are neither inflow nor outflow).
 
 **`analytics_list_events`** — paged event listing; the universal drilldown target.
 
