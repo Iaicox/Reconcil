@@ -250,6 +250,94 @@ describe('computeFlows / computeGas — semantics', () => {
   });
 });
 
+describe('computeFlows — group_by', () => {
+  const EXT2 = '0x0000000000000000000000000000000000000e02';
+  const YEAR: Period = { from: '2026-01-01', to: '2026-12-31' };
+  const JAN = new Date('2026-01-15T00:00:00Z');
+  const JUN = new Date('2026-06-15T00:00:00Z');
+
+  // A single token (ETH) across two months and two external counterparties:
+  //   Jan  EXT  → OWNED  100  (in,  cp EXT,  2026-01)
+  //   Jan  EXT2 → OWNED   40  (in,  cp EXT2, 2026-01)
+  //   Jun  OWNED→ EXT     30  (out, cp EXT,  2026-06)
+  // plus one internal Jan self-transfer OWNED→OWNED2 25 (never external flow).
+  async function seedGrouped(): Promise<void> {
+    const e = events();
+    e.push({ eventKind: 'native_transfer', tokenId: NATIVE.tokenId, amountRaw: 100n, fromAddr: EXT, toAddr: OWNED, blockTime: JAN });
+    e.push({ eventKind: 'native_transfer', tokenId: NATIVE.tokenId, amountRaw: 40n, fromAddr: EXT2, toAddr: OWNED, blockTime: JAN });
+    e.push({ eventKind: 'native_transfer', tokenId: NATIVE.tokenId, amountRaw: 30n, fromAddr: OWNED, toAddr: EXT, blockTime: JUN });
+    e.push({ eventKind: 'native_transfer', tokenId: NATIVE.tokenId, amountRaw: 25n, fromAddr: OWNED, toAddr: OWNED2, blockTime: JAN });
+    await seedWorld({ events: e.list, owned: [OWNED, OWNED2], external: [EXT, EXT2], tokens: [NATIVE], chainIds: [1] });
+  }
+
+  it('defaults to one row per token when group_by is omitted', async () => {
+    await seedGrouped();
+    const res = await computeFlows(db, { scope: { addresses: [OWNED, OWNED2] }, period: YEAR });
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0]).toMatchObject({ group: { token: 'ETH' }, inflowRaw: '140', outflowRaw: '30', netRaw: '110' });
+    expect(res.rows[0]?.backing.totalCount).toBe(3);
+  });
+
+  it('subdivides by month (token stays an implicit dimension)', async () => {
+    await seedGrouped();
+    const res = await computeFlows(db, { scope: { addresses: [OWNED, OWNED2] }, period: YEAR, groupBy: ['month'] });
+    const byMonth = new Map(res.rows.map((r) => [r.group.month, r]));
+    expect([...byMonth.keys()].sort()).toEqual(['2026-01', '2026-06']);
+    expect(byMonth.get('2026-01')).toMatchObject({ group: { token: 'ETH', month: '2026-01' }, inflowRaw: '140', outflowRaw: '0' });
+    expect(byMonth.get('2026-06')).toMatchObject({ group: { token: 'ETH', month: '2026-06' }, inflowRaw: '0', outflowRaw: '30' });
+    expect(byMonth.get('2026-01')?.backing.totalCount).toBe(2);
+    expect(byMonth.get('2026-06')?.backing.totalCount).toBe(1);
+  });
+
+  it('subdivides by counterparty (the not-in-scope endpoint)', async () => {
+    await seedGrouped();
+    const res = await computeFlows(db, { scope: { addresses: [OWNED, OWNED2] }, period: YEAR, groupBy: ['counterparty'] });
+    const byCp = new Map(res.rows.map((r) => [r.group.counterparty, r]));
+    expect([...byCp.keys()].sort()).toEqual([EXT, EXT2].sort());
+    expect(byCp.get(EXT)).toMatchObject({ inflowRaw: '100', outflowRaw: '30', netRaw: '70' });
+    expect(byCp.get(EXT2)).toMatchObject({ inflowRaw: '40', outflowRaw: '0' });
+  });
+
+  it('subdivides by (counterparty, month) composite and buckets backing per group', async () => {
+    await seedGrouped();
+    const res = await computeFlows(db, { scope: { addresses: [OWNED, OWNED2] }, period: YEAR, groupBy: ['counterparty', 'month'] });
+    const key = (r: { group: Record<string, string> }): string => `${r.group.counterparty}|${r.group.month}`;
+    const byKey = new Map(res.rows.map((r) => [key(r), r]));
+    expect(byKey.get(`${EXT}|2026-01`)).toMatchObject({ inflowRaw: '100', outflowRaw: '0' });
+    expect(byKey.get(`${EXT}|2026-06`)).toMatchObject({ inflowRaw: '0', outflowRaw: '30' });
+    expect(byKey.get(`${EXT2}|2026-01`)).toMatchObject({ inflowRaw: '40', outflowRaw: '0' });
+    for (const r of res.rows) expect(r.backing.totalCount).toBe(r.txCount);
+  });
+
+  it('applies grouping to internal self-transfers too', async () => {
+    await seedGrouped();
+    const res = await computeFlows(db, { scope: { addresses: [OWNED, OWNED2] }, period: YEAR, groupBy: ['month'] });
+    expect(res.internal).toHaveLength(1);
+    expect(res.internal[0]).toMatchObject({ group: { token: 'ETH', month: '2026-01' }, inflowRaw: '25' });
+  });
+
+  it('subdivides by day', async () => {
+    await seedGrouped(); // both Jan external events on 2026-01-15, the Jun one on 2026-06-15
+    const res = await computeFlows(db, { scope: { addresses: [OWNED, OWNED2] }, period: YEAR, groupBy: ['day'] });
+    const byDay = new Map(res.rows.map((r) => [r.group.day, r]));
+    expect([...byDay.keys()].sort()).toEqual(['2026-01-15', '2026-06-15']);
+    expect(byDay.get('2026-01-15')).toMatchObject({ group: { token: 'ETH', day: '2026-01-15' }, inflowRaw: '140', outflowRaw: '0' });
+    expect(byDay.get('2026-06-15')).toMatchObject({ group: { token: 'ETH', day: '2026-06-15' }, inflowRaw: '0', outflowRaw: '30' });
+  });
+
+  it('aligns backing to every group across the full 4-dim subset', async () => {
+    await seedGrouped();
+    const res = await computeFlows(db, { scope: { addresses: [OWNED, OWNED2] }, period: YEAR, groupBy: ['token', 'counterparty', 'day', 'month'] });
+    // Each external event is its own (token, cp, day, month) bucket → totalCount == txCount == 1.
+    expect(res.rows).toHaveLength(3);
+    for (const r of res.rows) expect(r.backing.totalCount).toBe(r.txCount);
+    const byKey = new Map(res.rows.map((r) => [`${r.group.counterparty}|${r.group.day}`, r]));
+    expect(byKey.get(`${EXT}|2026-01-15`)).toMatchObject({ inflowRaw: '100', outflowRaw: '0' });
+    expect(byKey.get(`${EXT2}|2026-01-15`)).toMatchObject({ inflowRaw: '40', outflowRaw: '0' });
+    expect(byKey.get(`${EXT}|2026-06-15`)).toMatchObject({ inflowRaw: '0', outflowRaw: '30' });
+  });
+});
+
 describe('listEvents — pagination and filters', () => {
   it('is page-boundary independent: limits {10,100,1000} yield the identical ordered set', async () => {
     const e = events();

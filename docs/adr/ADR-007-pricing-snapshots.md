@@ -54,6 +54,13 @@ date. Stablecoins pose a policy question: book at peg (1.0) or at market (±0.3%
   row per verified stablecoin per activity date, so even 1.0 cites a real, pinnable snapshot.
 - **The fill worklist comes from `chain_events`** (only what the ledger could value): a gap
   is a verified (token, date) with no market snapshot yet; `peg` rows don't satisfy it.
+- **Aggregate-flow valuation uses one representative date per row** (`analytics_flows`): a
+  `day` bucket values at that day, a `month` bucket at the month's last day, and an untimed
+  group at `period.to`. A period sum is valued once at that date (not per-event) — lossy but
+  reproducible and fully pinned; a per-event valuation is deferred (post-gate). For a **partial
+  final month** the representative date is still that month's last day, so the pinned snapshot may
+  sit just past `period.to` — deterministic by design (a month's valuation date does not depend on
+  where the query window happens to end), and surfaced as `PRICE_MISSING` if that snapshot is absent.
 
 ## Consequences
 

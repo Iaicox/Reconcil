@@ -8,24 +8,22 @@
  */
 import {
   analyticsBalancesInput, analyticsBalancesOutput,
-  type AnalyticsBalancesInput, type AnalyticsBalancesOutput, type CoverageRef,
-  type FxRef, type PriceRef, type TokenView, type Warning,
+  type AnalyticsBalancesInput, type AnalyticsBalancesOutput,
+  type FxRef, type PriceRef, type Warning,
 } from '@pet-crypto/core';
-import {
-  computeBalances, getLedgerStatus, type TokenMeta, type WalletCoverage,
-} from '@pet-crypto/ledger';
+import { computeBalances, getLedgerStatus } from '@pet-crypto/ledger';
 import { sumDecimals, valueQuantities, type ValueNeed } from '@pet-crypto/pricing';
 
 import type { ToolContext } from '../context.js';
-import { buildEnvelope, type EnvelopeParts, type ToolEnvelope } from '../envelope.js';
+import { mapCoverage } from '../coverage.js';
+import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { selectRefs } from '../refs.js';
 import { resolveScope } from '../scope.js';
+import { toTokenView } from '../token-view.js';
 import { persistToolCall } from '../tool-calls.js';
 
 export const TOOL_NAME = 'analytics_balances';
-const REF_CAP = 64;
-
-type WireEventRef = { chain_id: number; tx_hash: string; log_index: number };
 
 export async function analyticsBalances(
   ctx: ToolContext,
@@ -115,23 +113,10 @@ export async function analyticsBalances(
   }
 
   // --- citations: event refs / drilldown (C3) ------------------------------
-  const allRefs: WireEventRef[] = [];
-  let totalCount = 0;
-  for (const r of balances.rows) {
-    totalCount += r.backing.totalCount;
-    for (const e of r.backing.refs) allRefs.push({ chain_id: e.chainId, tx_hash: e.txHash, log_index: e.logIndex });
-  }
-  const deduped = dedupeRefs(allRefs);
-  const refsParts: Pick<EnvelopeParts, 'eventRefs' | 'eventRefSummary'> =
-    totalCount <= REF_CAP && deduped.length <= REF_CAP
-      ? { eventRefs: deduped }
-      : {
-          eventRefSummary: {
-            count: totalCount,
-            sample: deduped.slice(0, 10),
-            drilldown: { tool: 'analytics_list_events', args: drilldownArgs(input) },
-          },
-        };
+  const refsParts = selectRefs(
+    balances.rows.map((r) => r.backing),
+    { tool: 'analytics_list_events', args: drilldownArgs(input) },
+  );
 
   // --- validate the contract shape, THEN persist (C2), then respond --------
   // Validate first so a bug-produced bad result can't leave an orphan tool_calls
@@ -146,70 +131,6 @@ export async function analyticsBalances(
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });
-}
-
-// Only sanitized `*_display` reaches responses (C6); the raw value never leaves the server.
-// FOLLOW-UP (cross-package): when symbolDisplay is empty the contract wants
-// `untrusted.symbol_raw_sanitized` (§6.1) and a SANITIZED_HEAVY warning — both need
-// TokenMeta to carry the sanitized RAW symbol + its `heavy` flag, which ledger/core
-// don't surface yet (needs a persisted heavy flag + a raw-fallback on the token
-// registry). Until then a nameless token shows symbol ''.
-function toTokenView(t: TokenMeta): TokenView {
-  return {
-    chain_id: t.chainId,
-    address: t.address,
-    symbol: t.symbolDisplay ?? '',
-    decimals: t.decimals,
-    is_stablecoin: t.isStablecoin,
-    ...(t.pegCurrency !== null ? { peg_currency: t.pegCurrency } : {}),
-    verified: t.verified,
-  };
-}
-
-function mapCoverage(cov: WalletCoverage[]): { coverageRefs: CoverageRef[]; coverageWarnings: Warning[] } {
-  const refs: CoverageRef[] = [];
-  let incomplete = false;
-  let anchored = false;
-  let stale = false;
-  for (const w of cov) {
-    const status: CoverageRef['status'] = w.streams.some((s) => s.status === 'error')
-      ? 'error'
-      : w.streams.some((s) => s.status === 'backfilling')
-        ? 'backfilling'
-        : w.streams.some((s) => s.status === 'paused')
-          ? 'paused'
-          : 'live';
-    const anchorBlock = w.streams.map((s) => s.anchorBlock).find((b) => b !== undefined);
-    refs.push({
-      chain_id: w.chainId,
-      address: w.address,
-      streams: w.streams.map((s) => s.stream),
-      from_block: null,
-      to_block: Math.max(0, ...w.streams.map((s) => s.lastProcessedBlock)),
-      ...(anchorBlock !== undefined ? { anchor_block: anchorBlock } : {}),
-      status,
-    });
-    if (w.streams.some((s) => s.status !== 'live')) incomplete = true;
-    if (w.anchored) anchored = true;
-    if (w.streams.some((s) => s.stale)) stale = true;
-  }
-  const coverageWarnings: Warning[] = [];
-  if (incomplete) coverageWarnings.push({ code: 'COVERAGE_INCOMPLETE', message: 'a wallet/stream in scope is still backfilling or errored' });
-  if (anchored) coverageWarnings.push({ code: 'ANCHORED_BASELINE', message: 'balances rest on an opening_balance anchor, not full history' });
-  if (stale) coverageWarnings.push({ code: 'DATA_STALE', message: 'a checkpoint in scope is older than the freshness threshold' });
-  return { coverageRefs: refs, coverageWarnings };
-}
-
-function dedupeRefs(refs: WireEventRef[]): WireEventRef[] {
-  const seen = new Set<string>();
-  const out: WireEventRef[] = [];
-  for (const r of refs) {
-    const k = `${String(r.chain_id)}|${r.tx_hash}|${String(r.log_index)}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(r);
-  }
-  return out;
 }
 
 function drilldownArgs(input: AnalyticsBalancesInput): Record<string, unknown> {
