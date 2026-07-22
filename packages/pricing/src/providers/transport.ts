@@ -64,6 +64,17 @@ export function recordingTransport(inner: FetchJson, dir: string): FetchJson {
 
 const FETCH_TIMEOUT_MS = 30_000;
 
+/** Space requests by ≥ `ms` — public price endpoints (DefiLlama/CoinGecko/ECB) rate-limit bursts. */
+export function throttled(inner: FetchJson, ms: number): FetchJson {
+  let last = 0;
+  return async (url) => {
+    const wait = last + ms - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    last = Date.now();
+    return inner(url);
+  };
+}
+
 /** Production transport over global fetch (Node ≥ 22). Non-JSON bodies pass through as text. */
 export function realFetchJson(): FetchJson {
   return async (url) => {

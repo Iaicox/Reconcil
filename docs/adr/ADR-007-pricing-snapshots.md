@@ -40,10 +40,13 @@ date. Stablecoins pose a policy question: book at peg (1.0) or at market (±0.3%
 
 - **Decimal library: decimal.js** (ADR-004), a precision-40 half-up clone; full precision
   internally, rounding only at export. `fiat = qty × price × fx`.
-- **Source priority when several rows exist for a (token, date, currency):**
-  `manual > defillama > coingecko > peg`. A target-currency snapshot beats a USD one that
-  would need FX. Under `market` policy, `peg` rows are excluded; under `peg_for_stables`,
-  a verified stablecoin resolves to its `peg` row (price 1.0 in the peg currency).
+- **Source priority when several rows exist for a (token, date):** a `manual` correction is
+  **authoritative and outranks everything** — including a target-currency automated row that
+  would avoid FX (a human override is never silently discarded to save a conversion). Among
+  automated sources: a target-currency snapshot beats a USD one that would need FX, then
+  `defillama > coingecko`. Under `market` policy, `peg` rows are excluded; under
+  `peg_for_stables`, a verified stablecoin resolves to its `peg` row (price 1.0 in the peg
+  currency), FX-converted to the target if they differ.
 - **FX direction:** ECB publishes EUR-based rates (`rate` = USD per 1 EUR). USD→EUR
   divides by the rate, EUR→USD multiplies. The rate row for a date is the latest with
   `rate_date ≤ date`; a shift emits `FX_DATE_SHIFTED`.

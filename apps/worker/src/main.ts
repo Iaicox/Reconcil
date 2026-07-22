@@ -12,7 +12,7 @@ import {
   buildProviderBundle, realFetchJson, runBackfillPage, runTailTick, type ProcessorDeps,
 } from '@pet-crypto/ingestion';
 import {
-  buildPriceProviderBundle, realFetchJson as realPriceFetchJson, runPriceFill,
+  buildPriceProviderBundle, realFetchJson as realPriceFetchJson, throttled, runPriceFill,
 } from '@pet-crypto/pricing';
 import { loadConfig } from './config.js';
 import {
@@ -46,8 +46,11 @@ async function main(): Promise<void> {
   const pricesQueue = new Queue(PRICES_QUEUE, { connection });
 
   // Prices (ADR-007): daily fill of every not-yet-priced (token, date) + ECB FX,
-  // idempotent so a re-run/missed tick self-heals. Its own transport bundle.
-  const priceBundle = buildPriceProviderBundle({ env: process.env, fetchJson: realPriceFetchJson() });
+  // idempotent so a re-run/missed tick self-heals. Throttled so a large first fill
+  // doesn't burst public price endpoints into 429s.
+  const priceBundle = buildPriceProviderBundle({
+    env: process.env, fetchJson: throttled(realPriceFetchJson(), 250),
+  });
   const pricesWorker = new Worker(
     PRICES_QUEUE,
     async () => runPriceFill({ db, bundle: priceBundle, logger }),

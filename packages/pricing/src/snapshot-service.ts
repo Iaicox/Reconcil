@@ -23,30 +23,47 @@ export interface FxInsert {
   source: string; // 'ecb'
 }
 
+// Postgres caps a statement at 65535 bind params; at 5 params/row a first backfill
+// (multi-token, multi-year history) can overflow one INSERT. Chunk so it can't.
+// 1000 rows = 5000 params, well under the cap.
+const INSERT_CHUNK = 1000;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 /** Insert new price snapshots; returns the count actually inserted (conflicts skipped). */
 export async function upsertSnapshots(db: Db, rows: SnapshotInsert[]): Promise<number> {
-  if (rows.length === 0) return 0;
-  const inserted = await db
-    .insert(priceSnapshots)
-    .values(rows)
-    .onConflictDoNothing({
-      target: [priceSnapshots.tokenId, priceSnapshots.priceDate, priceSnapshots.currency, priceSnapshots.source],
-    })
-    .returning({ id: priceSnapshots.id });
-  return inserted.length;
+  let inserted = 0;
+  for (const batch of chunk(rows, INSERT_CHUNK)) {
+    const r = await db
+      .insert(priceSnapshots)
+      .values(batch)
+      .onConflictDoNothing({
+        target: [priceSnapshots.tokenId, priceSnapshots.priceDate, priceSnapshots.currency, priceSnapshots.source],
+      })
+      .returning({ id: priceSnapshots.id });
+    inserted += r.length;
+  }
+  return inserted;
 }
 
 /** Insert new ECB FX rows; returns the count actually inserted. */
 export async function upsertFxRates(db: Db, rows: FxInsert[]): Promise<number> {
-  if (rows.length === 0) return 0;
-  const inserted = await db
-    .insert(fxRates)
-    .values(rows)
-    .onConflictDoNothing({
-      target: [fxRates.rateDate, fxRates.baseCurrency, fxRates.quoteCurrency, fxRates.source],
-    })
-    .returning({ id: fxRates.id });
-  return inserted.length;
+  let inserted = 0;
+  for (const batch of chunk(rows, INSERT_CHUNK)) {
+    const r = await db
+      .insert(fxRates)
+      .values(batch)
+      .onConflictDoNothing({
+        target: [fxRates.rateDate, fxRates.baseCurrency, fxRates.quoteCurrency, fxRates.source],
+      })
+      .returning({ id: fxRates.id });
+    inserted += r.length;
+  }
+  return inserted;
 }
 
 /**

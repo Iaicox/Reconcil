@@ -102,6 +102,19 @@ describe('append-only upserts are idempotent', () => {
   });
 });
 
+describe('upsertSnapshots — batches larger than the 65535 bind-param cap', () => {
+  it('chunks a >13k-row insert instead of failing on the param limit', async () => {
+    await seedToken(1);
+    const rows = [];
+    const base = Date.UTC(2000, 0, 1);
+    for (let i = 0; i < 14000; i++) { // 14000 × 5 params = 70000 > 65535
+      const d = new Date(base + i * 86_400_000).toISOString().slice(0, 10);
+      rows.push({ tokenId: 1, priceDate: d, currency: 'USD', price: '1', source: 'defillama' });
+    }
+    expect(await upsertSnapshots(db, rows)).toBe(14000);
+  });
+});
+
 describe('materializePegSnapshots', () => {
   it('creates one peg row per stablecoin activity date, idempotently', async () => {
     await seedToken(1); // not a stablecoin → no peg row

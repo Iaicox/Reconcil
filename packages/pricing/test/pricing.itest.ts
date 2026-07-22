@@ -125,6 +125,21 @@ describe('valueQuantities — fiat with pinned refs (C4), warnings, dedup', () =
     expect(market.priceRefs[0]?.source).toBe('defillama');
   });
 
+  it('values an EUR-pegged stablecoin under peg policy across FX (target USD)', async () => {
+    await seedToken(7, { decimals: 6, isStablecoin: true, pegCurrency: 'EUR', symbol: 'EURC' });
+    const pegId = await seedSnapshot({ tokenId: 7, date: '2026-06-01', price: '1', source: 'peg', currency: 'EUR' });
+    await seedFx({ date: '2026-06-01', rate: '1.08' }); // 1 EUR = 1.08 USD
+
+    const res = await valueQuantities(
+      db, [need({ tokenId: 7, amount: ds('100'), isStablecoin: true, pegCurrency: 'EUR', symbol: 'EURC' })],
+      { currency: 'USD', policy: 'peg_for_stables' },
+    );
+    // 100 × 1 EUR (peg) × 1.08 = 108 USD
+    expect(res.values[0]?.fiatValue).toBe('108');
+    expect(res.priceRefs[0]).toMatchObject({ snapshotId: pegId, source: 'peg', currency: 'EUR' });
+    expect(res.fxRefs).toHaveLength(1);
+  });
+
   it('dedups refs and warnings across repeated (token, date) needs', async () => {
     await seedToken(1);
     await seedSnapshot({ tokenId: 1, date: '2026-06-01', price: '2000', source: 'defillama' });

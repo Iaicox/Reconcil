@@ -10,12 +10,18 @@ import { and, inArray } from 'drizzle-orm';
 
 import type { Currency, SnapshotRow, ValuationPolicy, ValueNeed } from './types.js';
 
-const SOURCE_RANK: Record<string, number> = { manual: 0, defillama: 1, coingecko: 2, peg: 3 };
+const SOURCE_RANK: Record<string, number> = { defillama: 0, coingecko: 1 };
 
-/** Preference key (lower wins): currency (target > USD > other), then source rank. */
+/**
+ * Preference key (lower wins). A `manual` correction is authoritative and outranks
+ * everything (even a target-currency automated row that would avoid FX). Among
+ * automated sources: currency (target > USD > other), then source. Peg rows are
+ * filtered out before this ranks anything.
+ */
 function marketPref(c: SnapshotRow, target: Currency): number {
+  if (c.source === 'manual') return 0;
   const cur = c.currency === target ? 0 : c.currency === 'USD' ? 1 : 2;
-  return cur * 10 + (SOURCE_RANK[c.source] ?? 9);
+  return 1 + cur * 10 + (SOURCE_RANK[c.source] ?? 9);
 }
 
 export function pickSnapshot(
@@ -48,6 +54,11 @@ export async function resolvePrices(
   const dates = [...new Set(needs.map((n) => n.date))];
   if (tokenIds.length === 0) return out;
 
+  // Target + USD (the FX pivot), plus each need's peg currency so a non-USD-pegged
+  // stablecoin's peg row (e.g. currency='EUR') survives the filter under peg policy.
+  const currencies = new Set<string>([opts.currency, 'USD']);
+  for (const n of needs) if (n.pegCurrency !== null) currencies.add(n.pegCurrency);
+
   const rows = await db
     .select({
       id: priceSnapshots.id, tokenId: priceSnapshots.tokenId, priceDate: priceSnapshots.priceDate,
@@ -57,7 +68,7 @@ export async function resolvePrices(
     .where(and(
       inArray(priceSnapshots.tokenId, tokenIds),
       inArray(priceSnapshots.priceDate, dates),
-      inArray(priceSnapshots.currency, [...new Set<string>([opts.currency, 'USD'])]),
+      inArray(priceSnapshots.currency, [...currencies]),
     ));
 
   const byKey = new Map<string, SnapshotRow[]>();

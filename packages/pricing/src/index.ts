@@ -22,7 +22,7 @@ export { priceGaps, fxDateRange, type PriceGap } from './gaps.js';
 export { runPriceFill, type FillDeps, type FillResult } from './fill.js';
 export { buildPriceProviderBundle, firstPrice } from './providers/provider-factory.js';
 export {
-  realFetchJson, fixtureTransport, recordingTransport, canonicalizeUrl, fixtureFileName,
+  realFetchJson, throttled, fixtureTransport, recordingTransport, canonicalizeUrl, fixtureFileName,
   type FetchJson,
 } from './providers/transport.js';
 export type { PriceBundle, PriceProvider, FxProvider, PriceQuery, DailyPrice, FxRatePoint } from './providers/types.js';

@@ -4,7 +4,7 @@
  * new snapshots + ECB FX — all idempotent, so a re-run is a no-op. Provider I/O
  * and retries are the worker's concern; this is the pure orchestration seam.
  */
-import type { Logger } from '@pet-crypto/core';
+import { serializeError, type Logger } from '@pet-crypto/core';
 import type { Db } from '@pet-crypto/db';
 
 import { fxDateRange, priceGaps } from './gaps.js';
@@ -35,26 +35,38 @@ export async function runPriceFill(deps: FillDeps): Promise<FillResult> {
   for (const g of gaps) {
     const chainSlug = CHAIN_SLUG[g.chainId];
     if (chainSlug === undefined) continue; // chain not price-mapped yet
-    const hit = await firstPrice(bundle.price, {
-      chainSlug, address: g.address, coingeckoId: g.coingeckoId, date: g.date,
-    });
-    if (hit !== null) {
-      snapshots.push({
-        tokenId: g.tokenId, priceDate: g.date, currency: hit.price.currency,
-        price: hit.price.price, source: hit.source,
+    // One job processes every gap, so a single fetch rejection (network/timeout)
+    // must not abort the batch or discard the snapshots already gathered — treat a
+    // throw like a miss and carry on (the gap simply re-tries next daily tick).
+    try {
+      const hit = await firstPrice(bundle.price, {
+        chainSlug, address: g.address, coingeckoId: g.coingeckoId, date: g.date,
       });
+      if (hit !== null) {
+        snapshots.push({
+          tokenId: g.tokenId, priceDate: g.date, currency: hit.price.currency,
+          price: hit.price.price, source: hit.source,
+        });
+      }
+    } catch (err) {
+      logger?.warn('price fetch failed; skipping gap', { tokenId: g.tokenId, date: g.date, err: serializeError(err) });
     }
   }
   const pricesInserted = await upsertSnapshots(db, snapshots);
 
+  // FX is independent of the price appends above; a failure here must not undo them.
   let fxInserted = 0;
-  const range = await fxDateRange(db);
-  if (range !== null) {
-    const points = await bundle.fx.rangeRates(range.from, range.to);
-    fxInserted = await upsertFxRates(
-      db,
-      points.map((p) => ({ rateDate: p.date, baseCurrency: 'EUR', quoteCurrency: p.quote, rate: p.rate, source: bundle.fx.source })),
-    );
+  try {
+    const range = await fxDateRange(db);
+    if (range !== null) {
+      const points = await bundle.fx.rangeRates(range.from, range.to);
+      fxInserted = await upsertFxRates(
+        db,
+        points.map((p) => ({ rateDate: p.date, baseCurrency: 'EUR', quoteCurrency: p.quote, rate: p.rate, source: bundle.fx.source })),
+      );
+    }
+  } catch (err) {
+    logger?.warn('FX fetch failed; prices already persisted', { err: serializeError(err) });
   }
 
   const result: FillResult = { gaps: gaps.length, pricesInserted, fxInserted, pegInserted };

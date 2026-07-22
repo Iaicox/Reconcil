@@ -43,4 +43,12 @@ describe('pickSnapshot — source priority, currency preference, peg policy', ()
     expect(pickSnapshot([], need(), 'USD', 'market')).toBeUndefined();
     expect(pickSnapshot([s(1, 'USD', 'peg')], need(), 'USD', 'market')).toBeUndefined();
   });
+
+  it('a manual correction outranks the currency preference (manual is authoritative)', () => {
+    // manual USD (would need FX) vs coingecko already in the target currency.
+    const c = [s(1, 'EUR', 'coingecko'), s(2, 'USD', 'manual')];
+    expect(pickSnapshot(c, need(), 'EUR', 'market')?.id).toBe(2);
+    // still beats a target-currency defillama row.
+    expect(pickSnapshot([s(3, 'EUR', 'defillama'), s(4, 'USD', 'manual')], need(), 'EUR', 'market')?.id).toBe(4);
+  });
 });

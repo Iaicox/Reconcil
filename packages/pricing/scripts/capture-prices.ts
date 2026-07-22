@@ -18,22 +18,11 @@ import { Pool } from 'pg';
 
 import { runPriceFill } from '../src/fill.js';
 import { buildPriceProviderBundle } from '../src/providers/provider-factory.js';
-import { recordingTransport, realFetchJson, type FetchJson } from '../src/providers/transport.js';
+import { recordingTransport, realFetchJson, throttled } from '../src/providers/transport.js';
 
 const FIXTURES_DIR = join(
   dirname(fileURLToPath(import.meta.url)), '..', '..', 'evals', 'fixtures', 'providers', 'prices',
 );
-
-/** Space requests so public endpoints (DefiLlama/CoinGecko/ECB) don't rate-limit. */
-function throttled(inner: FetchJson, ms: number): FetchJson {
-  let last = 0;
-  return async (url) => {
-    const wait = last + ms - Date.now();
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    last = Date.now();
-    return inner(url);
-  };
-}
 
 async function main(): Promise<void> {
   const url = process.env['DATABASE_URL'];

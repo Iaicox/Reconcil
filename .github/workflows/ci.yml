@@ -9,6 +9,11 @@ on:
     branches: [main]
   pull_request:
 
+# Least privilege for GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions):
+# every job only checks out and runs — none writes to the repo.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest

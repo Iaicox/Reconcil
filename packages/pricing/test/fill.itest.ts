@@ -85,6 +85,29 @@ describe('runPriceFill — gaps → fetch → append, then valuation reads it', 
     expect(eur.fxRefs).toHaveLength(1);
   });
 
+  it('a throwing provider for one token does not abort the batch', async () => {
+    await seedToken(1);
+    await seedToken(2);
+    await seedEvent(1, '2026-06-01'); // provider throws for this token
+    await seedEvent(2, '2026-06-01'); // this one prices fine
+    const bundle: PriceBundle = {
+      price: [{
+        source: 'defillama',
+        dailyPrice: (q) => {
+          if ((q.address ?? '').toLowerCase() === addr(1)) return Promise.reject(new Error('network boom'));
+          return Promise.resolve({ price: '3000', currency: 'USD' });
+        },
+      }],
+      fx: { source: 'ecb', rangeRates: () => Promise.resolve([]) },
+    };
+
+    // Must resolve (not reject) and still have inserted token 2's snapshot.
+    const res = await runPriceFill({ db, bundle });
+    expect(res.pricesInserted).toBe(1);
+    const usd = await valueQuantities(db, [need({ tokenId: 2, amount: '2' as ValueNeed['amount'], date: '2026-06-01' })], { currency: 'USD' });
+    expect(usd.values[0]?.fiatValue).toBe('6000');
+  });
+
   it('materializes peg snapshots for stablecoins during the fill', async () => {
     await seedToken(5, { isStablecoin: true, pegCurrency: 'USD' });
     await seedEvent(5, '2026-06-01');
