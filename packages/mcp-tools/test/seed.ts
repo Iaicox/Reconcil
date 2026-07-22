@@ -5,6 +5,8 @@
  * sequence). Single-chain (chain_id = 1) by construction — enough for the tool
  * envelope/valuation/citation assertions these suites make.
  */
+import { randomUUID } from 'node:crypto';
+
 import { chainEvents, type Db } from '@pet-crypto/db';
 import type { Pool } from 'pg';
 
@@ -48,6 +50,21 @@ export interface SnapshotOpts {
   source?: string;
 }
 
+export interface EntityOpts {
+  id?: string;
+  tenantId: string | null; // null = curated (built-in) label
+  name: string;
+  kind: string;
+  notes?: string | null;
+}
+
+export interface EntityAddressOpts {
+  entityId: string;
+  tenantId: string | null; // denormalized from the parent entity
+  chainId?: number | null; // null = any chain
+  address: string;
+}
+
 export interface Seeder {
   truncate(): Promise<void>;
   tenant(id: string, slug: string): Promise<void>;
@@ -56,6 +73,8 @@ export interface Seeder {
   event(o: EventOpts): Promise<void>;
   checkpoint(address: string, stream: string, status: string, opts?: { anchorBlock?: number; updatedAt?: string }): Promise<void>;
   snapshot(tokenId: number, price: string, date: string, o?: SnapshotOpts): Promise<void>;
+  entity(o: EntityOpts): Promise<string>; // returns the entity id
+  entityAddress(o: EntityAddressOpts): Promise<void>;
 }
 
 export function makeSeeder(pool: Pool, db: Db): Seeder {
@@ -65,7 +84,7 @@ export function makeSeeder(pool: Pool, db: Db): Seeder {
 
   return {
     async truncate() {
-      await pool.query('TRUNCATE tenants, wallets, chain_events, tokens, price_snapshots, fx_rates, ingestion_checkpoints, tool_calls RESTART IDENTITY CASCADE');
+      await pool.query('TRUNCATE tenants, wallets, chain_events, tokens, price_snapshots, fx_rates, ingestion_checkpoints, tool_calls, entities, entity_addresses RESTART IDENTITY CASCADE');
       seq = 0;
     },
     async tenant(id, slug) {
@@ -105,6 +124,20 @@ export function makeSeeder(pool: Pool, db: Db): Seeder {
       await pool.query(
         `INSERT INTO price_snapshots (token_id, price_date, currency, price, source) VALUES ($1,$2,$3,$4,$5)`,
         [tokenId, date, o.currency ?? 'USD', price, o.source ?? 'defillama'],
+      );
+    },
+    async entity(o) {
+      const id = o.id ?? randomUUID();
+      await pool.query(
+        `INSERT INTO entities (id, tenant_id, name, kind, notes) VALUES ($1,$2,$3,$4,$5)`,
+        [id, o.tenantId, o.name, o.kind, o.notes ?? null],
+      );
+      return id;
+    },
+    async entityAddress(o) {
+      await pool.query(
+        `INSERT INTO entity_addresses (entity_id, tenant_id, chain_id, address) VALUES ($1,$2,$3,$4)`,
+        [o.entityId, o.tenantId, o.chainId ?? null, o.address.toLowerCase()],
       );
     },
   };
