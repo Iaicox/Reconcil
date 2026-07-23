@@ -1,16 +1,21 @@
 /**
  * `ledger_track_wallet` (contract §6.2) — the onboarding write tool. Creates the
  * tenant's wallet row (idempotent on `UNIQUE(tenant_id, address)`) and seeds
- * `queued` ingestion checkpoints per (chain, stream); a worker scanner turns
- * those into backfill jobs, so this tool never imports `ingestion`/BullMQ
- * (dependency-cruiser boundary). `enqueued` carries the deterministic job id the
- * scanner will use, so the response and the eventual BullMQ job line up.
- * Checkpoints are GLOBAL (shared across tenants tracking the same address), and
- * `onConflictDoNothing` never resets an in-progress cursor to `queued`.
- * Anchored onboarding + the whale probe are a follow-up slice (ADR-008).
+ * ingestion checkpoints per (chain, stream); a worker scanner turns those into
+ * jobs, so this tool never imports `ingestion`/BullMQ (dependency-cruiser
+ * boundary). `enqueued` carries the deterministic job id the scanner will use, so
+ * the response and the eventual BullMQ job line up. Checkpoints are GLOBAL (shared
+ * across tenants tracking the same address), and `onConflictDoNothing` never
+ * resets an in-progress cursor — so an anchored request only takes effect for a
+ * freshly-created checkpoint (an already-tracked address is not downgraded).
+ *
+ * mode='full' → `queued` (full-history backfill); mode='anchored' → `anchoring`
+ * with `anchor_from`, seeding an opening_balance baseline (ADR-008). The >50k
+ * probe is asynchronous — it runs worker-side and surfaces via `ledger_status`
+ * (`suggests_anchored`), never in this tool's response (boundary + 02-mcp-contracts).
  */
 import {
-  backfillJobId, chains, ledgerTrackWalletInput, ledgerTrackWalletOutput,
+  anchorJobId, backfillJobId, chains, ledgerTrackWalletInput, ledgerTrackWalletOutput,
   type LedgerTrackWalletOutput,
 } from '@pet-crypto/core';
 import { ingestionCheckpoints, wallets } from '@pet-crypto/db';
@@ -34,13 +39,8 @@ export async function ledgerTrackWallet(
   if (!parsed.success) throw new ToolError('INVALID_INPUT', parsed.error.message);
   const input = parsed.data;
 
-  // Anchored onboarding writes an opening_balance baseline; the ingestion path
-  // for it is deferred (ADR-008 / 03-ingestion.md), so reject rather than
-  // silently backfilling full history under an anchored request.
-  if (input.mode === 'anchored') {
-    throw new ToolError('INVALID_INPUT', "mode='anchored' is not yet supported", 'track with the default full-history mode');
-  }
-
+  // The schema (F4) already guarantees anchored_from is a real, past date here.
+  const anchored = input.mode === 'anchored';
   const address = input.address.toLowerCase();
   const enabled = new Set(chains.map((c) => c.chainId));
   const requested = input.chains ?? chains.map((c) => c.chainId);
@@ -70,19 +70,27 @@ export async function ledgerTrackWallet(
     .limit(1);
   if (!w) throw new ToolError('INTERNAL', 'wallet upsert did not persist');
 
-  // Seed queued checkpoints and report only the streams THIS call actually queued.
+  // Seed checkpoints and report only the streams THIS call actually created.
   // Checkpoints are global; a stream already live/backfilling is a no-op insert the
-  // scanner (queued-only) never enqueues, so `.returning()` keeps `enqueued` truthful.
+  // scanner never enqueues, so `.returning()` keeps `enqueued` truthful. Anchored
+  // streams enter `anchoring` with the requested date; the worker resolves it to a
+  // block and writes the opening_balance baseline (ADR-008).
+  const seed = anchored
+    ? { status: 'anchoring' as const, anchorFrom: input.anchored_from }
+    : { status: 'queued' as const };
+  const jobIdFor = (chainId: number, stream: 'native' | 'erc20'): string =>
+    anchored ? anchorJobId(chainId, address, stream) : backfillJobId(chainId, address, stream);
+
   const enqueued: LedgerTrackWalletOutput['enqueued'] = [];
   for (const chainId of targetChains) {
     for (const stream of STREAMS) {
       const inserted = await ctx.db
         .insert(ingestionCheckpoints)
-        .values({ chainId, address, stream, status: 'queued' })
+        .values({ chainId, address, stream, ...seed })
         .onConflictDoNothing()
         .returning({ stream: ingestionCheckpoints.stream });
       if (inserted.length > 0) {
-        enqueued.push({ chain_id: chainId, stream, job_id: backfillJobId(chainId, address, stream) });
+        enqueued.push({ chain_id: chainId, stream, job_id: jobIdFor(chainId, stream) });
       }
     }
   }

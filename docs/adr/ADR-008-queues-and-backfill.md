@@ -1,6 +1,7 @@
 # ADR-008: Jobs — BullMQ topology; backfill = full history with anchored-window fallback
 
-**Status:** accepted · **Date:** 2026-07-14
+**Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-07-23 (probe surfacing —
+see Consequences)
 
 ## Context
 
@@ -47,3 +48,11 @@ in disguise: a balance is only correct if computed from the address's complete h
 - Whale onboarding cost is capped and predictable; the accountant consciously trades
   history depth for speed.
 - The 50k threshold is a tunable guess (open question Q5).
+
+*Amendment (2026-07-23, anchored-window slice):* the >50k probe runs **asynchronously**
+as a worker job, not inline in `ledger_track_wallet`. The MCP server must not import the
+provider layer (it lives in `packages/ingestion`; dependency-cruiser boundary, ADR-011),
+so the write tool cannot make a synchronous provider call. `suggests_anchored` therefore
+surfaces on **`ledger_status`** (the estimate is stored on the wallet's native checkpoint),
+not in the write tool's response — the HITL decision point is unchanged (02-mcp-contracts
+§6.2). Anchored seeding enters the `anchoring` state directly rather than via `queued`.

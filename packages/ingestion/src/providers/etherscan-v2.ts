@@ -186,5 +186,32 @@ export function etherscanV2Adapter(opts: {
       }
       return receipts;
     },
+
+    async getBlockByTime(chainId: number, unixSeconds: number): Promise<bigint> {
+      const { status, body } = await call({
+        chainid: String(chainId),
+        module: 'block',
+        action: 'getblocknobytime',
+        timestamp: String(unixSeconds),
+        closest: 'before',
+      });
+      // Account envelope with a decimal block-number string; decQuantity rejects
+      // empty/hostile text before it reaches BigInt() (ADR-011).
+      return BigInt(parseRows(decQuantity, unwrapAccountEnvelope(status, body)));
+    },
+
+    async estimateTxCount(chainId: number, address: string): Promise<number> {
+      // Account nonce = outbound tx count: a cheap lower bound for the >50k probe
+      // (ADR-008 Q5). Proxy is free-tier on Ethereum; on Base the free tier errors
+      // and the bundle degrades the probe (no suggestion) rather than guessing.
+      const { status, body } = await call({
+        chainid: String(chainId),
+        module: 'proxy',
+        action: 'eth_getTransactionCount',
+        address,
+        tag: 'latest',
+      });
+      return Number(unwrapProxyHex(status, body));
+    },
   };
 }

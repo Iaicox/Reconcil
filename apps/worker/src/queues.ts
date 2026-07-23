@@ -13,6 +13,11 @@ export const TAIL_QUEUE = 'tail';
 export const BACKFILL_QUEUE = 'backfill';
 export const PRICES_QUEUE = 'prices';
 export const ONBOARD_QUEUE = 'onboard';
+// Anchored-window baseline (ADR-008): one opening_balance write per (chain,
+// address, stream), then the anchor worker hands off to the backfill queue.
+export const ANCHOR_QUEUE = 'anchor';
+// >50k probe (ADR-008 Q5): one cheap tx-count estimate per wallet at onboarding.
+export const PROBE_QUEUE = 'probe';
 
 // Onboarding scanner: turn `queued` checkpoints (written by ledger_track_wallet)
 // into backfill jobs. A short tick so a freshly tracked wallet starts backfilling

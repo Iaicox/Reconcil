@@ -137,6 +137,20 @@ export function blockscoutAdapter(opts: {
       return BigInt(parseRows(decQuantity, unwrapAccountEnvelope(status, body)));
     },
 
+    async getBlockByTime(chainId: number, unixSeconds: number): Promise<bigint> {
+      assertChain(chainId);
+      // Portable block module (base rejects module=proxy, see getHead). The
+      // etherscan-compatible getblocknobytime answers in the account envelope with
+      // a decimal block-number string; decQuantity guards it before BigInt().
+      const { status, body } = await call({
+        module: 'block',
+        action: 'getblocknobytime',
+        timestamp: String(unixSeconds),
+        closest: 'before',
+      });
+      return BigInt(parseRows(decQuantity, unwrapAccountEnvelope(status, body)));
+    },
+
     async getReceipts(chainId: number, txHashes: string[]): Promise<RawReceipt[]> {
       assertChain(chainId);
       const receipts: RawReceipt[] = [];

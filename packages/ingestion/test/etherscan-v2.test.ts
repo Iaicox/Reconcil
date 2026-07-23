@@ -326,12 +326,73 @@ describe('getReceipts', () => {
   });
 });
 
+describe('getBlockByTime', () => {
+  it('queries getblocknobytime with closest=before and parses the decimal block', async () => {
+    const { transport, calls } = stub({ status: '1', message: 'OK', result: '19000000' });
+    const block = await adapter(transport).getBlockByTime!(1, 1700000000);
+    expect(block).toBe(19000000n);
+    const u = new URL(calls[0] ?? '');
+    expect(u.searchParams.get('module')).toBe('block');
+    expect(u.searchParams.get('action')).toBe('getblocknobytime');
+    expect(u.searchParams.get('timestamp')).toBe('1700000000');
+    expect(u.searchParams.get('closest')).toBe('before');
+    expect(u.searchParams.get('chainid')).toBe('1');
+    expect(u.searchParams.get('apikey')).toBe(KEY);
+  });
+
+  it('rejects a non-decimal block result as malformed without leaking it', async () => {
+    const hostile = 'block soon™';
+    const { transport } = stub({ status: '1', message: 'OK', result: hostile });
+    await expect(adapter(transport).getBlockByTime!(1, 1)).rejects.toMatchObject({
+      name: 'ProviderError',
+      kind: 'malformed',
+      message: expect.not.stringContaining(hostile) as unknown,
+    });
+  });
+
+  it('maps the free-tier "not supported" envelope to provider_error (base)', async () => {
+    const { transport } = stub({ status: '0', message: 'NOTOK', result: 'Free API access is not supported for this chain.' });
+    await expect(adapter(transport).getBlockByTime!(8453, 1)).rejects.toMatchObject({
+      kind: 'provider_error',
+      message: expect.not.stringContaining('Free API'),
+    });
+  });
+});
+
+describe('estimateTxCount', () => {
+  it('reads the account nonce via eth_getTransactionCount(latest)', async () => {
+    const { transport, calls } = stub({ jsonrpc: '2.0', id: 1, result: '0xc350' }); // 50000
+    const n = await adapter(transport).estimateTxCount!(1, Q.address);
+    expect(n).toBe(50000);
+    const u = new URL(calls[0] ?? '');
+    expect(u.searchParams.get('module')).toBe('proxy');
+    expect(u.searchParams.get('action')).toBe('eth_getTransactionCount');
+    expect(u.searchParams.get('address')).toBe(Q.address);
+    expect(u.searchParams.get('tag')).toBe('latest');
+  });
+
+  it('rejects a non-hex nonce as malformed instead of crashing BigInt()', async () => {
+    const { transport } = stub({ jsonrpc: '2.0', id: 1, result: 'plenty' });
+    await expect(adapter(transport).estimateTxCount!(1, Q.address)).rejects.toMatchObject({
+      name: 'ProviderError',
+      kind: 'malformed',
+      message: expect.not.stringContaining('plenty') as unknown,
+    });
+  });
+});
+
 describe('capabilities', () => {
-  it('does not expose PRO-only capabilities (ADR-009 degradation)', () => {
+  it('does not expose PRO-only balance capabilities (ADR-009 degradation)', () => {
     const a = adapter(stub({}).transport);
     expect(a.getTokenMeta).toBeUndefined();
     expect(a.getNativeBalanceAt).toBeUndefined();
     expect(a.getErc20BalanceAt).toBeUndefined();
     expect(a.kind).toBe('etherscan-v2');
+  });
+
+  it('exposes free-tier block/probe capabilities (anchoring + >50k probe)', () => {
+    const a = adapter(stub({}).transport);
+    expect(a.getBlockByTime).toBeDefined();
+    expect(a.estimateTxCount).toBeDefined();
   });
 });

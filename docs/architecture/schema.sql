@@ -244,7 +244,7 @@ CREATE TABLE ingestion_checkpoints (
     address               TEXT NOT NULL CHECK (address = lower(address)),
     stream                TEXT NOT NULL CHECK (stream IN ('native', 'erc20')),
     status                TEXT NOT NULL DEFAULT 'queued' CHECK (status IN
-                              ('queued', 'backfilling', 'live', 'paused', 'error')),
+                              ('queued', 'anchoring', 'backfilling', 'live', 'paused', 'error')),
     -- Events are complete for blocks <= last_processed_block (within coverage).
     last_processed_block  BIGINT NOT NULL DEFAULT 0,
     -- Non-NULL => anchored-window backfill: coverage starts here, opening_balance
@@ -256,6 +256,13 @@ CREATE TABLE ingestion_checkpoints (
     last_integrity        JSONB,
     last_error            TEXT,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Appended by migration 0001 (ALTER ADD COLUMN → physical end). Requested anchor
+    -- date for mode='anchored' (ledger_track_wallet writes it; the worker resolves it
+    -- to anchor_block via getBlockByTime during 'anchoring').
+    anchor_from           DATE,
+    -- >50k probe (ADR-008, tunable Q5): provider-estimated tx count, stored on the
+    -- native stream row; drives ledger_status.suggests_anchored. NULL until probed.
+    tx_count_hint         BIGINT,
     PRIMARY KEY (chain_id, address, stream)
 );
 

@@ -451,6 +451,9 @@ export const ledgerWalletStatusSchema = z.object({
   chain_id: z.number(),
   streams: z.array(ledgerStreamStatusSchema),
   integrity: ledgerIntegritySchema.optional(),
+  // >50k probe estimate (ADR-008 Q5), populated asynchronously by the worker.
+  // `suggests_anchored` is the HITL nudge to re-track in anchored mode.
+  estimate: z.object({ tx_count_hint: z.number(), suggests_anchored: z.boolean() }).optional(),
 });
 export type LedgerWalletStatusView = z.infer<typeof ledgerWalletStatusSchema>;
 
@@ -466,13 +469,32 @@ export const ledgerTrackWalletInput = z
     mode: z.enum(['full', 'anchored']).optional(), // default 'full' (ADR-008)
     anchored_from: isoDateString.optional(), // required when mode='anchored'
   })
-  .strict();
+  .strict()
+  // F4 (ADR-008): anchored mode needs a real, past baseline date. The worker
+  // resolves anchored_from → a block via getBlockByTime, so a missing/future/
+  // non-calendar date must fail closed here rather than mis-anchor downstream.
+  .superRefine((v, ctx) => {
+    if (v.mode === 'anchored' && v.anchored_from === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['anchored_from'], message: "anchored_from is required when mode='anchored'" });
+    }
+    if (v.anchored_from !== undefined) {
+      const [y, m, d] = v.anchored_from.split('-').map(Number) as [number, number, number];
+      const parsed = new Date(Date.UTC(y, m - 1, d));
+      const real = parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d;
+      if (!real) {
+        ctx.addIssue({ code: 'custom', path: ['anchored_from'], message: 'anchored_from is not a valid calendar date' });
+      } else if (parsed.getTime() > Date.now()) {
+        ctx.addIssue({ code: 'custom', path: ['anchored_from'], message: 'anchored_from must not be in the future' });
+      }
+    }
+  });
 export type LedgerTrackWalletInput = z.infer<typeof ledgerTrackWalletInput>;
 
 export const ledgerTrackWalletOutput = z.object({
   wallet_id: z.string(),
   enqueued: z.array(z.object({ chain_id: z.number(), stream: z.string(), job_id: z.string() })),
-  estimate: z.object({ tx_count_hint: z.number(), suggests_anchored: z.boolean() }).optional(),
+  // NB: the >50k probe estimate is NOT returned here — it runs asynchronously
+  // worker-side and surfaces on `ledger_status` (02-mcp-contracts §6.2, ADR-008).
 });
 export type LedgerTrackWalletOutput = z.infer<typeof ledgerTrackWalletOutput>;
 

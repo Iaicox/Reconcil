@@ -17,9 +17,12 @@
  * stale failed job before re-adding) belongs with the backfill error-surfacing
  * slice. Continuation pages use auto-ids, so only page-1 can wedge this way.
  */
-import { backfillJobId } from '@pet-crypto/core';
+import { anchorJobId, backfillJobId, probeJobId } from '@pet-crypto/core';
 import type { Db } from '@pet-crypto/db';
-import { listQueuedCheckpoints, type BackfillTarget } from '@pet-crypto/ingestion';
+import {
+  listAnchoringCheckpoints, listProbeTargets, listQueuedCheckpoints,
+  type AnchorTarget, type BackfillTarget,
+} from '@pet-crypto/ingestion';
 import type { JobsOptions } from 'bullmq';
 
 import { jobOptions } from './queues.js';
@@ -28,10 +31,29 @@ import { jobOptions } from './queues.js';
 export interface BackfillEnqueuer {
   add(name: 'page', data: BackfillTarget, opts: JobsOptions): Promise<unknown>;
 }
+export interface AnchorEnqueuer {
+  add(name: 'anchor', data: AnchorTarget, opts: JobsOptions): Promise<unknown>;
+}
+export interface ProbeTargetData { chainId: number; address: string; }
+export interface ProbeEnqueuer {
+  add(name: 'probe', data: ProbeTargetData, opts: JobsOptions): Promise<unknown>;
+}
 
 export async function enqueueBackfills(targets: BackfillTarget[], queue: BackfillEnqueuer): Promise<void> {
   for (const t of targets) {
     await queue.add('page', t, { ...jobOptions, jobId: backfillJobId(t.chainId, t.address, t.stream) });
+  }
+}
+
+export async function enqueueAnchors(targets: AnchorTarget[], queue: AnchorEnqueuer): Promise<void> {
+  for (const t of targets) {
+    await queue.add('anchor', t, { ...jobOptions, jobId: anchorJobId(t.chainId, t.address, t.stream) });
+  }
+}
+
+export async function enqueueProbes(targets: ProbeTargetData[], queue: ProbeEnqueuer): Promise<void> {
+  for (const t of targets) {
+    await queue.add('probe', t, { ...jobOptions, jobId: probeJobId(t.chainId, t.address) });
   }
 }
 
@@ -40,4 +62,23 @@ export async function enqueueQueuedBackfills(db: Db, queue: BackfillEnqueuer): P
   const targets = await listQueuedCheckpoints(db);
   await enqueueBackfills(targets, queue);
   return targets.length;
+}
+
+/** The queues the onboarding tick fans work out to (ADR-008). */
+export interface OnboardQueues {
+  backfill: BackfillEnqueuer;
+  anchor: AnchorEnqueuer;
+  probe: ProbeEnqueuer;
+}
+
+/**
+ * One onboarding scan: fan DB-driven work out to the queues. Backfill (`queued`
+ * full-history), anchor (`anchoring` opening_balance baseline), and probe
+ * (`queued` wallets with no tx-count hint). All idempotent via deterministic job
+ * ids, so re-scans are cheap and each set self-empties as its jobs run.
+ */
+export async function runOnboardScan(db: Db, q: OnboardQueues): Promise<void> {
+  await enqueueQueuedBackfills(db, q.backfill);
+  await enqueueAnchors(await listAnchoringCheckpoints(db), q.anchor);
+  await enqueueProbes(await listProbeTargets(db), q.probe);
 }

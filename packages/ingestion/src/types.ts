@@ -81,6 +81,13 @@ export interface ChainDataProvider {
   getNativeBalanceAt?(chainId: number, address: string, block: bigint): Promise<bigint>;
   getErc20BalanceAt?(chainId: number, address: string, token: string, block: bigint): Promise<bigint>;
   getReceipts?(chainId: number, txHashes: string[]): Promise<RawReceipt[]>;
+  // Anchoring (ADR-008): resolve a date's unix timestamp → the last block at or
+  // before it, so anchored coverage starts on a real block. Free-tier on both
+  // providers (getblocknobytime), unlike balance-at-block.
+  getBlockByTime?(chainId: number, unixSeconds: number): Promise<bigint>;
+  // >50k probe (ADR-008 Q5): a cheap, best-effort transaction-count estimate. A
+  // lower bound is fine — it only drives the anchored *suggestion* (HITL).
+  estimateTxCount?(chainId: number, address: string): Promise<number>;
 }
 
 /**

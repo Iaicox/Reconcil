@@ -322,8 +322,16 @@ output: { wallets: Array<{ address: string; chain_id: number;
                              last_error?: string }>;
             integrity?: { checked_at: string; block: number; clean: boolean;
                           drifts: Array<{ token: string; computed: DecimalString;
-                                          provider: DecimalString }> } }> }
+                                          provider: DecimalString }> };
+            estimate?: { tx_count_hint: number; suggests_anchored: boolean } }> }  // >50k probe (async)
 ```
+
+The `estimate` carries the **>50k probe** result (ADR-008 Q5). The probe runs
+asynchronously worker-side after `ledger_track_wallet` seeds the wallet, so it surfaces
+here — not in the write tool's response (the MCP server may not import the provider
+layer; ADR-011 boundary). `suggests_anchored` is `true` when the estimated transaction
+count exceeds the tunable threshold **and** the wallet is not already anchored: the HITL
+nudge to re-track in `mode: 'anchored'`.
 
 **`ledger_track_wallet`** — the onboarding write tool.
 
@@ -332,13 +340,18 @@ input:  { address: string; chains?: number[];                    // default: all
           client_id?: string; label?: string;
           mode?: 'full' | 'anchored';                            // default 'full'; see ADR-008
           anchored_from?: string }                               // date, required when mode='anchored'
-output: { wallet_id: string; enqueued: Array<{ chain_id: number; stream: string; job_id: string }>;
-          estimate?: { tx_count_hint: number; suggests_anchored: boolean } }
+output: { wallet_id: string; enqueued: Array<{ chain_id: number; stream: string; job_id: string }> }
 ```
 
-Idempotent (`UNIQUE (tenant_id, address)` → returns the existing wallet). If a quick
-provider probe estimates > 50k txs, the tool responds with `suggests_anchored: true`
-and does **not** silently choose — the human decides (HITL).
+Idempotent (`UNIQUE (tenant_id, address)` → returns the existing wallet); an anchored
+request only takes effect for a freshly-created global checkpoint (an already-tracked
+address is never downgraded). `mode: 'full'` seeds `queued` checkpoints (full-history
+backfill); `mode: 'anchored'` seeds `anchoring` with `anchor_from`, and the worker writes
+an `opening_balance` baseline at the resolved anchor block (ADR-008). `enqueued.job_id` is
+the deterministic id the scanner will use — a `backfill:*` id under `full`, an `anchor:*`
+id under `anchored`. The tool never silently chooses anchored: the >50k probe's
+`suggests_anchored` surfaces on `ledger_status` and the **human decides** (HITL), then
+re-tracks with `mode: 'anchored'`.
 
 **`ledger_trace_tool_call`** — audit replay of any previous answer.
 

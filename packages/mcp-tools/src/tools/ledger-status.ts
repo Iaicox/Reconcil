@@ -68,6 +68,11 @@ export async function ledgerStatus(
         ...(s.lastError !== undefined ? { last_error: s.lastError } : {}),
       })),
       ...(integrity !== undefined ? { integrity } : {}),
+      // >50k probe (ADR-008 Q5), surfaced here rather than in ledger_track_wallet's
+      // response (async, worker-side). suggests_anchored is the HITL nudge.
+      ...(w.estimate !== undefined
+        ? { estimate: { tx_count_hint: w.estimate.txCountHint, suggests_anchored: w.estimate.suggestsAnchored } }
+        : {}),
     };
   });
 

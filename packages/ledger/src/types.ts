@@ -231,12 +231,19 @@ export interface StreamStatus {
   stale: boolean;
 }
 
+/** The >50k probe result surfaced per wallet (ADR-008 Q5). */
+export interface WalletEstimate {
+  txCountHint: number;
+  suggestsAnchored: boolean; // hint over threshold AND not already anchored
+}
+
 export interface WalletCoverage {
   address: string;
   chainId: number;
   anchored: boolean;
   streams: StreamStatus[];
   integrity?: unknown; // provider-vs-computed drift check (already scrubbed)
+  estimate?: WalletEstimate; // present once the wallet has been probed
 }
 
 /** The subset of `chain_events` columns the ledger folds and SQL builders read. */

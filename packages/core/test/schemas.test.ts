@@ -99,6 +99,9 @@ describe('ledger_* schemas (§6.2)', () => {
     expect(ledgerStatusOutput.safeParse(withDrift(4)).success).toBe(false);
     // stream enum constrained
     expect(ledgerStatusOutput.safeParse({ wallets: [{ ...wallet, streams: [{ stream: 'bogus', status: 'live', last_processed_block: 1, last_block_time: 'x' }] }] }).success).toBe(false);
+    // >50k probe estimate surfaces here (async, worker-side), numeric hint
+    expect(ledgerStatusOutput.safeParse({ wallets: [{ ...wallet, estimate: { tx_count_hint: 60000, suggests_anchored: true } }] }).success).toBe(true);
+    expect(ledgerStatusOutput.safeParse({ wallets: [{ ...wallet, estimate: { tx_count_hint: '60000', suggests_anchored: true } }] }).success).toBe(false);
   });
 
   it('ledgerTrackWalletInput: address required, mode enum, anchored_from is ISO date, strict', () => {
@@ -110,11 +113,24 @@ describe('ledger_* schemas (§6.2)', () => {
     expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', bogus: 1 }).success).toBe(false);
   });
 
-  it('ledgerTrackWalletOutput: enqueued rows + optional estimate', () => {
+  it('ledgerTrackWalletInput: F4 — anchored_from required for anchored mode, must be a real past date', () => {
+    // required when mode='anchored'
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', mode: 'anchored' }).success).toBe(false);
+    // a future anchor date is nonsensical (no history to seed a baseline for)
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', mode: 'anchored', anchored_from: '2999-01-01' }).success).toBe(false);
+    // format-valid but not a real calendar date (Feb 30) — rejected, not rolled over
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', mode: 'anchored', anchored_from: '2024-02-30' }).success).toBe(false);
+    // mode='full' (default) with no anchored_from stays valid
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', mode: 'full' }).success).toBe(true);
+  });
+
+  it('ledgerTrackWalletOutput: enqueued rows; estimate lives on ledger_status, not here', () => {
     const base = { wallet_id: 'w1', enqueued: [{ chain_id: 1, stream: 'native', job_id: 'backfill:1:0xabc:native' }] };
     expect(ledgerTrackWalletOutput.safeParse(base).success).toBe(true);
-    expect(ledgerTrackWalletOutput.safeParse({ ...base, estimate: { tx_count_hint: 60000, suggests_anchored: true } }).success).toBe(true);
-    expect(ledgerTrackWalletOutput.safeParse({ ...base, estimate: { tx_count_hint: '60000', suggests_anchored: true } }).success).toBe(false);
+    // an anchored track reports anchor job ids
+    expect(ledgerTrackWalletOutput.safeParse({ wallet_id: 'w1', enqueued: [{ chain_id: 1, stream: 'native', job_id: 'anchor:1:0xabc:native' }] }).success).toBe(true);
+    // a malformed enqueued row (missing job_id) is rejected
+    expect(ledgerTrackWalletOutput.safeParse({ wallet_id: 'w1', enqueued: [{ chain_id: 1, stream: 'native' }] }).success).toBe(false);
   });
 
   it('ledgerTraceToolCallInput/Output: id required; coverage is CoverageRef[]', () => {

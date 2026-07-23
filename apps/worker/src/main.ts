@@ -9,15 +9,16 @@ import { Queue, Worker } from 'bullmq';
 import { chains, createLogger, serializeError } from '@pet-crypto/core';
 import { createDb, runMigrations } from '@pet-crypto/db';
 import {
-  buildProviderBundle, realFetchJson, runBackfillPage, runTailTick, type ProcessorDeps,
+  buildProviderBundle, realFetchJson, runAnchor, runBackfillPage, runProbe, runTailTick, type ProcessorDeps,
 } from '@pet-crypto/ingestion';
 import {
   buildPriceProviderBundle, realFetchJson as realPriceFetchJson, throttled, runPriceFill,
 } from '@pet-crypto/pricing';
 import { loadConfig } from './config.js';
-import { enqueueQueuedBackfills } from './onboard.js';
+import { enqueueBackfills, runOnboardScan } from './onboard.js';
 import {
-  BACKFILL_QUEUE, ONBOARD_QUEUE, ONBOARD_TICK_EVERY_MS, PRICES_QUEUE, PRICE_TICK_EVERY_MS, TAIL_QUEUE,
+  ANCHOR_QUEUE, BACKFILL_QUEUE, ONBOARD_QUEUE, ONBOARD_TICK_EVERY_MS, PROBE_QUEUE,
+  PRICES_QUEUE, PRICE_TICK_EVERY_MS, TAIL_QUEUE,
   backoffStrategy, jobOptions, makeConnection,
 } from './queues.js';
 
@@ -46,6 +47,8 @@ async function main(): Promise<void> {
   const tailQueue = new Queue(TAIL_QUEUE, { connection });
   const pricesQueue = new Queue(PRICES_QUEUE, { connection });
   const onboardQueue = new Queue(ONBOARD_QUEUE, { connection });
+  const anchorQueue = new Queue(ANCHOR_QUEUE, { connection });
+  const probeQueue = new Queue(PROBE_QUEUE, { connection });
 
   // Prices (ADR-007): daily fill of every not-yet-priced (token, date) + ECB FX,
   // idempotent so a re-run/missed tick self-heals. Throttled so a large first fill
@@ -85,18 +88,43 @@ async function main(): Promise<void> {
     { connection, concurrency: chains.length, settings: { backoffStrategy } },
   );
 
-  // Onboarding scanner (ADR-008): scan queued checkpoints → backfill jobs. The
-  // read + enqueue live in @pet-crypto/ingestion + onboard.ts; this is the tick host.
+  // Anchored-window baseline (ADR-008): write the opening_balance at the anchor,
+  // then hand the stream to the backfill queue (now 'backfilling') so history
+  // continues forward from the anchor — the same drain the tail worker uses.
+  const anchorWorker = new Worker(
+    ANCHOR_QUEUE,
+    async (job) => {
+      const res = await runAnchor(deps, job.data);
+      // Deterministic backfillJobId (via the shared scanner helper) so an anchor-job
+      // retry re-enqueues the SAME page-1 rather than a duplicate — no collision, the
+      // checkpoint is 'backfilling' now so neither scanner nor tail produces this id.
+      await enqueueBackfills([{ chainId: job.data.chainId, address: job.data.address, stream: job.data.stream }], backfillQueue);
+      return res;
+    },
+    { connection, concurrency: 2, settings: { backoffStrategy } },
+  );
+
+  // >50k probe (ADR-008 Q5): a cheap tx-count estimate stored on the wallet's
+  // native checkpoint; ledger_status reads it to surface suggests_anchored.
+  const probeWorker = new Worker(
+    PROBE_QUEUE,
+    async (job) => runProbe(deps, job.data),
+    { connection, concurrency: 2, settings: { backoffStrategy } },
+  );
+
+  // Onboarding scanner (ADR-008): fan queued/anchoring/unprobed checkpoints out to
+  // the backfill, anchor, and probe queues. The read + enqueue live in
+  // @pet-crypto/ingestion + onboard.ts; this is the tick host.
   const onboardWorker = new Worker(
     ONBOARD_QUEUE,
-    async () => { await enqueueQueuedBackfills(db, backfillQueue); },
+    async () => { await runOnboardScan(db, { backfill: backfillQueue, anchor: anchorQueue, probe: probeQueue }); },
     { connection, concurrency: 1, settings: { backoffStrategy } },
   );
 
-  for (const q of [backfillQueue, tailQueue, pricesQueue, onboardQueue]) {
+  for (const q of [backfillQueue, tailQueue, pricesQueue, onboardQueue, anchorQueue, probeQueue]) {
     q.on('error', (err) => { logger.error('queue error', { queue: q.name, err: serializeError(err) }); });
   }
-  for (const w of [backfillWorker, tailWorker, pricesWorker, onboardWorker]) {
+  for (const w of [backfillWorker, tailWorker, pricesWorker, onboardWorker, anchorWorker, probeWorker]) {
     w.on('error', (err) => { logger.error('worker error', { queue: w.name, err: serializeError(err) }); });
     w.on('failed', (job, err) => { logger.error('job failed', { queue: w.name, jobId: job?.id, err: serializeError(err) }); });
   }
@@ -126,10 +154,14 @@ async function main(): Promise<void> {
       await tailWorker.close();
       await pricesWorker.close();
       await onboardWorker.close();
+      await anchorWorker.close();
+      await probeWorker.close();
       await backfillQueue.close();
       await tailQueue.close();
       await pricesQueue.close();
       await onboardQueue.close();
+      await anchorQueue.close();
+      await probeQueue.close();
       await connection.quit();
       await pool.end();
       process.exit(0);
