@@ -11,9 +11,9 @@ One state row per `(chain_id, address, stream)` — persisted in `ingestion_chec
 
 ```mermaid
 stateDiagram-v2
-    [*] --> queued : ledger_track_wallet
-    queued --> anchoring : mode=anchored
-    queued --> backfilling : mode=full
+    [*] --> queued : track_wallet (mode=full)
+    [*] --> anchoring : track_wallet (mode=anchored)
+    queued --> backfilling : first page committed
     anchoring --> backfilling : opening_balance event written
     backfilling --> backfilling : page done (cursor advanced)
     backfilling --> live : cursor reached safe head
@@ -26,12 +26,16 @@ stateDiagram-v2
     paused --> live : manual
 ```
 
-> **`anchoring` is deferred** (worker-ingestion slice, 2026-07-18): the current
-> ingester does full-history backfill only, and `ingestion_checkpoints.status`
-> has no `anchoring` value (see `schema.sql`). The `queued → anchoring` and
-> `anchoring → backfilling` transitions and the anchored-window / `opening_balance`
-> path land with the anchored-backfill slice; until then a wallet goes
-> `queued → backfilling` regardless of size.
+> **Anchored backfill (implemented, anchored-window slice).** `ledger_track_wallet`
+> seeds `mode=anchored` streams **directly into `anchoring`** (with `anchor_from`),
+> not via a `queued` hop — the worker anchor processor resolves `anchor_from` → a
+> block (`getBlockByTime`, clamped to safe head), writes the `opening_balance`
+> baseline, and transitions `anchoring → backfilling`. Two notes on scope: the
+> anchor **token set is native + curated `verified=true` tokens** (the full
+> provider token-balance listing ∪ curated union, and its integrity reconciliation,
+> are a follow-up); and because checkpoints are **global**, an anchored request only
+> takes effect for a freshly-created checkpoint — an address already tracked
+> full-history is never downgraded to an anchored baseline.
 
 Streams are independent: `native` (provider tx list) and `erc20` (provider transfer
 list) are different endpoints with different pagination, so each has its own cursor.
