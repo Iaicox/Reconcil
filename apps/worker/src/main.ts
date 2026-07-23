@@ -15,8 +15,9 @@ import {
   buildPriceProviderBundle, realFetchJson as realPriceFetchJson, throttled, runPriceFill,
 } from '@pet-crypto/pricing';
 import { loadConfig } from './config.js';
+import { enqueueQueuedBackfills } from './onboard.js';
 import {
-  BACKFILL_QUEUE, PRICES_QUEUE, PRICE_TICK_EVERY_MS, TAIL_QUEUE,
+  BACKFILL_QUEUE, ONBOARD_QUEUE, ONBOARD_TICK_EVERY_MS, PRICES_QUEUE, PRICE_TICK_EVERY_MS, TAIL_QUEUE,
   backoffStrategy, jobOptions, makeConnection,
 } from './queues.js';
 
@@ -44,6 +45,7 @@ async function main(): Promise<void> {
   const backfillQueue = new Queue(BACKFILL_QUEUE, { connection });
   const tailQueue = new Queue(TAIL_QUEUE, { connection });
   const pricesQueue = new Queue(PRICES_QUEUE, { connection });
+  const onboardQueue = new Queue(ONBOARD_QUEUE, { connection });
 
   // Prices (ADR-007): daily fill of every not-yet-priced (token, date) + ECB FX,
   // idempotent so a re-run/missed tick self-heals. Throttled so a large first fill
@@ -83,10 +85,18 @@ async function main(): Promise<void> {
     { connection, concurrency: chains.length, settings: { backoffStrategy } },
   );
 
-  for (const q of [backfillQueue, tailQueue, pricesQueue]) {
+  // Onboarding scanner (ADR-008): scan queued checkpoints → backfill jobs. The
+  // read + enqueue live in @pet-crypto/ingestion + onboard.ts; this is the tick host.
+  const onboardWorker = new Worker(
+    ONBOARD_QUEUE,
+    async () => { await enqueueQueuedBackfills(db, backfillQueue); },
+    { connection, concurrency: 1, settings: { backoffStrategy } },
+  );
+
+  for (const q of [backfillQueue, tailQueue, pricesQueue, onboardQueue]) {
     q.on('error', (err) => { logger.error('queue error', { queue: q.name, err: serializeError(err) }); });
   }
-  for (const w of [backfillWorker, tailWorker, pricesWorker]) {
+  for (const w of [backfillWorker, tailWorker, pricesWorker, onboardWorker]) {
     w.on('error', (err) => { logger.error('worker error', { queue: w.name, err: serializeError(err) }); });
     w.on('failed', (job, err) => { logger.error('job failed', { queue: w.name, jobId: job?.id, err: serializeError(err) }); });
   }
@@ -98,6 +108,8 @@ async function main(): Promise<void> {
   }
   // Daily price fill (ADR-007) — one repeatable tick, idempotent per run.
   await pricesQueue.add('fill', {}, { ...jobOptions, repeat: { every: PRICE_TICK_EVERY_MS }, jobId: 'prices-fill' });
+  // Onboarding scan — one repeatable tick; idempotent (backfill jobId dedup).
+  await onboardQueue.add('scan', {}, { ...jobOptions, repeat: { every: ONBOARD_TICK_EVERY_MS }, jobId: 'onboard-scan' });
   logger.info('worker up', { chains: chains.map((c) => c.chainId) });
 
   let shuttingDown = false;
@@ -113,9 +125,11 @@ async function main(): Promise<void> {
       await backfillWorker.close();
       await tailWorker.close();
       await pricesWorker.close();
+      await onboardWorker.close();
       await backfillQueue.close();
       await tailQueue.close();
       await pricesQueue.close();
+      await onboardQueue.close();
       await connection.quit();
       await pool.end();
       process.exit(0);

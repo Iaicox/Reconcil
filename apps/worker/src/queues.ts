@@ -12,6 +12,12 @@ import type { JobsOptions } from 'bullmq';
 export const TAIL_QUEUE = 'tail';
 export const BACKFILL_QUEUE = 'backfill';
 export const PRICES_QUEUE = 'prices';
+export const ONBOARD_QUEUE = 'onboard';
+
+// Onboarding scanner: turn `queued` checkpoints (written by ledger_track_wallet)
+// into backfill jobs. A short tick so a freshly tracked wallet starts backfilling
+// promptly; idempotent (backfill jobId dedup) so re-scans are cheap.
+export const ONBOARD_TICK_EVERY_MS = 15_000;
 
 // Prices are daily UTC closes (ADR-007) — one fill tick per day is enough; it
 // backfills every not-yet-priced (token, date) each run, so a missed tick self-heals.

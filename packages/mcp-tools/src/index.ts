@@ -8,6 +8,7 @@ import {
   analyticsBalancesInput, analyticsCounterpartiesInput, analyticsFlowsInput, analyticsGasInput,
   analyticsListEventsInput, analyticsStablecoinInput,
   directoryListEntitiesInput, directoryUpsertEntityInput,
+  ledgerStatusInput, ledgerTraceToolCallInput, ledgerTrackWalletInput,
 } from '@pet-crypto/core';
 import { z } from 'zod';
 
@@ -21,6 +22,9 @@ import { analyticsListEvents, TOOL_NAME as LIST_EVENTS_TOOL } from './tools/anal
 import { analyticsStablecoinMovements, TOOL_NAME as STABLECOIN_TOOL } from './tools/analytics-stablecoin-movements.js';
 import { directoryListEntities, TOOL_NAME as DIRECTORY_LIST_TOOL } from './tools/directory-list-entities.js';
 import { directoryUpsertEntity, TOOL_NAME as DIRECTORY_UPSERT_TOOL } from './tools/directory-upsert-entity.js';
+import { ledgerStatus, TOOL_NAME as LEDGER_STATUS_TOOL } from './tools/ledger-status.js';
+import { ledgerTraceToolCall, TOOL_NAME as LEDGER_TRACE_TOOL } from './tools/ledger-trace-tool-call.js';
+import { ledgerTrackWallet, TOOL_NAME as LEDGER_TRACK_TOOL } from './tools/ledger-track-wallet.js';
 
 export interface ToolAnnotations {
   readOnlyHint: boolean;
@@ -99,6 +103,27 @@ export const directoryUpsertEntityTool: ToolDescriptor = {
   handler: directoryUpsertEntity,
 };
 
+export const ledgerStatusTool: ToolDescriptor = {
+  name: LEDGER_STATUS_TOOL,
+  annotations: READ_ONLY,
+  inputSchema: z.toJSONSchema(ledgerStatusInput) as Record<string, unknown>,
+  handler: ledgerStatus,
+};
+
+export const ledgerTraceToolCallTool: ToolDescriptor = {
+  name: LEDGER_TRACE_TOOL,
+  annotations: READ_ONLY,
+  inputSchema: z.toJSONSchema(ledgerTraceToolCallInput) as Record<string, unknown>,
+  handler: ledgerTraceToolCall,
+};
+
+export const ledgerTrackWalletTool: ToolDescriptor = {
+  name: LEDGER_TRACK_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(ledgerTrackWalletInput) as Record<string, unknown>,
+  handler: ledgerTrackWallet,
+};
+
 /** The registry the server/cli/evals iterate to declare tools. */
 export const tools: ToolDescriptor[] = [
   analyticsBalancesTool,
@@ -109,6 +134,9 @@ export const tools: ToolDescriptor[] = [
   analyticsCounterpartiesTool,
   directoryListEntitiesTool,
   directoryUpsertEntityTool,
+  ledgerStatusTool,
+  ledgerTraceToolCallTool,
+  ledgerTrackWalletTool,
 ];
 
 export { analyticsBalances } from './tools/analytics-balances.js';
@@ -119,6 +147,9 @@ export { analyticsListEvents } from './tools/analytics-list-events.js';
 export { analyticsCounterparties } from './tools/analytics-counterparties.js';
 export { directoryListEntities } from './tools/directory-list-entities.js';
 export { directoryUpsertEntity } from './tools/directory-upsert-entity.js';
+export { ledgerStatus } from './tools/ledger-status.js';
+export { ledgerTraceToolCall } from './tools/ledger-trace-tool-call.js';
+export { ledgerTrackWallet } from './tools/ledger-track-wallet.js';
 export { resolveEntities, refKey, type ResolvedEntity, type EntityRef } from './directory/resolve.js';
 export { listEntities, upsertEntity, type UpsertResult } from './directory/repo.js';
 export { buildEnvelope, type ToolEnvelope, type Citations, type EnvelopeParts } from './envelope.js';

@@ -417,3 +417,74 @@ export const directoryUpsertEntityOutput = z.object({
   created: z.boolean(),
 });
 export type DirectoryUpsertEntityOutput = z.infer<typeof directoryUpsertEntityOutput>;
+
+// ---- ledger_* (§6.2) --------------------------------------------------------
+
+export const ledgerStatusInput = z.object({ scope: scopeSchema.optional() }).strict();
+export type LedgerStatusInput = z.infer<typeof ledgerStatusInput>;
+
+/** Per-stream freshness. `status` mirrors the checkpoint enum but is typed as a
+ *  free string on the wire (contract §6.2). `last_block_time` is absent for a
+ *  freshly-queued stream that has no ingested events yet. */
+export const ledgerStreamStatusSchema = z.object({
+  stream: z.enum(['native', 'erc20']),
+  status: z.string(),
+  last_processed_block: z.number(),
+  last_block_time: z.string().optional(),
+  anchor_block: z.number().optional(),
+  backfill_progress: z.number().optional(), // 0..1 estimate; omitted when unknown
+  last_error: z.string().optional(),
+});
+export type LedgerStreamStatusView = z.infer<typeof ledgerStreamStatusSchema>;
+
+/** Balance-vs-provider drift check (ADR-005 decision 4); `clean` is derived
+ *  `drifts.length === 0`. Amounts are decimal strings (ADR-004). */
+export const ledgerIntegritySchema = z.object({
+  checked_at: z.string(),
+  block: z.number(),
+  clean: z.boolean(),
+  drifts: z.array(z.object({ token: z.string(), computed: decimalString, provider: decimalString })),
+});
+
+export const ledgerWalletStatusSchema = z.object({
+  address: z.string(),
+  chain_id: z.number(),
+  streams: z.array(ledgerStreamStatusSchema),
+  integrity: ledgerIntegritySchema.optional(),
+});
+export type LedgerWalletStatusView = z.infer<typeof ledgerWalletStatusSchema>;
+
+export const ledgerStatusOutput = z.object({ wallets: z.array(ledgerWalletStatusSchema) });
+export type LedgerStatusOutput = z.infer<typeof ledgerStatusOutput>;
+
+export const ledgerTrackWalletInput = z
+  .object({
+    address: z.string(),
+    chains: z.array(z.number()).optional(), // default: all enabled chains
+    client_id: z.string().optional(),
+    label: z.string().optional(),
+    mode: z.enum(['full', 'anchored']).optional(), // default 'full' (ADR-008)
+    anchored_from: isoDateString.optional(), // required when mode='anchored'
+  })
+  .strict();
+export type LedgerTrackWalletInput = z.infer<typeof ledgerTrackWalletInput>;
+
+export const ledgerTrackWalletOutput = z.object({
+  wallet_id: z.string(),
+  enqueued: z.array(z.object({ chain_id: z.number(), stream: z.string(), job_id: z.string() })),
+  estimate: z.object({ tx_count_hint: z.number(), suggests_anchored: z.boolean() }).optional(),
+});
+export type LedgerTrackWalletOutput = z.infer<typeof ledgerTrackWalletOutput>;
+
+export const ledgerTraceToolCallInput = z.object({ tool_call_id: z.string() }).strict();
+export type LedgerTraceToolCallInput = z.infer<typeof ledgerTraceToolCallInput>;
+
+export const ledgerTraceToolCallOutput = z.object({
+  tool_name: z.string(),
+  args: z.record(z.string(), z.unknown()),
+  called_at: z.string(),
+  coverage: z.array(coverageRefSchema),
+  result_digest: z.string(),
+  drilldown: z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()) }).optional(),
+});
+export type LedgerTraceToolCallOutput = z.infer<typeof ledgerTraceToolCallOutput>;
