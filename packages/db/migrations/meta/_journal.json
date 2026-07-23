@@ -8,6 +8,13 @@
       "when": 1784108440961,
       "tag": "0000_lame_valeria_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784830179675,
+      "tag": "0001_milky_shockwave",
+      "breakpoints": true
     }
   ]
 }

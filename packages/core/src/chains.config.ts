@@ -55,3 +55,11 @@ export function chainById(chainId: number): ChainConfig {
   if (!chain) throw new Error(`unknown chain id ${String(chainId)}`);
   return chain;
 }
+
+/**
+ * >50k probe threshold (ADR-008, open question Q5): a wallet whose provider-
+ * estimated transaction count exceeds this is a "whale", and `ledger_status`
+ * surfaces `suggests_anchored` so a human can re-track it in anchored mode. It is
+ * a tunable guess — kept in one place so re-tuning is a one-line change.
+ */
+export const ANCHOR_SUGGEST_TX_THRESHOLD = 50_000;

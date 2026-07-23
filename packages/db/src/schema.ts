@@ -487,7 +487,7 @@ export const ingestionCheckpoints = pgTable(
     address: text('address').notNull(),
     stream: text('stream').$type<'native' | 'erc20'>().notNull(),
     status: text('status')
-      .$type<'queued' | 'backfilling' | 'live' | 'paused' | 'error'>()
+      .$type<'queued' | 'anchoring' | 'backfilling' | 'live' | 'paused' | 'error'>()
       .notNull()
       .default('queued'),
     // Events are complete for blocks <= last_processed_block (within coverage).
@@ -501,6 +501,14 @@ export const ingestionCheckpoints = pgTable(
     lastIntegrity: jsonb('last_integrity').$type<unknown>(),
     lastError: text('last_error'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // Appended by migration 0001 (ALTER ADD COLUMN → physical end; parity keeps
+    // schema.sql / schema.ts in the same order). Requested anchor date for
+    // mode='anchored' (ledger_track_wallet writes it; the worker resolves it to
+    // anchor_block via getBlockByTime during 'anchoring').
+    anchorFrom: date('anchor_from'),
+    // >50k probe (ADR-008, tunable Q5): provider-estimated tx count, stored on the
+    // native stream row; drives ledger_status.suggests_anchored. NULL until probed.
+    txCountHint: bigint('tx_count_hint', { mode: 'number' }),
   },
   (t) => [
     primaryKey({
@@ -511,7 +519,7 @@ export const ingestionCheckpoints = pgTable(
     check('ingestion_checkpoints_stream_check', sql`stream IN ('native', 'erc20')`),
     check(
       'ingestion_checkpoints_status_check',
-      sql`status IN ('queued', 'backfilling', 'live', 'paused', 'error')`,
+      sql`status IN ('queued', 'anchoring', 'backfilling', 'live', 'paused', 'error')`,
     ),
   ],
 );
