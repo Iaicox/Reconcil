@@ -5,18 +5,22 @@
  * `ToolContext`, never read from arguments (ADR-006/012).
  */
 import {
-  analyticsBalancesInput, analyticsFlowsInput, analyticsGasInput,
+  analyticsBalancesInput, analyticsCounterpartiesInput, analyticsFlowsInput, analyticsGasInput,
   analyticsListEventsInput, analyticsStablecoinInput,
+  directoryListEntitiesInput, directoryUpsertEntityInput,
 } from '@pet-crypto/core';
 import { z } from 'zod';
 
 import type { ToolContext } from './context.js';
 import type { ToolEnvelope } from './envelope.js';
 import { analyticsBalances, TOOL_NAME as BALANCES_TOOL } from './tools/analytics-balances.js';
+import { analyticsCounterparties, TOOL_NAME as COUNTERPARTIES_TOOL } from './tools/analytics-counterparties.js';
 import { analyticsFlows, TOOL_NAME as FLOWS_TOOL } from './tools/analytics-flows.js';
 import { analyticsGas, TOOL_NAME as GAS_TOOL } from './tools/analytics-gas.js';
 import { analyticsListEvents, TOOL_NAME as LIST_EVENTS_TOOL } from './tools/analytics-list-events.js';
 import { analyticsStablecoinMovements, TOOL_NAME as STABLECOIN_TOOL } from './tools/analytics-stablecoin-movements.js';
+import { directoryListEntities, TOOL_NAME as DIRECTORY_LIST_TOOL } from './tools/directory-list-entities.js';
+import { directoryUpsertEntity, TOOL_NAME as DIRECTORY_UPSERT_TOOL } from './tools/directory-upsert-entity.js';
 
 export interface ToolAnnotations {
   readOnlyHint: boolean;
@@ -35,6 +39,9 @@ export interface ToolDescriptor {
 
 /** All analytics_* tools are read-only (P8), never destructive. */
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true, destructiveHint: false };
+
+/** Write tools (contract §1/§2): mutate tenant-owned data, never destructive. */
+const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false };
 
 export const analyticsBalancesTool: ToolDescriptor = {
   name: BALANCES_TOOL,
@@ -71,6 +78,27 @@ export const analyticsListEventsTool: ToolDescriptor = {
   handler: analyticsListEvents,
 };
 
+export const analyticsCounterpartiesTool: ToolDescriptor = {
+  name: COUNTERPARTIES_TOOL,
+  annotations: READ_ONLY,
+  inputSchema: z.toJSONSchema(analyticsCounterpartiesInput) as Record<string, unknown>,
+  handler: analyticsCounterparties,
+};
+
+export const directoryListEntitiesTool: ToolDescriptor = {
+  name: DIRECTORY_LIST_TOOL,
+  annotations: READ_ONLY,
+  inputSchema: z.toJSONSchema(directoryListEntitiesInput) as Record<string, unknown>,
+  handler: directoryListEntities,
+};
+
+export const directoryUpsertEntityTool: ToolDescriptor = {
+  name: DIRECTORY_UPSERT_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(directoryUpsertEntityInput) as Record<string, unknown>,
+  handler: directoryUpsertEntity,
+};
+
 /** The registry the server/cli/evals iterate to declare tools. */
 export const tools: ToolDescriptor[] = [
   analyticsBalancesTool,
@@ -78,6 +106,9 @@ export const tools: ToolDescriptor[] = [
   analyticsGasTool,
   analyticsStablecoinMovementsTool,
   analyticsListEventsTool,
+  analyticsCounterpartiesTool,
+  directoryListEntitiesTool,
+  directoryUpsertEntityTool,
 ];
 
 export { analyticsBalances } from './tools/analytics-balances.js';
@@ -85,6 +116,11 @@ export { analyticsFlows } from './tools/analytics-flows.js';
 export { analyticsGas } from './tools/analytics-gas.js';
 export { analyticsStablecoinMovements } from './tools/analytics-stablecoin-movements.js';
 export { analyticsListEvents } from './tools/analytics-list-events.js';
+export { analyticsCounterparties } from './tools/analytics-counterparties.js';
+export { directoryListEntities } from './tools/directory-list-entities.js';
+export { directoryUpsertEntity } from './tools/directory-upsert-entity.js';
+export { resolveEntities, refKey, type ResolvedEntity, type EntityRef } from './directory/resolve.js';
+export { listEntities, upsertEntity, type UpsertResult } from './directory/repo.js';
 export { buildEnvelope, type ToolEnvelope, type Citations, type EnvelopeParts } from './envelope.js';
 export { resolveScope, type ResolvedScope } from './scope.js';
 export { persistToolCall, canonicalStringify, type PersistParams } from './tool-calls.js';

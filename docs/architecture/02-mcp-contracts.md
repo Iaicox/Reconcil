@@ -222,18 +222,35 @@ representative-date rule as flow rows (month bucket → month end, else `period.
 **`analytics_counterparties`** — turnover per counterparty.
 
 ```ts
-input:  { scope?: Scope; period: Period; direction?: 'in' | 'out' | 'both';
-          top_n?: number;                                        // default 20
+input:  { scope?: Scope; period: Period; chain_ids?: number[];
+          direction?: 'in' | 'out' | 'both';
+          top_n?: number;                                        // default 20; counterparties, not rows
           include_unverified?: boolean; valuation?: Valuation }
 output: { rows: Array<{
             counterparty:
               | { kind: 'entity'; entity_id: string; name: string;    // tenant/curated label
                   entity_kind: string; curated: boolean }
               | { kind: 'address'; address: string },                 // unlabeled
-            inflow: DecimalString; outflow: DecimalString;
-            tx_count: number; tokens: string[]; fiat?: {...} }>;
+            tx_count: number;                                          // distinct txs with this counterparty
+            tokens: string[];                                         // sanitized symbols involved (convenience)
+            per_token: Array<{ token: TokenView;
+                               inflow: DecimalString; outflow: DecimalString;   // raw, per token
+                               fiat?: { inflow: DecimalString; outflow: DecimalString } }>;
+            fiat?: { inflow: DecimalString; outflow: DecimalString } }>;   // roll-up over per_token; valuation only
           unlabeled_share: { tx_count: number; hint: 'directory_upsert_entity' } }
 ```
+
+Turnover is reported **per token**, not as a single scalar per counterparty: raw base
+units of different tokens are not summable across decimals (ADR-004), exactly as
+`analytics_flows` is always per token. The optional counterparty-level `fiat` is the sum of
+the already-pinned per-token `fiat` values — fiat *is* summable, and the same
+`price_refs`/`fx_refs` cover it (C4, no new refs); it is present only when `valuation` is
+given and every involved token priced. `tx_count` is per counterparty (distinct tx
+hashes), so it does not partition across `per_token`. `top_n` ranks counterparties by
+activity (`tx_count` desc, address asc); each returned counterparty carries all its tokens.
+`unlabeled_share.tx_count` is summed over the **returned page** (the `top_n` counterparties),
+not the full counterparty set — these are the highest-activity counterparties, the ones
+worth labeling first.
 
 Resolution: `entity_addresses` exact match (tenant rows shadow curated rows). The tool
 suggests labeling, the agent proposes it, the human confirms — the tool never invents

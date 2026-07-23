@@ -156,4 +156,25 @@ describe('analytics_list_events — listing, filters, pagination, citations', ()
     const ctx2: ToolContext = { db, tenantId: TENANT2 };
     await expect(analyticsListEvents(ctx2, { scope: { addresses: [OWNED] } })).rejects.toBeInstanceOf(ToolError);
   });
+
+  it('populates AddressView.entity from the address book; tenant shadows curated (§6.1)', async () => {
+    await seedMixed();
+    // EXT has both a curated and a tenant label → the tenant one wins.
+    const curatedExt = await S.entity({ tenantId: null, name: 'Binance', kind: 'exchange' });
+    await S.entityAddress({ entityId: curatedExt, tenantId: null, chainId: 1, address: EXT });
+    const mineExt = await S.entity({ tenantId: TENANT, name: 'My CEX', kind: 'exchange' });
+    await S.entityAddress({ entityId: mineExt, tenantId: TENANT, chainId: 1, address: EXT });
+    const treasury = await S.entity({ tenantId: TENANT, name: 'Treasury', kind: 'self' });
+    await S.entityAddress({ entityId: treasury, tenantId: TENANT, chainId: null, address: OWNED });
+
+    const env = await analyticsListEvents(ctx(), { kinds: ['native_transfer'] });
+    const inbound = env.data.events.find((e) => e.amount === '100')!; // EXT → OWNED
+    expect(inbound.from.entity).toEqual({ entity_id: mineExt, name: 'My CEX', curated: false });
+    expect(inbound.to.entity).toEqual({ entity_id: treasury, name: 'Treasury', curated: false });
+    // AddressView.entity carries no entity_kind, unlike the counterparties variant (§6.1).
+    expect(inbound.from.entity).not.toHaveProperty('entity_kind');
+    // An unlabeled endpoint stays a bare address.
+    const outbound = env.data.events.find((e) => e.amount === '25')!; // OWNED → OWNED2 (OWNED2 unlabeled)
+    expect(outbound.to.entity).toBeUndefined();
+  });
 });

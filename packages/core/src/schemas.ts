@@ -296,3 +296,124 @@ export const analyticsListEventsOutput = z.object({
   total_count: z.number().optional(), // first page only (cursor absent)
 });
 export type AnalyticsListEventsOutput = z.infer<typeof analyticsListEventsOutput>;
+
+// ---- analytics_counterparties (§6.1) ----------------------------------------
+
+/** Resolved counterparty label (address book, §6.3); `entity_kind` here, unlike AddressView. */
+export const counterpartyEntitySchema = z.object({
+  kind: z.literal('entity'),
+  entity_id: z.string(),
+  name: z.string(),
+  entity_kind: z.string(),
+  curated: z.boolean(),
+});
+
+/** Unlabeled counterparty — a bare address. */
+export const counterpartyAddressSchema = z.object({
+  kind: z.literal('address'),
+  address: z.string(),
+});
+
+export const counterpartyRefSchema = z.discriminatedUnion('kind', [
+  counterpartyEntitySchema,
+  counterpartyAddressSchema,
+]);
+export type CounterpartyRef = z.infer<typeof counterpartyRefSchema>;
+
+/**
+ * Per-token turnover with a counterparty. Raw amounts are per token (base units of
+ * different decimals are not summable, ADR-004); fiat is optional (valuation).
+ */
+export const counterpartyPerTokenSchema = z.object({
+  token: tokenViewSchema,
+  inflow: decimalString,
+  outflow: decimalString,
+  fiat: z.object({ inflow: decimalString, outflow: decimalString }).optional(),
+});
+export type CounterpartyPerTokenView = z.infer<typeof counterpartyPerTokenSchema>;
+
+/**
+ * One counterparty's turnover. `tx_count` is per counterparty (distinct txs), so it
+ * does not partition across `per_token`; `fiat` (valuation only) is the summable
+ * roll-up over `per_token` fiat.
+ */
+export const counterpartyRowSchema = z.object({
+  counterparty: counterpartyRefSchema,
+  tx_count: z.number(),
+  tokens: z.array(z.string()), // sanitized symbols involved
+  per_token: z.array(counterpartyPerTokenSchema),
+  fiat: z.object({ inflow: decimalString, outflow: decimalString }).optional(),
+});
+export type CounterpartyRowView = z.infer<typeof counterpartyRowSchema>;
+
+export const analyticsCounterpartiesInput = z
+  .object({
+    scope: scopeSchema.optional(),
+    period: periodSchema,
+    chain_ids: z.array(z.number()).optional(),
+    direction: flowDirectionSchema.optional(),
+    top_n: z.number().int().positive().optional(), // counterparties, not rows
+    include_unverified: z.boolean().optional(),
+    valuation: valuationSchema.optional(),
+  })
+  .strict();
+export type AnalyticsCounterpartiesInput = z.infer<typeof analyticsCounterpartiesInput>;
+
+export const analyticsCounterpartiesOutput = z.object({
+  rows: z.array(counterpartyRowSchema),
+  unlabeled_share: z.object({
+    tx_count: z.number(),
+    hint: z.literal('directory_upsert_entity'),
+  }),
+});
+export type AnalyticsCounterpartiesOutput = z.infer<typeof analyticsCounterpartiesOutput>;
+
+// ---- directory_* (§6.3) -----------------------------------------------------
+
+/** Entity kinds (mirrors the `entities.kind` CHECK, schema.sql). */
+export const directoryEntityKind = z.enum([
+  'self', 'client', 'vendor', 'exchange', 'contract', 'employee', 'other',
+]);
+export type DirectoryEntityKind = z.infer<typeof directoryEntityKind>;
+
+export const directoryListEntitiesInput = z
+  .object({
+    query: z.string().optional(),
+    kind: z.string().optional(),
+    address: z.string().optional(),
+  })
+  .strict();
+export type DirectoryListEntitiesInput = z.infer<typeof directoryListEntitiesInput>;
+
+export const directoryEntityViewSchema = z.object({
+  entity_id: z.string(),
+  name: z.string(),
+  kind: z.string(),
+  curated: z.boolean(),
+  addresses: z.array(z.object({ chain_id: z.number().nullable(), address: z.string() })),
+  notes: z.string().optional(),
+});
+export type DirectoryEntityView = z.infer<typeof directoryEntityViewSchema>;
+
+export const directoryListEntitiesOutput = z.object({
+  entities: z.array(directoryEntityViewSchema),
+});
+export type DirectoryListEntitiesOutput = z.infer<typeof directoryListEntitiesOutput>;
+
+export const directoryUpsertEntityInput = z
+  .object({
+    entity_id: z.string().optional(), // present = update
+    name: z.string(),
+    kind: directoryEntityKind,
+    client_id: z.string().optional(),
+    notes: z.string().optional(),
+    addresses: z.array(z.object({ chain_id: z.number().optional(), address: z.string() })).optional(),
+  })
+  .strict();
+export type DirectoryUpsertEntityInput = z.infer<typeof directoryUpsertEntityInput>;
+
+export const directoryUpsertEntityOutput = z.object({
+  entity_id: z.string(),
+  created: z.boolean(),
+});
+export type DirectoryUpsertEntityOutput = z.infer<typeof directoryUpsertEntityOutput>;
