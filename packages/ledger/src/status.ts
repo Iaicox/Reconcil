@@ -4,6 +4,7 @@
  * ANCHORED_BASELINE, DATA_STALE). Reads checkpoints, not chain height, so
  * `backfillProgress` is best-effort/omitted (a stored head is an ingestion change).
  */
+import { ANCHOR_SUGGEST_TX_THRESHOLD } from '@pet-crypto/core';
 import { chainEvents, ingestionCheckpoints, type Db } from '@pet-crypto/db';
 import { and, inArray, sql } from 'drizzle-orm';
 
@@ -56,6 +57,9 @@ export async function getLedgerStatus(db: Db, p: StatusParams): Promise<WalletCo
   }
 
   const groups = new Map<string, WalletCoverage>();
+  // >50k probe hint lives on the native stream row (per wallet); read it aside and
+  // fold it into `estimate` once `anchored` is known for the whole wallet.
+  const hintByKey = new Map<string, number>();
   for (const c of checkpoints) {
     const key = `${c.chainId}|${c.address}`;
     let w = groups.get(key);
@@ -73,10 +77,22 @@ export async function getLedgerStatus(db: Db, p: StatusParams): Promise<WalletCo
     if (lt) s.lastBlockTime = lt.toISOString();
     w.streams.push(s);
 
+    if (c.stream === 'native' && c.txCountHint !== null) hintByKey.set(key, c.txCountHint);
     if (c.lastIntegrity !== null && w.integrity === undefined) w.integrity = c.lastIntegrity;
   }
 
   return [...groups.values()]
-    .map((w) => ({ ...w, streams: w.streams.sort((a, b) => a.stream.localeCompare(b.stream)) }))
+    .map((w) => {
+      const hint = hintByKey.get(`${w.chainId}|${w.address}`);
+      const estimate =
+        hint !== undefined
+          ? { txCountHint: hint, suggestsAnchored: hint > ANCHOR_SUGGEST_TX_THRESHOLD && !w.anchored }
+          : undefined;
+      return {
+        ...w,
+        streams: w.streams.sort((a, b) => a.stream.localeCompare(b.stream)),
+        ...(estimate ? { estimate } : {}),
+      };
+    })
     .sort((a, b) => a.chainId - b.chainId || a.address.localeCompare(b.address));
 }

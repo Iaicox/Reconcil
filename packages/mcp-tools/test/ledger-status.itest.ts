@@ -109,6 +109,33 @@ describe('ledger_status — coverage/freshness, integrity, warnings, tenancy', (
     expect(env.citations.coverage[0]!.status).toBe('backfilling');
   });
 
+  it('surfaces the >50k probe estimate with suggests_anchored when the hint exceeds the threshold', async () => {
+    await S.tenant(TENANT, 'acme');
+    await S.wallet(WALLET_OWNED, TENANT, OWNED);
+    await S.checkpoint(OWNED, 'native', 'queued');
+    await S.checkpoint(OWNED, 'erc20', 'queued');
+    await pool.query(
+      `UPDATE ingestion_checkpoints SET tx_count_hint = 75000 WHERE address = $1 AND stream = 'native'`,
+      [OWNED],
+    );
+
+    const env = await ledgerStatus(ctx(), {});
+    expect(env.data.wallets[0]!.estimate).toEqual({ tx_count_hint: 75000, suggests_anchored: true });
+  });
+
+  it('reports the hint but suppresses the suggestion once the wallet is already anchored', async () => {
+    await S.tenant(TENANT, 'acme');
+    await S.wallet(WALLET_OWNED, TENANT, OWNED);
+    await S.checkpoint(OWNED, 'native', 'backfilling', { anchorBlock: 10 });
+    await pool.query(
+      `UPDATE ingestion_checkpoints SET tx_count_hint = 90000 WHERE address = $1 AND stream = 'native'`,
+      [OWNED],
+    );
+
+    const env = await ledgerStatus(ctx(), {});
+    expect(env.data.wallets[0]!.estimate).toEqual({ tx_count_hint: 90000, suggests_anchored: false });
+  });
+
   it('is tenant-scoped: another tenant cannot reach an address it does not track', async () => {
     await S.tenant(TENANT, 'acme');
     await S.wallet(WALLET_OWNED, TENANT, OWNED);
