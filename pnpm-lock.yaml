@@ -96,16 +96,28 @@ importers:
       '@pet-crypto/mcp-tools':
         specifier: workspace:*
         version: link:../../packages/mcp-tools
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
       fastify:
         specifier: ^5.0.0
         version: 5.10.0
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
       zod:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^11.0.0
+        version: 11.14.0
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.1
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
       eslint:
         specifier: 'catalog:'
         version: 10.7.0
