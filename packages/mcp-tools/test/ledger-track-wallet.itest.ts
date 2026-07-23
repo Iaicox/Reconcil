@@ -97,11 +97,31 @@ describe('ledger_track_wallet — onboarding write, idempotency, tenancy', () =>
     expect((await pool.query(`SELECT address FROM wallets`)).rows[0]).toEqual({ address: OWNED });
   });
 
-  it('rejects anchored mode until it is wired (Part B)', async () => {
+  it('anchored mode seeds anchoring checkpoints with the anchor date and anchor job ids', async () => {
     await S.tenant(TENANT, 'acme');
-    await expect(
-      ledgerTrackWallet(ctx(), { address: OWNED, mode: 'anchored', anchored_from: '2026-01-01' }),
-    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    const env = await ledgerTrackWallet(ctx(), { address: OWNED, chains: [1], mode: 'anchored', anchored_from: '2024-01-01' });
+
+    expect([...env.data.enqueued].sort((a, b) => a.job_id.localeCompare(b.job_id))).toEqual([
+      { chain_id: 1, stream: 'erc20', job_id: `anchor:1:${OWNED}:erc20` },
+      { chain_id: 1, stream: 'native', job_id: `anchor:1:${OWNED}:native` },
+    ]);
+
+    const { rows } = await pool.query(
+      `SELECT stream, status, anchor_from::text AS anchor_from FROM ingestion_checkpoints ORDER BY stream`,
+    );
+    expect(rows).toEqual([
+      { stream: 'erc20', status: 'anchoring', anchor_from: '2024-01-01' },
+      { stream: 'native', status: 'anchoring', anchor_from: '2024-01-01' },
+    ]);
+  });
+
+  it('rejects anchored mode with a missing / future anchored_from (F4), writing nothing', async () => {
+    await S.tenant(TENANT, 'acme');
+    await expect(ledgerTrackWallet(ctx(), { address: OWNED, mode: 'anchored' }))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(ledgerTrackWallet(ctx(), { address: OWNED, mode: 'anchored', anchored_from: '2999-01-01' }))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    expect((await pool.query(`SELECT count(*)::int AS n FROM ingestion_checkpoints`)).rows[0]).toEqual({ n: 0 });
   });
 
   it('rejects an unknown chain and malformed input with INVALID_INPUT', async () => {
