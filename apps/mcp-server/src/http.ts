@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 
+import rateLimit from '@fastify/rate-limit';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { createLogger, serializeError, type Logger } from '@pet-crypto/core';
@@ -32,14 +33,19 @@ export interface HttpDeps {
  * transport per request, so tenants never share session state. Returned as a
  * factory so tests can drive it via `app.inject` without binding a socket.
  */
-export function buildHttpApp(deps: HttpDeps): FastifyInstance {
+export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   const { db, logger } = deps;
   const authenticate = deps.authenticate ?? ((h) => bearerTenant(db, h));
   const app = Fastify({ logger: true });
 
+  // Rate-limit the authenticated /mcp route (in-memory; CodeQL js/missing-rate-limiting).
+  // global:false → only opted-in routes are limited, so /healthz stays unlimited. Awaited
+  // before the route is defined so the plugin's onRoute hook sees its per-route config.
+  await app.register(rateLimit, { global: false });
+
   app.get('/healthz', () => ({ status: 'ok' }));
 
-  app.all('/mcp', async (request, reply) => {
+  app.all('/mcp', { config: { rateLimit: { max: 120, timeWindow: '1 minute' } } }, async (request, reply) => {
     const tenantId = await authenticate(request.headers.authorization);
     if (tenantId === null) {
       // Transport-level auth failure: no domain detail (§4); advertise the scheme (RFC 7235).
@@ -74,7 +80,7 @@ async function main(): Promise<void> {
   const cfg = loadConfig();
   const pool = new Pool({ connectionString: cfg.DATABASE_URL });
   const db = createDb(pool);
-  const app = buildHttpApp({ db, logger });
+  const app = await buildHttpApp({ db, logger });
 
   const shutdown = async (): Promise<void> => {
     await app.close();

@@ -18,10 +18,16 @@ export function hashKey(presentedKey: string): string {
  * header is absent or not a Bearer credential. The scheme match is case-insensitive
  * (RFC 7235 §2.1: auth schemes are case-insensitive) so a compliant `bearer …`
  * client is not spuriously rejected.
+ *
+ * A linear prefix-test + slice rather than a `\s+(.+)` regex: the two overlapping
+ * quantifiers over whitespace are a polynomial-ReDoS shape on the attacker-controlled
+ * Authorization header (CodeQL js/polynomial-redos). `^Bearer\s` has no quantifier.
  */
 export function parseBearerToken(header: string | undefined): string | null {
   if (header === undefined) return null;
-  return /^Bearer\s+(.+)$/i.exec(header)?.[1] ?? null;
+  if (!/^Bearer\s/i.test(header)) return null;
+  const token = header.slice('Bearer'.length).trim();
+  return token.length > 0 ? token : null;
 }
 
 /**

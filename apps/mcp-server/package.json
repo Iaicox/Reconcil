@@ -16,6 +16,7 @@
     "keygen": "tsx src/keygen.ts"
   },
   "dependencies": {
+    "@fastify/rate-limit": "^10.2.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@pet-crypto/core": "workspace:*",
     "@pet-crypto/db": "workspace:*",

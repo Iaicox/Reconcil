@@ -14,16 +14,17 @@ function appWith(authenticate: (h: string | undefined) => Promise<string | null>
 const rpc = { jsonrpc: '2.0', id: 1, method: 'tools/list' } as const;
 
 describe('buildHttpApp — health + bearer gate (hermetic, via inject)', () => {
-  it('GET /healthz returns ok', async () => {
-    const app = appWith(() => Promise.resolve(null));
+  it('GET /healthz returns ok and is not rate-limited', async () => {
+    const app = await appWith(() => Promise.resolve(null));
     const res = await app.inject({ method: 'GET', url: '/healthz' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ status: 'ok' });
+    expect(res.headers['x-ratelimit-limit']).toBeUndefined();
     await app.close();
   });
 
-  it('POST /mcp without a bearer → 401 + WWW-Authenticate, no domain detail', async () => {
-    const app = appWith(() => Promise.resolve(null));
+  it('POST /mcp without a bearer → 401 + WWW-Authenticate, no domain detail, rate-limited', async () => {
+    const app = await appWith(() => Promise.resolve(null));
     const res = await app.inject({
       method: 'POST',
       url: '/mcp',
@@ -33,11 +34,13 @@ describe('buildHttpApp — health + bearer gate (hermetic, via inject)', () => {
     expect(res.statusCode).toBe(401);
     expect(res.headers['www-authenticate']).toBe('Bearer');
     expect(res.json()).toEqual({ error: 'unauthorized' });
+    // rate limit is active on /mcp (CodeQL js/missing-rate-limiting)
+    expect(res.headers['x-ratelimit-limit']).toBeDefined();
     await app.close();
   });
 
   it('POST /mcp with an unrecognized bearer → 401', async () => {
-    const app = appWith((h) => Promise.resolve(h === 'Bearer good' ? 'tenant-1' : null));
+    const app = await appWith((h) => Promise.resolve(h === 'Bearer good' ? 'tenant-1' : null));
     const res = await app.inject({
       method: 'POST',
       url: '/mcp',
