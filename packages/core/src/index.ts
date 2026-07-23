@@ -9,12 +9,13 @@ export type { Brand } from './brand.js';
 export {
   chains,
   chainById,
+  ANCHOR_SUGGEST_TX_THRESHOLD,
   type ChainConfig,
   type ProviderConfig,
   type FeeStrategy,
 } from './chains.config.js';
 
-export { backfillJobId } from './jobs.js';
+export { backfillJobId, anchorJobId, probeJobId } from './jobs.js';
 
 export { createLogger, serializeError, type Logger } from './logger.js';
 
