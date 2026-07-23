@@ -42,6 +42,23 @@ export async function seedCheckpoint(
   await db.insert(ingestionCheckpoints).values({ chainId, address, stream, status: 'queued' }).onConflictDoNothing();
 }
 
+/**
+ * Every checkpoint still awaiting its first backfill. The worker onboarding
+ * scanner enqueues one backfill page per row; the first `commitPage` flips it to
+ * `backfilling`, so a row leaves this set as soon as ingestion starts.
+ */
+export async function listQueuedCheckpoints(db: Db): Promise<CommitTarget[]> {
+  return db
+    .select({
+      chainId: ingestionCheckpoints.chainId,
+      address: ingestionCheckpoints.address,
+      stream: ingestionCheckpoints.stream,
+    })
+    .from(ingestionCheckpoints)
+    .where(eq(ingestionCheckpoints.status, 'queued'))
+    .orderBy(ingestionCheckpoints.chainId, ingestionCheckpoints.address, ingestionCheckpoints.stream);
+}
+
 export async function commitPage(
   db: Db,
   target: CommitTarget,

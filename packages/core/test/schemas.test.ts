@@ -4,6 +4,8 @@ import { z } from 'zod';
 import {
   analyticsBalancesInput, analyticsBalancesOutput, analyticsGasInput, analyticsGasOutput,
   analyticsListEventsInput, analyticsStablecoinInput, analyticsStablecoinOutput, decimalString,
+  ledgerStatusInput, ledgerStatusOutput, ledgerTraceToolCallInput, ledgerTraceToolCallOutput,
+  ledgerTrackWalletInput, ledgerTrackWalletOutput,
 } from '../src/schemas.js';
 
 describe('contract schemas', () => {
@@ -73,5 +75,57 @@ describe('contract schemas', () => {
     // min_amount is non-negative at the boundary (mirrors the ledger guard)
     expect(analyticsListEventsInput.safeParse({ min_amount: '5' }).success).toBe(true);
     expect(analyticsListEventsInput.safeParse({ min_amount: '-5' }).success).toBe(false);
+  });
+});
+
+describe('ledger_* schemas (§6.2)', () => {
+  it('ledgerStatusInput: scope optional, strict', () => {
+    expect(ledgerStatusInput.safeParse({}).success).toBe(true);
+    expect(ledgerStatusInput.safeParse({ scope: { addresses: ['0xabc'] } }).success).toBe(true);
+    expect(ledgerStatusInput.safeParse({ bogus: 1 }).success).toBe(false);
+  });
+
+  it('ledgerStatusOutput: streams + integrity, drift amounts are decimal strings', () => {
+    const wallet = {
+      address: '0xabc', chain_id: 1,
+      streams: [{ stream: 'native', status: 'live', last_processed_block: 100, last_block_time: '2026-06-01T00:00:00Z' }],
+    };
+    expect(ledgerStatusOutput.safeParse({ wallets: [wallet] }).success).toBe(true);
+    // integrity drifts must be decimal strings, not JSON numbers (ADR-004)
+    const withDrift = (computed: unknown) => ({
+      wallets: [{ ...wallet, integrity: { checked_at: '2026-06-01T00:00:00Z', block: 100, clean: false, drifts: [{ token: 'USDC', computed, provider: '5' }] } }],
+    });
+    expect(ledgerStatusOutput.safeParse(withDrift('4')).success).toBe(true);
+    expect(ledgerStatusOutput.safeParse(withDrift(4)).success).toBe(false);
+    // stream enum constrained
+    expect(ledgerStatusOutput.safeParse({ wallets: [{ ...wallet, streams: [{ stream: 'bogus', status: 'live', last_processed_block: 1, last_block_time: 'x' }] }] }).success).toBe(false);
+  });
+
+  it('ledgerTrackWalletInput: address required, mode enum, anchored_from is ISO date, strict', () => {
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC' }).success).toBe(true);
+    expect(ledgerTrackWalletInput.safeParse({}).success).toBe(false); // address required
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', mode: 'anchored', anchored_from: '2026-01-01' }).success).toBe(true);
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', mode: 'bogus' }).success).toBe(false);
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', anchored_from: 'yesterday' }).success).toBe(false);
+    expect(ledgerTrackWalletInput.safeParse({ address: '0xABC', bogus: 1 }).success).toBe(false);
+  });
+
+  it('ledgerTrackWalletOutput: enqueued rows + optional estimate', () => {
+    const base = { wallet_id: 'w1', enqueued: [{ chain_id: 1, stream: 'native', job_id: 'backfill:1:0xabc:native' }] };
+    expect(ledgerTrackWalletOutput.safeParse(base).success).toBe(true);
+    expect(ledgerTrackWalletOutput.safeParse({ ...base, estimate: { tx_count_hint: 60000, suggests_anchored: true } }).success).toBe(true);
+    expect(ledgerTrackWalletOutput.safeParse({ ...base, estimate: { tx_count_hint: '60000', suggests_anchored: true } }).success).toBe(false);
+  });
+
+  it('ledgerTraceToolCallInput/Output: id required; coverage is CoverageRef[]', () => {
+    expect(ledgerTraceToolCallInput.safeParse({ tool_call_id: '01J' }).success).toBe(true);
+    expect(ledgerTraceToolCallInput.safeParse({}).success).toBe(false);
+    const out = {
+      tool_name: 'analytics_balances', args: {}, called_at: '2026-06-01T00:00:00Z',
+      coverage: [{ chain_id: 1, address: '0xabc', streams: ['native'], from_block: null, to_block: 100, status: 'live' }],
+      result_digest: 'a'.repeat(64),
+    };
+    expect(ledgerTraceToolCallOutput.safeParse(out).success).toBe(true);
+    expect(ledgerTraceToolCallOutput.safeParse({ ...out, drilldown: { tool: 'analytics_list_events', args: {} } }).success).toBe(true);
   });
 });

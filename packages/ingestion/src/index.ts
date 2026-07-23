@@ -16,6 +16,6 @@ export { assignErc20Metadata, type Erc20WithMeta } from './logindex.js';
 export { runBackfillPage, type BackfillTarget, type ProcessorDeps } from './processors/backfill.js';
 export { runTailTick } from './processors/tail.js';
 export { type IngestResult, type IngestTarget } from './processors/ingest.js';
-export { getCheckpoint, seedCheckpoint, commitPage } from './write/checkpoint-repo.js';
+export { getCheckpoint, seedCheckpoint, listQueuedCheckpoints, commitPage } from './write/checkpoint-repo.js';
 export { insertEventRows, toChainEventRow } from './write/event-writer.js';
 export { tokenInsertValues } from './write/token-repo.js';

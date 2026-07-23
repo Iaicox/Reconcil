@@ -14,6 +14,8 @@ export {
   type FeeStrategy,
 } from './chains.config.js';
 
+export { backfillJobId } from './jobs.js';
+
 export { createLogger, serializeError, type Logger } from './logger.js';
 
 export { formatUnits, parseUnits, type RawAmount, type DecimalString } from './money.js';
