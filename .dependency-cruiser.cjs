@@ -57,12 +57,16 @@ module.exports = {
     {
       name: 'evals-layer',
       severity: 'error',
-      comment: 'Evals bind tools in-process; ingestion stays worker-only.',
+      comment:
+        'Evals bind tools in-process (mcp-tools) and compose ingestion + ledger for the ' +
+        'golden-wallet reconciliation harness (04-testing.md §2). ingestion is still barred ' +
+        'from the read-only MCP server runtime by mcp-tools-layer + nothing-imports-apps — the ' +
+        'server never imports evals, so this edge does not weaken the MiCA guarantee (ADR-011).',
       from: { path: '^packages/evals/' },
       to: {
         path: '^(packages|apps)/',
         pathNot:
-          '^packages/(evals|mcp-tools|ledger|recon|exporters|pricing|db|core)/',
+          '^packages/(evals|mcp-tools|ingestion|ledger|recon|exporters|pricing|db|core)/',
       },
     },
     {

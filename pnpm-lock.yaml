@@ -244,13 +244,37 @@ importers:
       '@pet-crypto/db':
         specifier: workspace:*
         version: link:../db
+      '@pet-crypto/ingestion':
+        specifier: workspace:*
+        version: link:../ingestion
+      '@pet-crypto/ledger':
+        specifier: workspace:*
+        version: link:../ledger
       '@pet-crypto/mcp-tools':
         specifier: workspace:*
         version: link:../mcp-tools
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^11.0.0
+        version: 11.14.0
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
       eslint:
         specifier: 'catalog:'
         version: 10.7.0
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
