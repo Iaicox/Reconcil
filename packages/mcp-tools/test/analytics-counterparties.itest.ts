@@ -133,6 +133,8 @@ describe('analytics_counterparties — per-token turnover, labels, valuation, te
     const env = await analyticsCounterparties(ctx(), { period: PERIOD, top_n: 1 });
     expect(env.data.rows).toHaveLength(1);
     expect(env.data.rows[0]?.tx_count).toBe(3); // EXT, the busiest
+    // unlabeled_share is over the RETURNED page (§6.1): EXT2 (tx 1) is truncated, so 3 not 4.
+    expect(env.data.unlabeled_share.tx_count).toBe(3);
   });
 
   it('summarizes backing as event_ref_summary + drilldown past the ref cap (C3)', async () => {

@@ -248,6 +248,9 @@ the already-pinned per-token `fiat` values — fiat *is* summable, and the same
 given and every involved token priced. `tx_count` is per counterparty (distinct tx
 hashes), so it does not partition across `per_token`. `top_n` ranks counterparties by
 activity (`tx_count` desc, address asc); each returned counterparty carries all its tokens.
+`unlabeled_share.tx_count` is summed over the **returned page** (the `top_n` counterparties),
+not the full counterparty set — these are the highest-activity counterparties, the ones
+worth labeling first.
 
 Resolution: `entity_addresses` exact match (tenant rows shadow curated rows). The tool
 suggests labeling, the agent proposes it, the human confirms — the tool never invents

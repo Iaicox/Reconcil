@@ -105,6 +105,15 @@ describe('directory_upsert_entity / directory_list_entities — address book (§
     expect((await directoryListEntities(ctx(), { address: EXT2 })).data.entities).toHaveLength(0);
   });
 
+  it('treats % / _ in the search query as literals, not ILIKE wildcards', async () => {
+    await directoryUpsertEntity(ctx(), { name: 'Ada', kind: 'vendor' });
+    await directoryUpsertEntity(ctx(), { name: 'A%B', kind: 'vendor' }); // % survives the sanitizer
+
+    // Unescaped, 'A%' would match both (wildcard); escaped, only the literal 'A%B'.
+    const hits = (await directoryListEntities(ctx(), { query: 'A%' })).data.entities.map((e) => e.name);
+    expect(hits).toEqual(['A%B']);
+  });
+
   it('sanitizes hostile names and warns SANITIZED_HEAVY when heavily stripped (§7)', async () => {
     const env = await directoryUpsertEntity(ctx(), { name: '‮‮‮AB', kind: 'other' });
     expect(env.warnings.map((w) => w.code)).toContain('SANITIZED_HEAVY');

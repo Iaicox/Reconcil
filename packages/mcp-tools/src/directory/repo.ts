@@ -27,7 +27,15 @@ export async function listEntities(
   input: DirectoryListEntitiesInput,
 ): Promise<DirectoryEntityView[]> {
   const conds = [or(eq(entities.tenantId, ctx.tenantId), isNull(entities.tenantId))];
-  if (input.query !== undefined) conds.push(ilike(entities.name, `%${input.query}%`));
+  if (input.query !== undefined) {
+    // Escape ILIKE metacharacters so % / _ in user input match literally (Postgres'
+    // default LIKE escape is backslash).
+    const pattern = `%${input.query.replace(/[\\%_]/g, '\\$&')}%`;
+    conds.push(ilike(entities.name, pattern));
+  }
+  // `sql` (not `eq`): entities.kind is a branded `$type<union>` column while the contract's
+  // kind filter is a free `string` — `eq` rejects that at the type level. Value is still
+  // parameterized, so this is not an injection surface.
   if (input.kind !== undefined) conds.push(sql`${entities.kind} = ${input.kind}`);
 
   if (input.address !== undefined) {
@@ -155,7 +163,18 @@ export async function upsertEntity(
         }
         continue;
       }
-      await tx.insert(entityAddresses).values({ entityId: id, tenantId: ctx.tenantId, chainId, address: addr });
+      try {
+        await tx.insert(entityAddresses).values({ entityId: id, tenantId: ctx.tenantId, chainId, address: addr });
+      } catch (err) {
+        // Defensive: under concurrency two upserts can both pass the `held` pre-check and
+        // the loser hits the (tenant, chain, address) unique constraint. Map that pg unique
+        // violation (23505) to the same INVALID_INPUT the serial path returns rather than an
+        // opaque INTERNAL. (Rolls back the half-built entity, like any throw in this tx.)
+        if (err !== null && typeof err === 'object' && (err as { code?: string }).code === '23505') {
+          throw new ToolError('INVALID_INPUT', `address already labeled by another entity: ${addr}`);
+        }
+        throw err;
+      }
     }
 
     return { id, created };

@@ -35,6 +35,12 @@ export async function directoryUpsertEntity(
   } catch (err) {
     throw new ToolError('INTERNAL', `directory_upsert_entity produced an output that violates its contract: ${String(err)}`);
   }
+  // FOLLOW-UP (write-tool atomicity, C2): the mutation (upsertEntity's own transaction)
+  // and this audit write are two separate transactions, so a persistToolCall failure in
+  // the brief window after the mutation commits leaves an un-audited write. The clean fix
+  // threads a single transaction through the shared persistToolCall (whose ToolContext.db
+  // is typed Db, not a PgTransaction) — a typing-invasive change to shared plumbing worth
+  // building once when the recon_* write tools land and all need atomic write+audit.
   const toolCallId = await persistToolCall(ctx, {
     toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: [], result: data,
   });
