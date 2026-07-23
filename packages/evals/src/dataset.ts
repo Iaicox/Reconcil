@@ -12,7 +12,11 @@ import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 
 /** Tool names validated against the live registry — a typo fails at load, not at grade time. */
-const toolName = z.enum(tools.map((t) => t.name) as [string, ...string[]]);
+const toolNames = tools.map((t) => t.name);
+if (toolNames.length === 0) {
+  throw new Error('the mcp-tools registry is empty — cannot build the eval tool-name enum');
+}
+const toolName = z.enum(toolNames as [string, ...string[]]);
 
 export const guardrailKind = z.enum([
   'none',

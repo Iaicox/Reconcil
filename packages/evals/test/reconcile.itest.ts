@@ -2,7 +2,7 @@ import { createDb, runMigrations, type Db } from '@pet-crypto/db';
 import { computeBalances } from '@pet-crypto/ledger';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { recordedNativeBalance, seedGoldenWallet } from '../src/seed.js';
 
@@ -37,6 +37,13 @@ afterAll(async () => {
   await container.stop();
 });
 
+// Each case seeds from a clean slate — seedGoldenWallet inserts the native token
+// unconditionally, and tokens has unique(chain_id, address) nullsNotDistinct, so a
+// second seed without truncation would collide.
+beforeEach(async () => {
+  await pool.query('TRUNCATE chain_events, tokens RESTART IDENTITY CASCADE');
+});
+
 describe('golden-wallet reconciliation (freelancer, chain 1, native+gas)', () => {
   it('seeds native+gas through the real pipeline and computes a deterministic balance', async () => {
     const seeded = await seedGoldenWallet(db, 'freelancer', 1);
@@ -50,8 +57,6 @@ describe('golden-wallet reconciliation (freelancer, chain 1, native+gas)', () =>
   });
 
   it('quantifies the R3 internal-inflow gap against the recorded eth_get_balance', async () => {
-    // Re-seed into a clean slate so this case is independent of the one above.
-    await pool.query('TRUNCATE chain_events, tokens RESTART IDENTITY CASCADE');
     const seeded = await seedGoldenWallet(db, 'freelancer', 1);
 
     const res = await computeBalances(db, { scope: { addresses: [seeded.address] } });

@@ -42,14 +42,21 @@ export function canonicalDecimal(raw: string): string | null {
 }
 
 /**
- * Decimal-number tokens in free text, canonicalised + deduped. The pattern is
- * bounded (no nested quantifier over an overlapping class), so it is ReDoS-safe.
- * Incidental digits inside hashes/addresses are a known over-match — tolerable
- * because both the answer and the tool results run through the same extraction.
+ * Decimal-number tokens in free text, canonicalised + deduped. A leading `-` is a sign
+ * only when not preceded by a digit or dot (the `(?<![\d.])` guard), so an ISO date
+ * ("2026-06-30") yields 2026/6/30 rather than 2026/-6/-30, and a range ("1.5-2.5") does
+ * not invent a negative. The pattern is bounded (the lookbehind is zero-width, no nested
+ * quantifier over an overlapping class), so it is ReDoS-safe.
+ *
+ * Two acknowledged limitations, both weakening the check rather than breaking it:
+ * incidental digits inside hashes/addresses over-match, and structural integers in tool
+ * results (decimals: 18, chain_id: 1) enter the anti-fabrication "provided" set — so a
+ * fabricated 18 or 1 can slip through (false negative). A magnitude/context-aware match
+ * is a follow-up once the runner (PR #15) exercises this on real transcripts.
  */
 export function extractNumbers(text: string): Set<string> {
   const out = new Set<string>();
-  for (const m of text.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)) {
+  for (const m of text.matchAll(/(?<![\d.])-?\d[\d,]*(?:\.\d+)?/g)) {
     const c = canonicalDecimal(m[0]);
     if (c !== null) out.add(c);
   }
