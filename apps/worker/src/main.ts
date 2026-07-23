@@ -15,7 +15,7 @@ import {
   buildPriceProviderBundle, realFetchJson as realPriceFetchJson, throttled, runPriceFill,
 } from '@pet-crypto/pricing';
 import { loadConfig } from './config.js';
-import { runOnboardScan } from './onboard.js';
+import { enqueueBackfills, runOnboardScan } from './onboard.js';
 import {
   ANCHOR_QUEUE, BACKFILL_QUEUE, ONBOARD_QUEUE, ONBOARD_TICK_EVERY_MS, PROBE_QUEUE,
   PRICES_QUEUE, PRICE_TICK_EVERY_MS, TAIL_QUEUE,
@@ -95,7 +95,10 @@ async function main(): Promise<void> {
     ANCHOR_QUEUE,
     async (job) => {
       const res = await runAnchor(deps, job.data);
-      await backfillQueue.add('page', { chainId: job.data.chainId, address: job.data.address, stream: job.data.stream }, jobOptions);
+      // Deterministic backfillJobId (via the shared scanner helper) so an anchor-job
+      // retry re-enqueues the SAME page-1 rather than a duplicate — no collision, the
+      // checkpoint is 'backfilling' now so neither scanner nor tail produces this id.
+      await enqueueBackfills([{ chainId: job.data.chainId, address: job.data.address, stream: job.data.stream }], backfillQueue);
       return res;
     },
     { connection, concurrency: 2, settings: { backoffStrategy } },
