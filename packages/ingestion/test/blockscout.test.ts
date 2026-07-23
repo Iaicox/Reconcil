@@ -145,6 +145,32 @@ describe('capabilities (Blockscout has them all)', () => {
     expect(u.searchParams.get('action')).toBe('eth_block_number');
   });
 
+  it('getBlockByTime queries the portable block module and parses the decimal result', async () => {
+    const { transport, calls } = stub({ status: '1', message: 'OK', result: '18500000' });
+    const block = await adapter(transport).getBlockByTime!(1, 1700000000);
+    expect(block).toBe(18500000n);
+    const u = new URL(calls[0] ?? '');
+    expect(u.searchParams.get('module')).toBe('block');
+    expect(u.searchParams.get('action')).toBe('getblocknobytime');
+    expect(u.searchParams.get('timestamp')).toBe('1700000000');
+    expect(u.searchParams.get('closest')).toBe('before');
+  });
+
+  it('rejects a non-decimal getblocknobytime result as malformed without leaking it', async () => {
+    const hostile = 'upgrade at https://evil.example';
+    const { transport } = stub({ status: '1', message: 'OK', result: hostile });
+    await expect(adapter(transport).getBlockByTime!(1, 1)).rejects.toMatchObject({
+      name: 'ProviderError',
+      kind: 'malformed',
+      message: expect.not.stringContaining('evil.example') as unknown,
+    });
+  });
+
+  it('does not expose estimateTxCount (proxy module unsupported; probe degrades)', () => {
+    const { transport } = stub({});
+    expect(adapter(transport).estimateTxCount).toBeUndefined();
+  });
+
   it('getReceipts reuses the shared receipt mapping', async () => {
     const { transport } = stub({
       jsonrpc: '2.0',

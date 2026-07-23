@@ -13,9 +13,25 @@ import { etherscanV2Adapter } from './etherscan-v2.js';
 import { blockscoutAdapter } from './blockscout.js';
 import { httpRpcCall, rpcGetReceipts, type RpcCall } from './rpc.js';
 
+/** A provider-attested balance plus the provider that served it (ADR-009 audit:
+ *  the opening_balance event records this on `chain_events.provider`). */
+export interface BalanceResult {
+  balance: bigint;
+  provider: string;
+}
+
 export interface ProviderBundle {
   indexer: ChainDataProvider;
   getReceipts(hashes: string[]): Promise<RawReceipt[]>;
+  // Anchoring capabilities (ADR-008), chain bound at build time. Balance-at-block
+  // routes to whichever provider serves it (etherscan is Pro-only, blockscout free);
+  // a required capability with no serving provider throws (explicit degradation).
+  getBlockByTime(unixSeconds: number): Promise<bigint>;
+  getNativeBalanceAt(address: string, block: bigint): Promise<BalanceResult>;
+  getErc20BalanceAt(address: string, token: string, block: bigint): Promise<BalanceResult>;
+  // >50k probe (ADR-008 Q5): best-effort — degrades to undefined (no suggestion)
+  // when no provider can serve it, so a gap never blocks onboarding.
+  estimateTxCount(address: string): Promise<number | undefined>;
 }
 
 export function failoverProvider(providers: ChainDataProvider[]): ChainDataProvider {
@@ -77,5 +93,60 @@ export function buildProviderBundle(opts: {
     return etherscan.getReceipts?.(opts.chainId, hashes) ?? [];
   };
 
-  return { indexer, getReceipts };
+  // Capability routing (ADR-009): try providers in failover order, skipping any
+  // that does not implement the capability, failing over on a ProviderError.
+  const capabilityProviders: ChainDataProvider[] = [etherscan, blockscout];
+  const requireCapability = async <R>(
+    method: keyof ChainDataProvider,
+    invoke: (p: ChainDataProvider) => Promise<R>,
+    label: string,
+  ): Promise<R> => {
+    let last: unknown;
+    let capable = false;
+    for (const p of capabilityProviders) {
+      if (typeof p[method] !== 'function') continue;
+      capable = true;
+      try {
+        return await invoke(p);
+      } catch (err) {
+        if (!(err instanceof ProviderError)) throw err;
+        last = err;
+      }
+    }
+    if (!capable) {
+      throw new ProviderError('provider_error', `no provider serves ${label} on chain ${String(opts.chainId)}`);
+    }
+    throw last;
+  };
+
+  return {
+    indexer,
+    getReceipts,
+    getBlockByTime: (unixSeconds) =>
+      requireCapability('getBlockByTime', (p) => p.getBlockByTime!(opts.chainId, unixSeconds), 'block-by-time'),
+    getNativeBalanceAt: (address, block) =>
+      requireCapability(
+        'getNativeBalanceAt',
+        async (p) => ({ balance: await p.getNativeBalanceAt!(opts.chainId, address, block), provider: p.kind }),
+        'native balance-at-block',
+      ),
+    getErc20BalanceAt: (address, token, block) =>
+      requireCapability(
+        'getErc20BalanceAt',
+        async (p) => ({ balance: await p.getErc20BalanceAt!(opts.chainId, address, token, block), provider: p.kind }),
+        'erc20 balance-at-block',
+      ),
+    estimateTxCount: async (address) => {
+      // Best-effort (ADR-008 Q5): a provider gap or error yields no hint, never a throw.
+      for (const p of capabilityProviders) {
+        if (typeof p.estimateTxCount !== 'function') continue;
+        try {
+          return await p.estimateTxCount(opts.chainId, address);
+        } catch (err) {
+          if (!(err instanceof ProviderError)) throw err;
+        }
+      }
+      return undefined;
+    },
+  };
 }
