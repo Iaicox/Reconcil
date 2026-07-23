@@ -16,11 +16,18 @@ function makeEnvelope(
 }
 
 describe('renderEnvelope', () => {
-  it('renders data and a tool_call_id footer, no warnings line when clean', () => {
+  it('summarizes scalar fields and appends a tool_call_id footer, no warnings line when clean', () => {
     const text = renderEnvelope(makeEnvelope({ total: '100.50' }));
-    expect(text).toContain('"total": "100.50"');
+    expect(text).toContain('total: 100.50');
     expect(text).toContain('tool_call_id: call_123');
     expect(text).not.toContain('warnings:');
+  });
+
+  it('renders arrays as counts, not a full dump (§2 short text)', () => {
+    const text = renderEnvelope(makeEnvelope({ balances: [1, 2, 3], totals: [1] }));
+    expect(text).toContain('balances: 3');
+    expect(text).toContain('totals: 1');
+    expect(text).not.toContain('['); // the array elements themselves are not serialized
   });
 
   it('lists warning codes when present', () => {

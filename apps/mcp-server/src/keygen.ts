@@ -8,13 +8,14 @@
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-import { createLogger, serializeError } from '@pet-crypto/core';
+import { serializeError } from '@pet-crypto/core';
 import { apiKeys, createDb, tenants, type Db } from '@pet-crypto/db';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 
 import { hashKey } from './auth.js';
 import { loadConfig } from './config.js';
+import { createStderrLogger } from './logger.js';
 
 /** Mint and persist a key for `slug`; returns the plaintext (caller shows it once). */
 export async function mintKey(db: Db, slug: string, label?: string): Promise<string> {
@@ -31,7 +32,8 @@ export async function mintKey(db: Db, slug: string, label?: string): Promise<str
 }
 
 async function runCli(argv: string[]): Promise<void> {
-  const logger = createLogger({ name: 'mcp-server:keygen' });
+  // Logs to stderr so stdout carries only the one-time plaintext key (clean `| head -1`).
+  const logger = createStderrLogger('mcp-server:keygen');
   const [slug, label] = argv;
   if (slug === undefined) {
     logger.error('usage: tsx src/keygen.ts <tenant-slug> [label]');
@@ -52,7 +54,7 @@ async function runCli(argv: string[]): Promise<void> {
 // Runs only when invoked directly (tsx src/keygen.ts …); inert when imported.
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runCli(process.argv.slice(2)).catch((err: unknown) => {
-    createLogger({ name: 'mcp-server:keygen' }).error('keygen failed', { err: serializeError(err) });
+    createStderrLogger('mcp-server:keygen').error('keygen failed', { err: serializeError(err) });
     process.exit(1);
   });
 }

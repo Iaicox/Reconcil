@@ -14,6 +14,17 @@ export function hashKey(presentedKey: string): string {
 }
 
 /**
+ * Extract the token from an `Authorization: Bearer <token>` header, or null if the
+ * header is absent or not a Bearer credential. The scheme match is case-insensitive
+ * (RFC 7235 §2.1: auth schemes are case-insensitive) so a compliant `bearer …`
+ * client is not spuriously rejected.
+ */
+export function parseBearerToken(header: string | undefined): string | null {
+  if (header === undefined) return null;
+  return /^Bearer\s+(.+)$/i.exec(header)?.[1] ?? null;
+}
+
+/**
  * Resolve the tenant behind a presented bearer key, or null for an unknown or
  * revoked key. The caller answers 401 without distinguishing the two — a missing
  * key and a wrong key are indistinguishable to the client (no oracle).

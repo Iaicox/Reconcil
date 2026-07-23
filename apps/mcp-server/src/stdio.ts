@@ -1,10 +1,11 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { serializeError, type Logger } from '@pet-crypto/core';
+import { serializeError } from '@pet-crypto/core';
 import { createDb } from '@pet-crypto/db';
 import { Pool } from 'pg';
 
 import { ensureSelfHostTenant } from './auth.js';
 import { loadConfig } from './config.js';
+import { createStderrLogger } from './logger.js';
 import { createServer } from './server.js';
 
 /**
@@ -12,24 +13,17 @@ import { createServer } from './server.js';
  * Auth: none (process trust); the tenant is the single self-host tenant, resolved
  * and created-on-first-run from config, then fixed for every tool call.
  *
- * stdout carries the JSON-RPC protocol, so logs MUST go to stderr — createLogger
- * writes to stdout and would corrupt the stream. Hence this local stderr Logger.
+ * stdout carries the JSON-RPC protocol, so logs go to stderr (createStderrLogger)
+ * — a stray stdout log line would corrupt the stream.
  */
-const log = (level: string, msg: string, fields?: Record<string, unknown>): void => {
-  process.stderr.write(`${JSON.stringify({ time: new Date().toISOString(), level, name: 'mcp-server:stdio', msg, ...fields })}\n`);
-};
-const logger: Logger = {
-  info: (msg, fields) => { log('info', msg, fields); },
-  warn: (msg, fields) => { log('warn', msg, fields); },
-  error: (msg, fields) => { log('error', msg, fields); },
-};
+const logger = createStderrLogger('mcp-server:stdio');
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const pool = new Pool({ connectionString: cfg.DATABASE_URL });
 
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-    process.once(sig, () => { void pool.end().finally(() => { process.exit(0); }); });
+    process.once(sig, () => { void pool.end().catch(() => {}).finally(() => { process.exit(0); }); });
   }
 
   const db = createDb(pool);
