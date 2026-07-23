@@ -26,6 +26,8 @@ beforeEach(async () => { await S.truncate(); });
 
 const ctx: () => ToolContext = () => ({ db, tenantId: TENANT });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CLIENT = '00000000-0000-0000-0000-0000000000c1';
+const CLIENT2 = '00000000-0000-0000-0000-0000000000c2';
 
 async function checkpointRows(): Promise<{ chain_id: number; address: string; stream: string; status: string }[]> {
   const { rows } = await pool.query(
@@ -67,14 +69,16 @@ describe('ledger_track_wallet — onboarding write, idempotency, tenancy', () =>
     expect((await pool.query(`SELECT label FROM wallets`)).rows[0]).toEqual({ label: 'treasury' });
   });
 
-  it('does not disturb an in-progress stream on re-track', async () => {
+  it('does not disturb an in-progress stream on re-track, and reports only the newly-queued one', async () => {
     await S.tenant(TENANT, 'acme');
     await S.checkpoint(OWNED, 'native', 'live');
-    await ledgerTrackWallet(ctx(), { address: OWNED, chains: [1] });
+    const env = await ledgerTrackWallet(ctx(), { address: OWNED, chains: [1] });
 
     const cps = await checkpointRows();
     expect(cps.find((c) => c.stream === 'native')?.status).toBe('live'); // preserved
     expect(cps.find((c) => c.stream === 'erc20')?.status).toBe('queued'); // newly seeded
+    // F2: enqueued reflects only streams this call actually queued — native (already live) excluded
+    expect(env.data.enqueued).toEqual([{ chain_id: 1, stream: 'erc20', job_id: `backfill:1:${OWNED}:erc20` }]);
   });
 
   it('defaults to all enabled chains when none are given', async () => {
@@ -115,5 +119,31 @@ describe('ledger_track_wallet — onboarding write, idempotency, tenancy', () =>
     expect(b.data.wallet_id).not.toBe(a.data.wallet_id); // per-tenant wallet rows
     expect((await pool.query(`SELECT count(*)::int AS n FROM wallets`)).rows[0]).toEqual({ n: 2 });
     expect(await checkpointRows()).toHaveLength(2); // one global (chain, address, stream) set
+    // F2: the checkpoints already existed (queued by tenant 1) → tenant 2 queued nothing new
+    expect(b.data.enqueued).toEqual([]);
+  });
+
+  it('rejects a client_id that is malformed / unknown / owned by another tenant (ADR-006)', async () => {
+    await S.tenant(TENANT, 'acme');
+    await S.tenant(TENANT2, 'other');
+    await S.client(CLIENT2, TENANT2, 'foreign');
+
+    await expect(ledgerTrackWallet(ctx(), { address: OWNED, chains: [1], client_id: 'not-a-uuid' }))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(ledgerTrackWallet(ctx(), { address: OWNED, chains: [1], client_id: '00000000-0000-0000-0000-0000000000cf' }))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    // valid UUID, but owned by TENANT2 — must not silently attach this tenant's wallet to it
+    await expect(ledgerTrackWallet(ctx(), { address: OWNED, chains: [1], client_id: CLIENT2 }))
+      .rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    // validation runs before any write
+    expect((await pool.query(`SELECT count(*)::int AS n FROM wallets`)).rows[0]).toEqual({ n: 0 });
+  });
+
+  it('attaches a client_id owned by the tenant', async () => {
+    await S.tenant(TENANT, 'acme');
+    await S.client(CLIENT, TENANT, 'acme-sub');
+    const env = await ledgerTrackWallet(ctx(), { address: OWNED, chains: [1], client_id: CLIENT });
+    expect(env.data.wallet_id).toMatch(UUID);
+    expect((await pool.query(`SELECT client_id FROM wallets`)).rows[0]).toEqual({ client_id: CLIENT });
   });
 });

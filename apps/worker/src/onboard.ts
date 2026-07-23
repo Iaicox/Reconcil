@@ -6,6 +6,16 @@
  * (`backfillJobId`) so repeated scans and the id the tool returned to the caller
  * line up. Runs as a repeatable worker tick in main.ts; the first `commitPage`
  * flips a checkpoint off the queued set, so this self-empties.
+ *
+ * Failure-path caveat (known, tracked): `jobOptions.removeOnFail=false` (ADR-008
+ * DLQ) means a page-1 backfill that exhausts all attempts is retained in Redis
+ * under its deterministic id; `commitPage` never ran, so the checkpoint stays
+ * `queued`, and the next scan's re-add is deduped against the retained failed job
+ * → no retry, and nothing flips the checkpoint to `error`, so `ledger_status`
+ * won't surface it. Recovery today is operational: clear the DLQ'd backfill job.
+ * A robust fix (mark the checkpoint `error` on permanent failure, and/or drop a
+ * stale failed job before re-adding) belongs with the backfill error-surfacing
+ * slice. Continuation pages use auto-ids, so only page-1 can wedge this way.
  */
 import { backfillJobId } from '@pet-crypto/core';
 import type { Db } from '@pet-crypto/db';

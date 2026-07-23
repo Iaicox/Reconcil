@@ -13,9 +13,12 @@ export function mapCoverage(cov: WalletCoverage[]): { coverageRefs: CoverageRef[
   let anchored = false;
   let stale = false;
   for (const w of cov) {
+    // `queued` (not yet started) has no CoverageRef enum value; it is not-live/
+    // incomplete, so it maps to `backfilling` — never `live` (a fresh wallet must
+    // not read as fully covered).
     const status: CoverageRef['status'] = w.streams.some((s) => s.status === 'error')
       ? 'error'
-      : w.streams.some((s) => s.status === 'backfilling')
+      : w.streams.some((s) => s.status === 'backfilling' || s.status === 'queued')
         ? 'backfilling'
         : w.streams.some((s) => s.status === 'paused')
           ? 'paused'

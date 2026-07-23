@@ -68,6 +68,7 @@ export interface EntityAddressOpts {
 export interface Seeder {
   truncate(): Promise<void>;
   tenant(id: string, slug: string): Promise<void>;
+  client(id: string, tenantId: string, name: string): Promise<void>;
   wallet(id: string, tenantId: string, address: string): Promise<void>;
   token(id: number, o?: TokenOpts): Promise<void>;
   event(o: EventOpts): Promise<void>;
@@ -84,11 +85,14 @@ export function makeSeeder(pool: Pool, db: Db): Seeder {
 
   return {
     async truncate() {
-      await pool.query('TRUNCATE tenants, wallets, chain_events, tokens, price_snapshots, fx_rates, ingestion_checkpoints, tool_calls, entities, entity_addresses RESTART IDENTITY CASCADE');
+      await pool.query('TRUNCATE tenants, clients, wallets, chain_events, tokens, price_snapshots, fx_rates, ingestion_checkpoints, tool_calls, entities, entity_addresses RESTART IDENTITY CASCADE');
       seq = 0;
     },
     async tenant(id, slug) {
       await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, $2, $2)`, [id, slug]);
+    },
+    async client(id, tenantId, name) {
+      await pool.query(`INSERT INTO clients (id, tenant_id, name) VALUES ($1, $2, $3)`, [id, tenantId, name]);
     },
     async wallet(id, tenantId, address) {
       await pool.query(`INSERT INTO wallets (id, tenant_id, address) VALUES ($1, $2, $3)`, [id, tenantId, address]);

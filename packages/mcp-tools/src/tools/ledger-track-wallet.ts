@@ -19,6 +19,7 @@ import { and, eq } from 'drizzle-orm';
 import type { ToolContext } from '../context.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { resolveClientId } from '../scope.js';
 import { persistToolCall } from '../tool-calls.js';
 
 export const TOOL_NAME = 'ledger_track_wallet';
@@ -49,6 +50,9 @@ export async function ledgerTrackWallet(
   // Config order, de-duped.
   const targetChains = chains.map((c) => c.chainId).filter((c) => requested.includes(c));
 
+  // Reject a client_id that isn't the tenant's own before any write (ADR-006).
+  const clientId = await resolveClientId(ctx, input.client_id);
+
   // Idempotent wallet upsert; a re-track returns the existing id (never a duplicate).
   await ctx.db
     .insert(wallets)
@@ -56,7 +60,7 @@ export async function ledgerTrackWallet(
       tenantId: ctx.tenantId,
       address,
       ...(input.label !== undefined ? { label: input.label } : {}),
-      ...(input.client_id !== undefined ? { clientId: input.client_id } : {}),
+      ...(clientId !== null ? { clientId } : {}),
     })
     .onConflictDoNothing({ target: [wallets.tenantId, wallets.address] });
   const [w] = await ctx.db
@@ -66,14 +70,20 @@ export async function ledgerTrackWallet(
     .limit(1);
   if (!w) throw new ToolError('INTERNAL', 'wallet upsert did not persist');
 
+  // Seed queued checkpoints and report only the streams THIS call actually queued.
+  // Checkpoints are global; a stream already live/backfilling is a no-op insert the
+  // scanner (queued-only) never enqueues, so `.returning()` keeps `enqueued` truthful.
   const enqueued: LedgerTrackWalletOutput['enqueued'] = [];
   for (const chainId of targetChains) {
     for (const stream of STREAMS) {
-      await ctx.db
+      const inserted = await ctx.db
         .insert(ingestionCheckpoints)
         .values({ chainId, address, stream, status: 'queued' })
-        .onConflictDoNothing();
-      enqueued.push({ chain_id: chainId, stream, job_id: backfillJobId(chainId, address, stream) });
+        .onConflictDoNothing()
+        .returning({ stream: ingestionCheckpoints.stream });
+      if (inserted.length > 0) {
+        enqueued.push({ chain_id: chainId, stream, job_id: backfillJobId(chainId, address, stream) });
+      }
     }
   }
 

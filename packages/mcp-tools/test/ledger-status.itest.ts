@@ -105,6 +105,8 @@ describe('ledger_status — coverage/freshness, integrity, warnings, tenancy', (
     expect(w.streams.every((s) => s.status === 'queued')).toBe(true);
     expect(w.streams.every((s) => s.last_block_time === undefined)).toBe(true);
     expect(env.warnings.map((x) => x.code)).toContain('COVERAGE_INCOMPLETE');
+    // F5: a not-yet-started stream must not read as 'live' in the coverage slice
+    expect(env.citations.coverage[0]!.status).toBe('backfilling');
   });
 
   it('is tenant-scoped: another tenant cannot reach an address it does not track', async () => {

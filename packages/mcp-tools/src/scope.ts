@@ -4,8 +4,8 @@
  * fields intersect; default (no scope) = all of the tenant's wallets. Unknown
  * wallet ids / untracked addresses are loud domain errors, not silent empties.
  */
-import { wallets } from '@pet-crypto/db';
-import { eq } from 'drizzle-orm';
+import { clients, wallets } from '@pet-crypto/db';
+import { eq, sql } from 'drizzle-orm';
 
 import type { Scope } from '@pet-crypto/core';
 
@@ -14,6 +14,24 @@ import { ToolError } from './errors.js';
 
 export interface ResolvedScope {
   addresses: string[]; // lowercase, tenant-tracked
+}
+
+/**
+ * Validate a caller-supplied `client_id` belongs to the session tenant (ADR-006).
+ * `undefined` → `null` (single-company mode). `clients.id::text` is canonical
+ * lowercase, so a non-UUID / unknown / other-tenant value all fall through to
+ * "no row" → INVALID_INPUT — never a raw Postgres uuid-cast error, and never a
+ * silent cross-tenant attachment. Returns the canonical id to store.
+ */
+export async function resolveClientId(ctx: ToolContext, clientId?: string): Promise<string | null> {
+  if (clientId === undefined) return null;
+  const rows = await ctx.db
+    .select({ id: clients.id })
+    .from(clients)
+    .where(sql`${clients.id}::text = ${clientId.toLowerCase()} and ${clients.tenantId} = ${ctx.tenantId}`)
+    .limit(1);
+  if (rows.length === 0) throw new ToolError('INVALID_INPUT', `unknown client_id: ${clientId}`);
+  return rows[0]!.id;
 }
 
 export async function resolveScope(ctx: ToolContext, scope?: Scope): Promise<ResolvedScope> {
