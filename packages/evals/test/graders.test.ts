@@ -91,6 +91,16 @@ describe('G2 numeric', () => {
     const e: EvalExpect = { numbers: [{ value: '15230.42', label: 'USDC balance' }] };
     expect(gradeNumeric(t, e).pass).toBe(false);
   });
+  it('does not flag digits from a cited tool_call_id — provenance is legitimately tool-returned', () => {
+    // The id's "9" is absent from data; before anti-fabrication traced the whole envelope
+    // (data + citations) this failed, penalising the agent for citing provenance (P1/P2).
+    const t = script(
+      [inv('analytics_balances', data, { toolCallId: '01J9K3P7QZ' })],
+      'Your USDC balance was 15230.42 (traceable via tool_call_id 01J9K3P7QZ).',
+    );
+    const e: EvalExpect = { numbers: [{ value: '15230.42', label: 'USDC balance' }] };
+    expect(gradeNumeric(t, e).pass).toBe(true);
+  });
 });
 
 describe('G3 citation', () => {
