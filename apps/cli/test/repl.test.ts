@@ -32,9 +32,9 @@ describe('parseCommand', () => {
 });
 
 describe('renderInvocation', () => {
-  const envelope = (id?: string): ToolEnvelope<unknown> => ({
+  const envelope = (id: string): ToolEnvelope<unknown> => ({
     data: {},
-    citations: id === undefined ? { coverage: [] } : { tool_call_id: id, coverage: [] },
+    citations: { tool_call_id: id, coverage: [] },
     warnings: [],
     meta: { schema_version: 1, computed_at: '2026-07-24T00:00:00.000Z', units: 'decimal-string' },
   });
@@ -44,10 +44,5 @@ describe('renderInvocation', () => {
     const line = renderInvocation(inv);
     expect(line).toContain('analytics_balances');
     expect(line).toContain('tc-9');
-  });
-
-  it('marks a missing tool_call_id rather than printing undefined', () => {
-    const inv: Invocation = { name: 'directory_list_entities', args: {}, envelope: envelope() };
-    expect(renderInvocation(inv)).toContain('no id');
   });
 });

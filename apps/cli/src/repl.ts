@@ -2,9 +2,11 @@
  * Interactive demo REPL (P11): the conversational twin of the eval runner. It drives the
  * Anthropic Tool Runner over the same in-process MCP tool binding and system prompt as the
  * eval agent (agent/core.ts), but against a REAL, tenant-scoped database instead of a
- * fixture — the thing you show in the OSS demo. Read-only by construction: the tools are
- * the merged registry, the LLM never computes (P1), and figures trace through the citation
- * envelope (P2). The Anthropic API key is needed only here and in the eval harness.
+ * fixture — the thing you show in the OSS demo. The LLM never computes (P1) and every
+ * figure traces through the citation envelope (P2). The bound registry is read-only
+ * analytics plus the two non-destructive, tenant-scoped writes (ledger_track_wallet,
+ * directory upserts — P8); there is no signing or custody anywhere (the MiCA red line).
+ * The Anthropic API key is needed only here and in the eval harness.
  *
  * Multi-turn is deliberately text-only: each turn seeds the runner with a copy of the
  * conversation so the runner's internal tool_use/tool_result rounds never leak into the
@@ -53,8 +55,8 @@ export function parseCommand(line: string): Command {
 
 /** A compact one-line trace for a tool call: name + the tool_call_id that traces provenance (C2). */
 export function renderInvocation(inv: Invocation): string {
-  const id = inv.envelope.citations.tool_call_id ?? '(no id)';
-  return `  → ${inv.name}  [${id}]`;
+  // tool_call_id is a required Citations field (C2) — every envelope carries it.
+  return `  → ${inv.name}  [${inv.envelope.citations.tool_call_id}]`;
 }
 
 const HELP = `Commands:
@@ -91,6 +93,7 @@ export async function runRepl(argv: string[] = process.argv.slice(3)): Promise<v
   const slug = process.env['SELF_HOST_TENANT_SLUG'] ?? 'self-host';
   const name = process.env['SELF_HOST_TENANT_NAME'] ?? 'Self-hosted';
   const model = modelFromArgv(argv);
+  // Captured once at startup: a session left open across midnight keeps this date — fine for a demo.
   const referenceDate = new Date().toISOString().slice(0, 10);
 
   const client = new Anthropic();
@@ -103,6 +106,13 @@ export async function runRepl(argv: string[] = process.argv.slice(3)): Promise<v
     const tenantId = await ensureSelfHostTenant(db, slug, name);
     const ctx: ToolContext = { db, tenantId };
     const history: Anthropic.Beta.BetaMessageParam[] = [];
+
+    // ctx, the prompt, and the tool binding are fixed for the whole session — build once.
+    const systemPrompt = buildSystemPrompt(referenceDate);
+    const onInvocation = (inv: Invocation): void => {
+      console.log(renderInvocation(inv));
+    };
+    const runnableTools = buildRunnableTools(ctx, onInvocation);
 
     console.log(`pet-crypto demo REPL — tenant "${slug}", model ${model}, today ${referenceDate}.`);
     console.log('Type /help for commands, /exit to quit.');
@@ -133,9 +143,6 @@ export async function runRepl(argv: string[] = process.argv.slice(3)): Promise<v
       }
 
       history.push({ role: 'user', content: cmd.text });
-      const onInvocation = (inv: Invocation): void => {
-        console.log(renderInvocation(inv));
-      };
 
       let answer: string;
       try {
@@ -144,8 +151,8 @@ export async function runRepl(argv: string[] = process.argv.slice(3)): Promise<v
             model,
             max_tokens: 4096,
             max_iterations: 8,
-            system: buildSystemPrompt(referenceDate),
-            tools: buildRunnableTools(ctx, onInvocation),
+            system: systemPrompt,
+            tools: runnableTools,
             messages: [...history], // copy: the runner's internal rounds must not leak into our history
           })
           .runUntilDone();
@@ -159,8 +166,14 @@ export async function runRepl(argv: string[] = process.argv.slice(3)): Promise<v
         continue;
       }
 
-      console.log(`\nassistant › ${answer === '' ? '(no response)' : answer}`);
-      history.push({ role: 'assistant', content: answer === '' ? '(no response)' : answer });
+      if (answer === '') {
+        // No final text (e.g. the model stopped after tool calls). Don't store a synthetic
+        // assistant turn; the unanswered user turn merges with the next question (API-legal).
+        console.log('\nassistant › (no text response)');
+        continue;
+      }
+      console.log(`\nassistant › ${answer}`);
+      history.push({ role: 'assistant', content: answer });
     }
   } finally {
     rl.close();
