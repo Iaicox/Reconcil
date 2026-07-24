@@ -189,4 +189,12 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 | `evals-full` | nightly + manual | 30 cases × 3 runs, publishes scorecard artifact |
 
 Secrets policy: `ANTHROPIC_API_KEY` only in `evals-*`; provider keys never needed in CI
-(fixtures only).
+(fixtures only). An `evals-preflight` job resolves secret presence into an output the eval
+jobs gate on, so a missing key makes them **skip** (grey), never fail red.
+
+Gate cadence — deliberate: the live gate runs **pre-merge on the PR** (`evals-smoke`) and
+**nightly / on-demand** (`evals-full`), **not** on push to `main`. So the demo-readiness gate
+is a per-PR + nightly signal, not a per-`main`-push blocker; a change that lands on `main`
+without a PR (or a non-determinism only `evals-full` exercises) is caught by the next nightly.
+The deterministic reconciliation + ground-truth-numbers itests DO run on every PR (keyless
+`integration` job), so the R3/P1-P2 guarantees are enforced per-PR regardless.

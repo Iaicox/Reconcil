@@ -14,7 +14,8 @@
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs"
+    "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
+    "check:supply-chain": "node scripts/check-no-signing-libs.cjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

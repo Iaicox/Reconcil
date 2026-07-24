@@ -11,11 +11,11 @@ import { join, resolve } from 'node:path';
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createDb, runMigrations, type Db } from '@pet-crypto/db';
-import { coreDatasetPath, loadDataset, type EvalCase } from '@pet-crypto/evals';
+import { loadDataset, type EvalCase } from '@pet-crypto/evals';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 
-import { parseArgs } from './evals/args.js';
+import { DATASETS, parseArgs } from './evals/args.js';
 import { makeAgentProducer } from './evals/agent.js';
 import { evaluateGate } from './evals/gate.js';
 import { runSuite } from './evals/harness.js';
@@ -71,7 +71,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  const all = loadDataset(coreDatasetPath());
+  // parseArgs validated args.suite is a known DATASETS key.
+  const all = loadDataset(DATASETS[args.suite]!());
   const dataset: EvalCase[] = args.smoke ? all.filter((c) => SMOKE_IDS.has(c.id)) : all;
 
   const client = new Anthropic();

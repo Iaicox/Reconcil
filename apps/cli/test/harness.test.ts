@@ -156,4 +156,15 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['--runs', '-1'])).toThrow(/positive integer/);
     expect(() => parseArgs(['--runs', '2.5'])).toThrow(/positive integer/);
   });
+  it('throws on an unknown flag rather than silently running (a typo must not 30×3 the API spend)', () => {
+    expect(() => parseArgs(['--smoek'])).toThrow(/unknown argument/);
+  });
+  it('tolerates the `--` pnpm forwards and a leading `run` token', () => {
+    expect(parseArgs(['--', '--smoke']).smoke).toBe(true);
+    expect(parseArgs(['run', '--suite', 'core']).suite).toBe('core');
+  });
+  it('selects a known suite and rejects an unknown one', () => {
+    expect(parseArgs(['--suite', 'core']).suite).toBe('core');
+    expect(() => parseArgs(['--suite', 'nope'])).toThrow(/unknown suite/);
+  });
 });
