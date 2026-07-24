@@ -5,6 +5,7 @@ import type {
   Page,
   PageQuery,
   RawErc20Transfer,
+  RawInternalTx,
   RawNativeTx,
   RawReceipt,
 } from '../types.js';
@@ -30,6 +31,24 @@ const txRow = z.object({
   gasPrice: decQuantity,
   isError: z.enum(['0', '1']),
 });
+
+// txlistinternal rows carry the same numeric-string discipline as txlist but no gas
+// (the parent tx's fee already covers it). `to` is '' for internal contract creations.
+// The parent-tx hash key differs by provider — Etherscan V2 sends `hash`, Blockscout's
+// etherscan-compat shim sends `transactionHash` (verified at capture, spec §7) — so
+// accept either and coalesce in mapInternalRows.
+const internalRow = z
+  .object({
+    blockNumber: decQuantity,
+    timeStamp: decQuantity,
+    hash: z.string().optional(),
+    transactionHash: z.string().optional(),
+    from: z.string(),
+    to: z.string(),
+    value: decQuantity,
+    isError: z.enum(['0', '1']),
+  })
+  .refine((r) => r.hash !== undefined || r.transactionHash !== undefined, 'missing parent tx hash');
 
 const tokenRow = z.object({
   blockNumber: decQuantity,
@@ -81,6 +100,19 @@ export function mapTxRows(rows: z.infer<typeof txRow>[]): RawNativeTx[] {
   }));
 }
 
+export function mapInternalRows(rows: z.infer<typeof internalRow>[]): RawInternalTx[] {
+  return rows.map((r) => ({
+    blockNumber: r.blockNumber,
+    timeStamp: r.timeStamp,
+    // refine() above guarantees at least one is present.
+    hash: (r.transactionHash ?? r.hash)!,
+    from: r.from,
+    to: r.to === '' ? null : r.to,
+    value: r.value,
+    isError: r.isError,
+  }));
+}
+
 export function mapTokenRows(rows: z.infer<typeof tokenRow>[]): RawErc20Transfer[] {
   return rows.map((r) => ({
     blockNumber: r.blockNumber,
@@ -115,7 +147,7 @@ export function mapReceipt(r: z.infer<typeof receiptResult>): RawReceipt {
   };
 }
 
-export { txRow, tokenRow, receiptResult };
+export { txRow, internalRow, tokenRow, receiptResult };
 
 export function etherscanV2Adapter(opts: {
   fetchJson: FetchJson;
@@ -155,6 +187,22 @@ export function etherscanV2Adapter(opts: {
       });
       const rows = parseRows(z.array(txRow), unwrapAccountEnvelope(status, body));
       return { items: mapTxRows(rows) };
+    },
+
+    async getInternalTxs(q: PageQuery): Promise<Page<RawInternalTx>> {
+      const { status, body } = await call({
+        chainid: String(q.chainId),
+        module: 'account',
+        action: 'txlistinternal',
+        address: q.address,
+        startblock: q.fromBlock.toString(),
+        endblock: q.toBlock.toString(),
+        page: '1',
+        offset: String(q.limit),
+        sort: q.sort,
+      });
+      const rows = parseRows(z.array(internalRow), unwrapAccountEnvelope(status, body));
+      return { items: mapInternalRows(rows) };
     },
 
     async getErc20Transfers(q: PageQuery): Promise<Page<RawErc20Transfer>> {

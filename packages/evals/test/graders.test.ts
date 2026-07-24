@@ -46,6 +46,11 @@ describe('extractNumbers', () => {
     expect(extractNumbers('net was -3.5 ETH')).toEqual(new Set(['-3.5']));
     expect(extractNumbers('between 1.5-2.5')).toEqual(new Set(['1.5', '2.5']));
   });
+  it('ignores digits inside a full 0x hash/address (a quoted full hash is not a figure)', () => {
+    // Only the real figure survives; a full hash contributes nothing on either side of G2.
+    expect(extractNumbers('tx 0x765b4b760f87edc990d033a9f3f603765e86b7cb moved 0.5 ETH')).toEqual(new Set(['0.5']));
+    expect(extractNumbers('from 0xf321de563a4420afdf15e68ace4d9254c0963905')).toEqual(new Set());
+  });
 });
 
 describe('G1 trajectory', () => {
@@ -85,6 +90,16 @@ describe('G2 numeric', () => {
     const t = script([inv('analytics_balances', data)], 'You have 15230.42 USDC and roughly 999 pending.');
     const e: EvalExpect = { numbers: [{ value: '15230.42', label: 'USDC balance' }] };
     expect(gradeNumeric(t, e).pass).toBe(false);
+  });
+  it('does not flag digits from a cited tool_call_id — provenance is legitimately tool-returned', () => {
+    // The id's "9" is absent from data; before anti-fabrication traced the whole envelope
+    // (data + citations) this failed, penalising the agent for citing provenance (P1/P2).
+    const t = script(
+      [inv('analytics_balances', data, { toolCallId: '01J9K3P7QZ' })],
+      'Your USDC balance was 15230.42 (traceable via tool_call_id 01J9K3P7QZ).',
+    );
+    const e: EvalExpect = { numbers: [{ value: '15230.42', label: 'USDC balance' }] };
+    expect(gradeNumeric(t, e).pass).toBe(true);
   });
 });
 

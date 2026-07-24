@@ -23,5 +23,8 @@ catalog:
   vitest: ^4.1.0
   zod: ^4.0.0
 
+minimumReleaseAgeExclude:
+  - '@anthropic-ai/sdk@0.114.0'
+
 onlyBuiltDependencies:
   - esbuild

@@ -159,5 +159,6 @@ export { mapCoverage } from './coverage.js';
 export { toTokenView } from './token-view.js';
 export { selectRefs, dedupeRefs, REF_CAP } from './refs.js';
 export { ulid } from './ulid.js';
+export { describeTool, UNTRUSTED_NOTE } from './descriptions.js';
 export { ToolError, type ErrorCode } from './errors.js';
 export type { ToolContext } from './context.js';

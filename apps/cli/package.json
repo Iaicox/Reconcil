@@ -2,23 +2,30 @@
   "name": "@pet-crypto/cli",
   "version": "0.0.0",
   "private": true,
-  "description": "Thin CLI agent (Agent SDK): demo REPL + eval runs; tools bound in-process.",
+  "description": "Thin CLI agent (Anthropic SDK Tool Runner): demo REPL + eval runs; tools bound in-process.",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src",
+    "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "dev": "tsx src/main.ts"
+    "dev": "tsx src/main.ts",
+    "evals": "tsx src/run.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.114.0",
     "@pet-crypto/core": "workspace:*",
+    "@pet-crypto/db": "workspace:*",
     "@pet-crypto/evals": "workspace:*",
-    "@pet-crypto/mcp-tools": "workspace:*"
+    "@pet-crypto/mcp-tools": "workspace:*",
+    "@testcontainers/postgresql": "^11.0.0",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/pg": "^8.20.0",
     "eslint": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

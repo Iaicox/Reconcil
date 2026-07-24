@@ -83,7 +83,10 @@ seams remain in the architecture for optionality:
 - Node.js + TypeScript (strict), pnpm. No Python.
 - Postgres 16, Drizzle ORM (ADR-002). Redis + BullMQ for ingestion jobs (ADR-008).
 - HTTP where needed: minimal Fastify host (ADR-003); validation with Zod v4.
-- MCP: official TypeScript SDK. LLM: Anthropic Claude; Agent SDK for the CLI agent and evals.
+- MCP: official TypeScript SDK. LLM: Anthropic Claude; the CLI agent + eval runner use the
+  Anthropic SDK **Tool Runner** (`@anthropic-ai/sdk`, `client.beta.messages.toolRunner`) — the
+  concrete form of "Agent SDK" here: it binds our own tools in-process with clean per-call
+  citation-envelope capture, no Claude Code filesystem/bash tools in the loop (PR #15).
 - Deploy: docker-compose (self-host) + Railway (hosted demo).
 
 ## Roadmap

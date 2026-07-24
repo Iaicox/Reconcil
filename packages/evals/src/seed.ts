@@ -5,11 +5,13 @@
  * ingestion + ledger, which is why the harness lives in `packages/evals` (a sibling of
  * both), not in either.
  *
- * Native-only for now. erc20 rows cannot reach chain_events without receipt-derived
+ * Native + internal for now. erc20 rows cannot reach chain_events without receipt-derived
  * logIndex (the network-gated receipts capture, §2 unblocker (a)); Base(8453) gas needs
- * OP-stack RPC receipts (unblocker (c)). Both are deferred — so seeding is txlist-only
- * (chain 1) and reconciliation is native+gas. The blockscout adapter is used throughout
- * because it also serves the recorded `eth_get_balance` the reconciliation checks against.
+ * OP-stack RPC receipts (unblocker (c)). Both are deferred. Chain 1 seeds txlist +
+ * txlistinternal + gas, so the computed native balance reconciles *exactly* to the
+ * recorded `eth_get_balance` (R3 closed — the internal inflows txlist omits are the gap,
+ * §2 unblocker (b), ADR-005 d2). The blockscout adapter is used throughout because it
+ * also serves the recorded `eth_get_balance` the reconciliation checks against.
  */
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +38,10 @@ export interface SeededWallet {
   chainId: number;
   nativeTokenId: number;
   toBlock: bigint;
+  /** native_transfer events from both streams (txlist + txlistinternal). */
   nativeTransfers: number;
+  /** subset of nativeTransfers that came from txlistinternal (sentinel log_index ≤ −1000). */
+  internalTransfers: number;
   gasFees: number;
 }
 
@@ -79,9 +84,15 @@ export async function seedGoldenWallet(db: Db, role: string, chainId = 1): Promi
     limit: 1000,
     sort: 'asc',
   };
-  const native = await collectAllPages((pq) => provider.getNativeTxs(pq), q);
+  const [native, internal] = await Promise.all([
+    collectAllPages((pq) => provider.getNativeTxs(pq), q),
+    // Optional capability (ADR-009) — every configured provider has it, but stay honest.
+    provider.getInternalTxs
+      ? collectAllPages((pq) => provider.getInternalTxs!(pq), q)
+      : Promise.resolve([]),
+  ]);
   const events = normalize(
-    { native: { items: native } },
+    { native: { items: native }, internal: { items: internal } },
     { chainId, trackedAddress: entry.address, feeStrategy: 'txlist', provider: provider.kind },
   );
 
@@ -100,6 +111,7 @@ export async function seedGoldenWallet(db: Db, role: string, chainId = 1): Promi
     nativeTokenId,
     toBlock: BigInt(window.toBlock),
     nativeTransfers: events.filter((e) => e.eventKind === 'native_transfer').length,
+    internalTransfers: events.filter((e) => e.eventKind === 'native_transfer' && e.logIndex <= -1000).length,
     gasFees: events.filter((e) => e.eventKind === 'gas_fee').length,
   };
 }

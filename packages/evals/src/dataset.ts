@@ -5,6 +5,7 @@
  * case. The deterministic graders and (PR #15) the Agent-SDK runner consume `EvalCase[]`.
  */
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { decimalString } from '@pet-crypto/core';
 import { tools } from '@pet-crypto/mcp-tools';
@@ -73,4 +74,9 @@ export function parseDataset(text: string): EvalCase[] {
 /** Read + parse a dataset file (e.g. `fixtures/evals/core-30.yaml`). */
 export function loadDataset(path: string): EvalCase[] {
   return parseDataset(readFileSync(path, 'utf8'));
+}
+
+/** Absolute path to the bundled core-30 dataset — resolves from both src (tsx) and dist. */
+export function coreDatasetPath(): string {
+  return fileURLToPath(new URL('../fixtures/evals/core-30.yaml', import.meta.url));
 }

@@ -48,15 +48,24 @@ export function canonicalDecimal(raw: string): string | null {
  * not invent a negative. The pattern is bounded (the lookbehind is zero-width, no nested
  * quantifier over an overlapping class), so it is ReDoS-safe.
  *
- * Two acknowledged limitations, both weakening the check rather than breaking it:
- * incidental digits inside hashes/addresses over-match, and structural integers in tool
- * results (decimals: 18, chain_id: 1) enter the anti-fabrication "provided" set — so a
- * fabricated 18 or 1 can slip through (false negative). A magnitude/context-aware match
- * is a follow-up once the runner (PR #15) exercises this on real transcripts.
+ * Full 0x-hex runs (addresses, tx hashes) are stripped first, so their incidental digits
+ * never register as figures — on either side of the anti-fabrication check. A hash the
+ * agent copies verbatim from a tool result is thus dropped on both sides. It does NOT
+ * catch a hash the agent *truncates* with an ellipsis ("0x765b…310a" leaves the tail
+ * "310a" → "310"); the backstop for that is G2 tracing the whole envelope (data +
+ * citations), so anything genuinely in the tool result already counts as provided.
+ *
+ * Two limitations (weaken, don't break): structural integers in tool results
+ * (decimals: 18, chain_id: 1) enter the "provided" set, so a fabricated 18 or 1 can slip
+ * through (false negative); and a ULID tool_call_id (not 0x-hex, so not stripped here) is
+ * only safe because G2 traces citations. A magnitude/context-aware match is the follow-up,
+ * calibrated against real transcripts. ReDoS-safe: both regexes are single bounded char
+ * classes, no overlapping quantifiers.
  */
 export function extractNumbers(text: string): Set<string> {
+  const scrubbed = text.replace(/0x[0-9a-fA-F]+/g, ' ');
   const out = new Set<string>();
-  for (const m of text.matchAll(/(?<![\d.])-?\d[\d,]*(?:\.\d+)?/g)) {
+  for (const m of scrubbed.matchAll(/(?<![\d.])-?\d[\d,]*(?:\.\d+)?/g)) {
     const c = canonicalDecimal(m[0]);
     if (c !== null) out.add(c);
   }

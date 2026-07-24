@@ -3,7 +3,7 @@ import { assignErc20Metadata } from '../src/logindex.js';
 import type { Erc20WithMeta } from '../src/logindex.js';
 import { ZERO_ADDRESS, normalize } from '../src/normalize.js';
 import type { NormalizeContext } from '../src/normalize.js';
-import type { RawNativeTx, RawReceipt } from '../src/types.js';
+import type { RawInternalTx, RawNativeTx, RawReceipt } from '../src/types.js';
 
 const TRACKED = '0xAbCd000000000000000000000000000000000001';
 const OTHER = '0xdef0000000000000000000000000000000000002';
@@ -141,6 +141,83 @@ describe('receipts-opstack strategy', () => {
   it('throws on a missing receipt for an outgoing tx (contract, not fallback)', () => {
     const ctx: NormalizeContext = { ...baseCtx, receipts: new Map() };
     expect(() => normalize({ native: { items: [tx({})] } }, ctx)).toThrow(/missing receipt/i);
+  });
+});
+
+describe('internal transfers (txlistinternal): native inflows, no gas, sentinel log_index', () => {
+  function internal(overrides: Partial<RawInternalTx>): RawInternalTx {
+    return {
+      blockNumber: '19000005',
+      timeStamp: '1700000500',
+      hash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
+      from: OTHER,
+      to: TRACKED,
+      value: '3000000000000000000',
+      isError: '0',
+      ...overrides,
+    };
+  }
+
+  it('one internal inflow ⇒ a single native_transfer at sentinel −1000, no gas', () => {
+    const events = normalize({ internal: { items: [internal({})] } }, CTX);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      chainId: 1,
+      txHash: '0xccc3000000000000000000000000000000000000000000000000000000000003',
+      logIndex: -1000,
+      eventKind: 'native_transfer',
+      token: { kind: 'native' },
+      fromAddr: OTHER,
+      toAddr: TRACKED.toLowerCase(),
+      amountRaw: 3000000000000000000n,
+      blockNumber: 19000005n,
+      provider: 'etherscan-v2',
+    });
+  });
+
+  it('several internal transfers in one tx ⇒ −1000, −1001, −1002 in provider order', () => {
+    const items = [internal({ value: '1' }), internal({ value: '2' }), internal({ value: '3' })];
+    const events = normalize({ internal: { items } }, CTX);
+    expect(events.map((e) => e.logIndex)).toEqual([-1000, -1001, -1002]);
+    expect(events.map((e) => e.amountRaw)).toEqual([1n, 2n, 3n]);
+  });
+
+  it('sentinel index resets per parent tx', () => {
+    const items = [
+      internal({ hash: '0xAAA', value: '1' }),
+      internal({ hash: '0xBBB', value: '2' }),
+      internal({ hash: '0xAAA', value: '3' }),
+    ];
+    const events = normalize({ internal: { items } }, CTX);
+    // grouped by lowercased hash: 0xaaa gets −1000 then −1001; 0xbbb gets −1000.
+    expect(events.map((e) => [e.txHash, e.logIndex])).toEqual([
+      ['0xaaa', -1000],
+      ['0xbbb', -1000],
+      ['0xaaa', -1001],
+    ]);
+  });
+
+  it('failed / zero-value / contract-creation internal rows move no value ⇒ skipped', () => {
+    const items = [
+      internal({ isError: '1' }),
+      internal({ value: '0' }),
+      internal({ to: null }),
+      internal({ value: '5' }),
+    ];
+    const events = normalize({ internal: { items } }, CTX);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ logIndex: -1000, amountRaw: 5n });
+  });
+
+  it('internal transfers carry no gas even when the tracked wallet is the sender', () => {
+    const events = normalize({ internal: { items: [internal({ from: TRACKED, to: OTHER })] } }, CTX);
+    expect(events.map((e) => e.eventKind)).toEqual(['native_transfer']);
+  });
+
+  it('a huge uint256 internal value survives exactly (no Number anywhere)', () => {
+    const max = '115792089237316195423570985008687907853269984665640564039457584007913129639935';
+    const events = normalize({ internal: { items: [internal({ value: max })] } }, CTX);
+    expect(events[0]?.amountRaw).toBe(BigInt(max));
   });
 });
 

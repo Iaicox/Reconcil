@@ -8,6 +8,7 @@
 // Dataset (§5)
 export {
   loadDataset,
+  coreDatasetPath,
   parseDataset,
   guardrailKind,
   evalCaseSchema,

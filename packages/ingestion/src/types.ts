@@ -31,6 +31,21 @@ export interface RawNativeTx {
   isError: '0' | '1';
 }
 
+/**
+ * A contract-initiated native value transfer (`txlistinternal`). No gas fields — the
+ * fee is charged once on the parent tx (already captured as its `gas_fee`). `to` is
+ * nullable for internal contract creations, which move no value and are skipped.
+ */
+export interface RawInternalTx {
+  blockNumber: string;
+  timeStamp: string;
+  hash: string; // parent tx hash
+  from: string;
+  to: string | null;
+  value: string;
+  isError: '0' | '1';
+}
+
 export interface RawErc20Transfer {
   blockNumber: string;
   timeStamp: string;
@@ -76,6 +91,10 @@ export interface ChainDataProvider {
   readonly kind: 'etherscan-v2' | 'blockscout' | (string & {});
   getHead(chainId: number): Promise<bigint>;
   getNativeTxs(q: PageQuery): Promise<Page<RawNativeTx>>;
+  // Contract-initiated native inflows (`txlistinternal`). Optional capability
+  // (ADR-009): closes the R3 gap where txlist alone omits internal value moves, so a
+  // native balance reconciles to eth_get_balance (04-testing.md §2, ADR-005 d2).
+  getInternalTxs?(q: PageQuery): Promise<Page<RawInternalTx>>;
   getErc20Transfers(q: PageQuery): Promise<Page<RawErc20Transfer>>;
   getTokenMeta?(chainId: number, address: string): Promise<RawTokenMeta>;
   getNativeBalanceAt?(chainId: number, address: string, block: bigint): Promise<bigint>;

@@ -1,6 +1,6 @@
-# CI plan: docs/architecture/04-testing.md §7. Current subset: `check`, `test`,
-# `schema-parity` and `integration` (testcontainers Postgres); `evals-*` jobs
-# arrive with the code they exercise.
+# CI plan: docs/architecture/04-testing.md §7. Jobs: `check`, `test`, `schema-parity`,
+# `integration` (testcontainers Postgres), plus the live-LLM `evals-smoke` (PR) and
+# `evals-full` (nightly + manual) — the only jobs that use ANTHROPIC_API_KEY.
 
 name: ci
 
@@ -8,6 +8,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '0 6 * * *' # nightly evals-full (UTC)
+  workflow_dispatch: {}
 
 # Least privilege for GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions):
 # every job only checks out and runs — none writes to the repo.
@@ -30,6 +33,9 @@ jobs:
       - run: pnpm build
       - run: pnpm lint
       - run: pnpm depcruise
+      # ADR-011 transitive guard: depcruise skips node_modules, so scan the full lockfile
+      # for signing/key-material packages (needs only the lockfile + cruiser config).
+      - run: pnpm check:supply-chain
 
   test:
     runs-on: ubuntu-latest
@@ -70,3 +76,63 @@ jobs:
       - run: pnpm --filter @pet-crypto/ledger test:integration
       - run: pnpm --filter @pet-crypto/pricing test:integration
       - run: pnpm --filter @pet-crypto/mcp-tools test:integration
+      # Golden-wallet reconciliation (native balance == recorded eth_get_balance) and the
+      # DB-derived ground-truth numbers (numbers.itest.ts) — deterministic, no LLM key.
+      - run: pnpm --filter @pet-crypto/evals test:integration
+
+  # Resolve secret presence into a job output. A job-level `if:` can't reference secrets.*,
+  # but a step expression can — so the eval jobs gate on this output and SKIP (grey) when
+  # ANTHROPIC_API_KEY is unset, instead of running and failing red at the key check.
+  evals-preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      has_key: ${{ steps.k.outputs.has_key }}
+    steps:
+      - id: k
+        run: echo "has_key=${{ secrets.ANTHROPIC_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
+
+  # Live agent smoke (5 cases × 1 run): the only cheap catch for contract/prompt drift.
+  # Runs only when the secret exists AND on a same-repo PR (fork PRs have no secrets).
+  # Docker (testcontainers) is present on ubuntu-latest; the runner spins its own throwaway
+  # Postgres. ANTHROPIC_API_KEY is used here and in evals-full, nowhere else.
+  evals-smoke:
+    needs: evals-preflight
+    if: needs.evals-preflight.outputs.has_key == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter @pet-crypto/cli evals -- --smoke
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # Full suite (30 cases × 3 runs) + published scorecard. Nightly and on-demand only —
+  # never on every PR (cost). Applies the demo-readiness gate (§6): a failure exits
+  # non-zero and marks the run red.
+  evals-full:
+    needs: evals-preflight
+    if: needs.evals-preflight.outputs.has_key == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter @pet-crypto/cli evals -- --suite core --runs 3 --out eval-reports
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-scorecard
+          path: eval-reports/

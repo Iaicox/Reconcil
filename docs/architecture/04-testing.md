@@ -39,32 +39,29 @@ a small freelancer wallet (ETH + USDC, < 200 txs), an SMB wallet with heavy stab
 activity on both chains, and an edge wallet full of spam airdrops. Expectations are
 hand-verified against a block explorer once, then guarded by tests forever.
 
-> **Golden wallet reconciliation — deferred to the evals slice (weeks 4–5).** The
-> `wallets/*.expect.json` above are consumed by the eval harness (`pnpm evals run`, §5): it
-> seeds a DB by replaying the recorded provider fixtures through the real ingestion pipeline
-> (the native replay already exists — `packages/ingestion/test/golden.test.ts`), then runs
-> ledger over it. Two assertion levels — (1) ledger `computeBalances/Flows/Gas/Counterparties`
-> equal the hand-verified expectations; (2) computed **native balance at a block equals the
-> recorded `eth_get_balance`** provider response at that block — the "balances match provider
-> spot-checks" bullet (R3 integrity job). It lives in `packages/evals` (which composes
-> ingestion + ledger), **not** `packages/ledger`: the two are siblings (both → db, core), and
-> ledger's math is already covered by SQL≡fold on generated worlds + the property invariants
-> (§3). **Unblockers before it can be authored:** (a) erc20 rows must reach `chain_events` —
-> recorded `tokentx` fixtures carry no provider `log_index`; the worker derives it from RPC
-> receipts (`packages/ingestion/src/logindex.ts`), which needs the network-gated erc20/receipts
-> capture (BASE_RPC_URL + live Etherscan + Base-RPC POST-body fixture recording) deferred with
-> the worker slice; until then only native+gas reconcile. (b) The internal-tx gap
-> (05-risks-open-questions.md R3): `txlist` omits contract-initiated native inflows, so a native
-> balance may not equal `eth_get_balance` — resolve by confirming from the recorded fixtures that
-> the chosen wallet has no material internal inflows (native txlist − gas == recorded balance)
-> and asserting only those, or add a `txlistinternal` stream (post-gate). (c) Base (8453) gas
-> needs OP-stack RPC receipts (03-ingestion.md §6 `receipts-opstack`), the same capture gap.
-> (d) A one-time block-explorer hand-verification pass to freeze the expectations.
+> **Golden wallet reconciliation — native LANDED (PR #15).** The recorded fixtures are
+> seeded through the real ingestion pipeline (`packages/evals/src/seed.ts`), then ledger runs
+> over them (`packages/evals/test/reconcile.itest.ts`). Two assertion levels — (1) ledger
+> `computeBalances/Flows/Gas/Counterparties` equal the hand-verified expectations; (2) the
+> computed **native balance equals the recorded `eth_get_balance`** at the capture block — the
+> "balances match provider spot-checks" bullet (R3 integrity job). Level (2) now **asserts
+> equality to the wei** for the freelancer wallet, not just quantifies the gap. It lives in
+> `packages/evals` (which composes ingestion + ledger), **not** `packages/ledger`: the two are
+> siblings (both → db, core), and ledger's math is already covered by SQL≡fold on generated
+> worlds + the property invariants (§3).
 >
-> Interim de-risk (cheap, no network): from the recorded `freelancer` `txlist` + `eth_get_balance`
-> fixtures, check whether native reconciles (native in − out − gas == recorded balance) to learn
-> whether internal txs are material — i.e. whether a native provider spot-check is viable once
-> erc20 lands, or whether `txlistinternal` is required first.
+> **Unblocker status:** (a) erc20 rows still cannot reach `chain_events` — recorded `tokentx`
+> fixtures carry no provider `log_index`; the worker derives it from RPC receipts
+> (`packages/ingestion/src/logindex.ts`), which needs the network-gated erc20/receipts capture
+> (BASE_RPC_URL + live Etherscan + Base-RPC POST-body recording) deferred with the worker slice.
+> So erc20/USDC cases stay `numbers`-free; only native+gas reconcile and carry ground-truth
+> figures. (b) **RESOLVED (PR #15):** a `txlistinternal` stream (ADR-005 d2, `getInternalTxs`
+> on both adapters, normalized to `native_transfer` at sentinel `−(1000+n)`) supplies the
+> contract-initiated native inflows `txlist` omits, so the freelancer native balance reconciles
+> to `eth_get_balance` exactly (the 5 internal transfers sum to the former R3 gap). (c) Base
+> (8453) gas still needs OP-stack RPC receipts (03-ingestion.md §6 `receipts-opstack`), the same
+> capture gap. (d) The one-time block-explorer values are frozen as recorded fixtures + pinned
+> `numbers`, guarded by `numbers.itest.ts`.
 
 Two **synthetic families**: a scenario builder constructs event sets with known aggregates
 (exact expected values by construction) — including the whale-pagination case (10k+
@@ -133,9 +130,16 @@ that"), cross-session trace (`ledger_trace_tool_call`), Face B: import → sugge
 confirm → status → journal export narrative, partial payment explanation, VAT field
 passthrough, guardrails (×3), injections (×2).
 
-**Runner** (`apps/cli`: `pnpm evals run --suite core --runs 3`): fresh agent session per
-case (Agent SDK), tools bound in-process over a fixture-seeded database; transcripts and
-tool traffic captured to a report artifact (JSON + Markdown scorecard).
+**Runner** (`apps/cli`, `pnpm --filter @pet-crypto/cli evals -- --suite core --runs 3`):
+a fresh agent session per case on the **Anthropic SDK Tool Runner**
+(`client.beta.messages.toolRunner` + `betaTool`; the brief says "Agent SDK" — this is the
+concrete choice, see brief §Stack), with the 11 MCP tools bound in-process over a
+fixture-seeded database (ADR-012 — no server in the loop). Each tool's citation envelope is
+captured to build the Transcript; results land in a report artifact (JSON + Markdown
+scorecard). The runner is the only live-LLM component; every grader downstream is
+deterministic. Default model `claude-opus-4-8` (`--model` overrides). The orchestration core
+(seed → grade → aggregate → gate → scorecard) is LLM-agnostic and unit-tested with a fake
+session producer, so the hermetic `test` job needs no API key.
 
 **Graders — deterministic, no LLM in the gate:**
 
@@ -162,6 +166,15 @@ never part of the gate.
 | G2 numeric + G1 trajectory | **≥ 90% of cases pass by majority (2 of 3 runs)** — ≥ 27/30 |
 | Property + integration suites | green, always |
 
+Denominators are the **applicable** cases (`apps/cli/src/evals/gate.ts`): a safety metric counts
+only the cases it applies to (G3 → `must_cite`, G4 → refusals, G5 → injection canaries), and G2
+counts only cases carrying ground-truth `numbers` — the native balance/gas cases this slice, since
+erc20 figures await unblocker (a) above. On a small applicable set the "≥ 90%" quality bar rounds
+up — with 3 numbers-cases it takes 3/3 (2/3 = 0.67 misses), so it is effectively 100% until the
+numbers/Face-A set grows; that is stricter than 90% by design, never looser. The dataset is the **24 Face A cases** today; the "≥ 27/30"
+target is the full set once the Face B cases (import → suggest → confirm → status → journal, ≈6) land
+with the `recon` slice (their tools are not in the registry yet).
+
 Failing the gate blocks the OSS demo publication, by definition of "done" for week 5.
 
 ## 7. CI (GitHub Actions)
@@ -176,4 +189,12 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 | `evals-full` | nightly + manual | 30 cases × 3 runs, publishes scorecard artifact |
 
 Secrets policy: `ANTHROPIC_API_KEY` only in `evals-*`; provider keys never needed in CI
-(fixtures only).
+(fixtures only). An `evals-preflight` job resolves secret presence into an output the eval
+jobs gate on, so a missing key makes them **skip** (grey), never fail red.
+
+Gate cadence — deliberate: the live gate runs **pre-merge on the PR** (`evals-smoke`) and
+**nightly / on-demand** (`evals-full`), **not** on push to `main`. So the demo-readiness gate
+is a per-PR + nightly signal, not a per-`main`-push blocker; a change that lands on `main`
+without a PR (or a non-determinism only `evals-full` exercises) is caught by the next nightly.
+The deterministic reconciliation + ground-truth-numbers itests DO run on every PR (keyless
+`integration` job), so the R3/P1-P2 guarantees are enforced per-PR regardless.

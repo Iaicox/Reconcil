@@ -5,13 +5,16 @@ import type {
   Page,
   PageQuery,
   RawErc20Transfer,
+  RawInternalTx,
   RawNativeTx,
   RawReceipt,
   RawTokenMeta,
 } from '../types.js';
 import { ProviderError } from '../types.js';
 import { decQuantity, parseRows, unwrapAccountEnvelope, unwrapProxy, unwrapProxyHex } from './envelope.js';
-import { mapReceipt, mapTokenRows, mapTxRows, receiptResult, tokenRow, txRow } from './etherscan-v2.js';
+import {
+  internalRow, mapInternalRows, mapReceipt, mapTokenRows, mapTxRows, receiptResult, tokenRow, txRow,
+} from './etherscan-v2.js';
 
 const tokenMetaResult = z.object({
   contractAddress: z.string().optional(),
@@ -70,6 +73,22 @@ export function blockscoutAdapter(opts: {
       });
       const rows = parseRows(z.array(txRow), unwrapAccountEnvelope(status, body));
       return { items: mapTxRows(rows) };
+    },
+
+    async getInternalTxs(q: PageQuery): Promise<Page<RawInternalTx>> {
+      assertChain(q.chainId);
+      const { status, body } = await call({
+        module: 'account',
+        action: 'txlistinternal',
+        address: q.address,
+        startblock: q.fromBlock.toString(),
+        endblock: q.toBlock.toString(),
+        page: '1',
+        offset: String(q.limit),
+        sort: q.sort,
+      });
+      const rows = parseRows(z.array(internalRow), unwrapAccountEnvelope(status, body));
+      return { items: mapInternalRows(rows) };
     },
 
     async getErc20Transfers(q: PageQuery): Promise<Page<RawErc20Transfer>> {
