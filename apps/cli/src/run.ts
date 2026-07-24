@@ -21,6 +21,7 @@ import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
 import { buildReport, toJson, toMarkdown } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
+import { METRICS } from './evals/types.js';
 
 const DEFAULT_MODEL = 'claude-opus-4-8';
 // A 5-case subset spanning the metric mix for the PR smoke job (§7): balance freshness,
@@ -112,6 +113,22 @@ async function main(): Promise<void> {
     writeFileSync(join(outDir, 'scorecard.md'), toMarkdown(report), 'utf8');
 
     console.error(toMarkdown(report));
+
+    if (!gate.passed) {
+      // Surface the grader's detail for every applicable metric that failed, so the CI
+      // log explains WHY (e.g. "expected X not found" = rounding, "fabricated Y", wrong
+      // figure) without needing the JSON artifact.
+      console.error('Failing details:');
+      for (const c of cases) {
+        for (const m of METRICS) {
+          const outcome = c.metrics[m];
+          if (!outcome.applicable || outcome.passed) continue;
+          const failing = c.runs.find((r) => !r[m].pass);
+          console.error(`  ${c.id} · ${m}: ${failing?.[m].detail ?? '(failed)'}`);
+        }
+      }
+    }
+
     console.error(`\nreports → ${outDir}`);
     if (!gate.passed) process.exitCode = 1;
   } finally {
