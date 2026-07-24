@@ -159,8 +159,8 @@ export const chainEvents = pgTable(
     chainId: integer('chain_id').notNull(),
     // lowercase 0x-hex(64); synthetic 'anchor:<addr>:<block>' for opening_balance
     txHash: text('tx_hash').notNull(),
-    // sentinels: -1 native transfer, -2 gas fee, -3 opening balance;
-    // reserved: -(1000+n) for future internal (trace) transfers
+    // sentinels: -1 native transfer, -2 gas fee, -3 opening balance,
+    // -(1000+n) trace-level internal transfer n (txlistinternal, ADR-005 d2); real logs ≥ 0
     logIndex: integer('log_index').notNull(),
     eventKind: text('event_kind')
       .$type<'native_transfer' | 'erc20_transfer' | 'gas_fee' | 'opening_balance'>()

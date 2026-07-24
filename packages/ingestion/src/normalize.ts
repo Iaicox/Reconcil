@@ -1,10 +1,14 @@
 import type {
   NormalizedEvent,
   Page,
+  RawInternalTx,
   RawNativeTx,
   RawReceipt,
 } from './types.js';
 import type { Erc20WithMeta } from './logindex.js';
+
+/** Trace-level internal transfer n → sentinel log_index (ADR-005 d2). */
+const INTERNAL_SENTINEL_BASE = -1000;
 
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -22,7 +26,7 @@ export interface NormalizeContext {
  * Cross-page dedup is the DB idempotency key's job (ADR-005) — not done here.
  */
 export function normalize(
-  input: { native?: Page<RawNativeTx>; erc20?: Page<Erc20WithMeta> },
+  input: { native?: Page<RawNativeTx>; internal?: Page<RawInternalTx>; erc20?: Page<Erc20WithMeta> },
   ctx: NormalizeContext,
 ): NormalizedEvent[] {
   const tracked = ctx.trackedAddress.toLowerCase();
@@ -67,6 +71,36 @@ export function normalize(
         amountRaw: gasFee(tx, ctx),
       });
     }
+  }
+
+  // Internal transfers (txlistinternal): contract-initiated native value moves that
+  // txlist omits. No gas of their own (the parent tx's gas_fee covers it). Several can
+  // share one parent tx, so each gets sentinel −(1000+n), n = 0-based emit order per tx
+  // (ADR-005 d2). Failed / zero-value / contract-creation rows move no value → skipped.
+  const internalSeen = new Map<string, number>();
+  for (const it of input.internal?.items ?? []) {
+    if (it.isError !== '0' || it.to === null || BigInt(it.value) <= 0n) continue;
+    const txHash = it.hash.toLowerCase();
+    const n = internalSeen.get(txHash) ?? 0;
+    internalSeen.set(txHash, n + 1);
+    events.push({
+      chainId: ctx.chainId,
+      txHash,
+      logIndex: INTERNAL_SENTINEL_BASE - n,
+      eventKind: 'native_transfer',
+      token: { kind: 'native' },
+      fromAddr: it.from.toLowerCase(),
+      toAddr: it.to.toLowerCase(),
+      amountRaw: BigInt(it.value),
+      blockNumber: BigInt(it.blockNumber),
+      blockTime: new Date(Number(it.timeStamp) * 1000),
+      provider: ctx.provider,
+      // tx-level from/to mirror the internal endpoints — chain_events.tx_from/tx_to
+      // are NOT NULL, and an internal transfer has no distinct outer tx envelope here.
+      txFrom: it.from.toLowerCase(),
+      txTo: it.to.toLowerCase(),
+      raw: it,
+    });
   }
 
   for (const t of input.erc20?.items ?? []) {

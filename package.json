@@ -18,8 +18,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
+    "@pet-crypto/ingestion": "workspace:*",
     "dependency-cruiser": "^18.1.0",
     "eslint": "catalog:",
+    "tsx": "catalog:",
     "turbo": "^2.3.0",
     "typescript": "catalog:",
     "typescript-eslint": "^8.18.0"

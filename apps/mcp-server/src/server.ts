@@ -3,9 +3,8 @@ import {
   CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { serializeError, type Logger } from '@pet-crypto/core';
-import { tools, ToolError, type ToolContext } from '@pet-crypto/mcp-tools';
+import { describeTool, tools, ToolError, type ToolContext } from '@pet-crypto/mcp-tools';
 
-import { describeTool } from './descriptions.js';
 import { renderEnvelope } from './render.js';
 
 interface ErrorPayload {

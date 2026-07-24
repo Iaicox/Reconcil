@@ -1,7 +1,8 @@
 # ADR-005: Event store — append-only, composite idempotency key, gas-as-event, finality lag
 
 **Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-07-15 (`token_id`
-added to the idempotency key — see decision 2)
+added to the idempotency key — see decision 2) · 2026-07-24 (trace-level internal
+transfers activated — see decision 2)
 
 ## Context
 
@@ -15,7 +16,9 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    (no materialized state to invalidate in MVP).
 2. **Idempotency key `UNIQUE (chain_id, tx_hash, log_index, token_id)`** with sentinel
    `log_index` values for non-log facts: `-1` native transfer, `-2` gas fee,
-   `-3` opening balance, `-(1000+n)` reserved for future trace-level internal transfers.
+   `-3` opening balance, `-(1000+n)` trace-level internal transfer *n* (0-based, in
+   provider order within the parent tx — `txlistinternal`; a tx can carry several
+   contract-initiated native inflows, so a single `-1` slot cannot hold them).
    One uniform key ⇒ one dedup mechanism (`ON CONFLICT DO NOTHING`) everywhere.
    `token_id` is functionally dependent on the first three columns for real logs (a log
    carries exactly one token), but load-bearing for anchored opening balances: anchoring
@@ -49,3 +52,11 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
 - No UPDATE/DELETE on the hot table — vacuum-friendly, backup-friendly, audit-friendly.
 - Synthetic tx_hash format (`anchor:<addr>:<block>`) is non-hex by design — trivially
   distinguishable from real hashes in citations.
+- Internal transfers (`txlistinternal`) carry no gas of their own (the parent tx's
+  `gas_fee` already covers it), so they normalize to `native_transfer` only. Ingesting
+  them closes the R3 gap where `txlist` alone omits contract-initiated native inflows, so
+  the computed native balance reconciles to the recorded `eth_get_balance` (the R3
+  integrity check, 04-testing.md §2). The 0-based sub-index `n` is assigned per parent tx
+  when a tx's internal rows are normalized together (the seed/backfill path collects all
+  pages before `normalize`); page-independent trace indexing for a streamed worker path is
+  a follow-up.

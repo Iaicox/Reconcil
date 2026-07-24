@@ -61,6 +61,54 @@ describe('paging endpoints (shared etherscan-compatible shape)', () => {
     expect(new URL(calls[0] ?? '').searchParams.get('action')).toBe('tokentx');
   });
 
+  it('getInternalTxs uses action=txlistinternal and maps rows, reading Blockscout\'s transactionHash', async () => {
+    // Real Blockscout etherscan-compat shape (verified at capture): the parent tx key
+    // is `transactionHash` (Etherscan uses `hash`), and `index`/`callType`/gas fields
+    // are dropped. `status:"2"` ("some internal txs not yet processed") still returns
+    // the result rows — treated like any non-"0" status by the shared envelope.
+    const { transport, calls } = stub({
+      status: '2',
+      message: 'Some internal transactions within this block range have not yet been processed',
+      result: [
+        {
+          blockNumber: '19000005', timeStamp: '1700000500',
+          transactionHash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
+          from: '0xDEF0000000000000000000000000000000000002', to: Q.address,
+          value: '3000000000000000000', contractAddress: '', input: '', type: 'call',
+          gas: '2300', gasUsed: '0', index: '0', callType: 'call', isError: '0', errCode: '',
+        },
+      ],
+    });
+    const page = await adapter(transport).getInternalTxs!(Q);
+    expect(new URL(calls[0] ?? '').searchParams.get('action')).toBe('txlistinternal');
+    expect(page.items).toEqual([
+      {
+        blockNumber: '19000005', timeStamp: '1700000500',
+        hash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
+        from: '0xDEF0000000000000000000000000000000000002', to: Q.address,
+        value: '3000000000000000000', isError: '0',
+      },
+    ]);
+  });
+
+  it('treats "No transactions found" internal result as an empty page', async () => {
+    const { transport } = stub({ status: '0', message: 'No transactions found', result: [] });
+    const page = await adapter(transport).getInternalTxs!(Q);
+    expect(page.items).toEqual([]);
+  });
+
+  it('maps an internal contract creation (to="") to null', async () => {
+    const { transport } = stub({
+      status: '1', message: 'OK',
+      result: [{
+        blockNumber: '1', timeStamp: '1', transactionHash: '0xabc', from: '0xdef', to: '',
+        value: '0', isError: '0',
+      }],
+    });
+    const page = await adapter(transport).getInternalTxs!(Q);
+    expect(page.items[0]?.to).toBeNull();
+  });
+
   it('treats "No token transfers found" as an empty page', async () => {
     const { transport } = stub({ status: '0', message: 'No token transfers found', result: null });
     const page = await adapter(transport).getErc20Transfers(Q);

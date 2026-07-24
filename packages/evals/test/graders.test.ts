@@ -46,6 +46,11 @@ describe('extractNumbers', () => {
     expect(extractNumbers('net was -3.5 ETH')).toEqual(new Set(['-3.5']));
     expect(extractNumbers('between 1.5-2.5')).toEqual(new Set(['1.5', '2.5']));
   });
+  it('ignores digits inside 0x hashes/addresses (a quoted or truncated hash is not a figure)', () => {
+    // Only the real figure survives; the hash contributes nothing on either side of G2.
+    expect(extractNumbers('tx 0x765b4b760f87edc990d033a9f3f603765e86b7cb moved 0.5 ETH')).toEqual(new Set(['0.5']));
+    expect(extractNumbers('from 0xf321de563a4420afdf15e68ace4d9254c0963905')).toEqual(new Set());
+  });
 });
 
 describe('G1 trajectory', () => {

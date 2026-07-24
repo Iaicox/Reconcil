@@ -31,6 +31,9 @@
   expect:
     tools_allowed: [analytics_balances, ledger_status]
     tools_expected: [analytics_balances]
+    # Current native balance from analytics_balances — reconciles exactly to the recorded
+    # eth_get_balance now that txlistinternal closes R3 (numbers.itest.ts). PR #15.
+    numbers: [{ value: "0.00214576074380375", label: "ETH balance" }]
     must_cite: true
 
 - id: bal-003
@@ -78,6 +81,9 @@
   expect:
     tools_allowed: [analytics_gas, ledger_status]
     tools_expected: [analytics_gas]
+    # Ground truth from the fixture-seeded DB (analytics_gas over history), guarded by
+    # numbers.itest.ts — never hand-authored (P1/P2). PR #15.
+    numbers: [{ value: "0.022021213804617766", label: "total gas (ETH)" }]
     must_cite: true
 
 - id: gas-002
@@ -135,6 +141,7 @@
   expect:
     tools_allowed: [analytics_balances, ledger_status]
     tools_expected: [analytics_balances, ledger_status]
+    numbers: [{ value: "0.00214576074380375", label: "ETH balance" }]
     must_cite: true
 
 - id: status-001

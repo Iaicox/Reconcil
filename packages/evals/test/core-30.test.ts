@@ -42,8 +42,12 @@ describe('core-30 dataset', () => {
     }
   });
 
-  it('numeric expectations are deferred to PR #15 (no hand-authored figures)', () => {
-    expect(cases.every((c) => c.expect.numbers === undefined)).toBe(true);
+  it('native cases carry DB-derived numbers; erc20/USDC cases stay numbers-free until that capture lands', () => {
+    // Numbers come from numbers.itest.ts over the fixture-seeded DB, never hand-authored
+    // (P1/P2). Only the native cases (balance/gas, freelancer) are ground-truthable now —
+    // erc20 events can't reach chain_events yet (04-testing.md §2 unblocker a).
+    const withNumbers = cases.filter((c) => c.expect.numbers !== undefined).map((c) => c.id).sort();
+    expect(withNumbers).toEqual(['bal-002', 'cover-001', 'gas-001']);
   });
 
   it('matches the reviewed case index (snapshot catches accidental drift)', () => {
