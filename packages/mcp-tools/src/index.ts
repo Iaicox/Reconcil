@@ -8,6 +8,7 @@ import {
   analyticsBalancesInput, analyticsCounterpartiesInput, analyticsFlowsInput, analyticsGasInput,
   analyticsListEventsInput, analyticsStablecoinInput,
   directoryListEntitiesInput, directoryUpsertEntityInput,
+  exportClosePackInput, exportPdfSummaryInput,
   ledgerStatusInput, ledgerTraceToolCallInput, ledgerTrackWalletInput,
 } from '@pet-crypto/core';
 import { z } from 'zod';
@@ -22,6 +23,8 @@ import { analyticsListEvents, TOOL_NAME as LIST_EVENTS_TOOL } from './tools/anal
 import { analyticsStablecoinMovements, TOOL_NAME as STABLECOIN_TOOL } from './tools/analytics-stablecoin-movements.js';
 import { directoryListEntities, TOOL_NAME as DIRECTORY_LIST_TOOL } from './tools/directory-list-entities.js';
 import { directoryUpsertEntity, TOOL_NAME as DIRECTORY_UPSERT_TOOL } from './tools/directory-upsert-entity.js';
+import { exportClosePack, TOOL_NAME as EXPORT_CLOSE_PACK_TOOL } from './tools/export-close-pack.js';
+import { exportPdfSummary, TOOL_NAME as EXPORT_PDF_SUMMARY_TOOL } from './tools/export-pdf-summary.js';
 import { ledgerStatus, TOOL_NAME as LEDGER_STATUS_TOOL } from './tools/ledger-status.js';
 import { ledgerTraceToolCall, TOOL_NAME as LEDGER_TRACE_TOOL } from './tools/ledger-trace-tool-call.js';
 import { ledgerTrackWallet, TOOL_NAME as LEDGER_TRACK_TOOL } from './tools/ledger-track-wallet.js';
@@ -124,6 +127,24 @@ export const ledgerTrackWalletTool: ToolDescriptor = {
   handler: ledgerTrackWallet,
 };
 
+/**
+ * Export tools (contract §6.5): non-read-only (they write files and register an
+ * `exports` row) but never destructive — they mutate no domain data.
+ */
+export const exportClosePackTool: ToolDescriptor = {
+  name: EXPORT_CLOSE_PACK_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(exportClosePackInput) as Record<string, unknown>,
+  handler: exportClosePack,
+};
+
+export const exportPdfSummaryTool: ToolDescriptor = {
+  name: EXPORT_PDF_SUMMARY_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(exportPdfSummaryInput) as Record<string, unknown>,
+  handler: exportPdfSummary,
+};
+
 /** The registry the server/cli/evals iterate to declare tools. */
 export const tools: ToolDescriptor[] = [
   analyticsBalancesTool,
@@ -137,6 +158,8 @@ export const tools: ToolDescriptor[] = [
   ledgerStatusTool,
   ledgerTraceToolCallTool,
   ledgerTrackWalletTool,
+  exportClosePackTool,
+  exportPdfSummaryTool,
 ];
 
 export { analyticsBalances } from './tools/analytics-balances.js';
@@ -147,6 +170,8 @@ export { analyticsListEvents } from './tools/analytics-list-events.js';
 export { analyticsCounterparties } from './tools/analytics-counterparties.js';
 export { directoryListEntities } from './tools/directory-list-entities.js';
 export { directoryUpsertEntity } from './tools/directory-upsert-entity.js';
+export { exportClosePack } from './tools/export-close-pack.js';
+export { exportPdfSummary } from './tools/export-pdf-summary.js';
 export { ledgerStatus } from './tools/ledger-status.js';
 export { ledgerTraceToolCall } from './tools/ledger-trace-tool-call.js';
 export { ledgerTrackWallet } from './tools/ledger-track-wallet.js';

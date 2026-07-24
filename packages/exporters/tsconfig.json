@@ -2,8 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "types": ["node"]
   },
   "include": ["src"],
-  "references": [{ "path": "../core" }, { "path": "../db" }]
+  "references": [{ "path": "../core" }]
 }
