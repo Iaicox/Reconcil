@@ -7,8 +7,19 @@
  *
  * Callers pass already-sorted, already-sanitized rows (C6, ADR-011): no `*_raw`
  * hostile string ever reaches a cell.
+ *
+ * Formula injection (CWE-1236): a spreadsheet evaluates a cell whose text begins
+ * with `= + - @` (or tab/CR) as a formula, and CSV quoting does NOT neutralize
+ * that. A minted token symbol like `+SUM(..)` survives the core sanitizer (its
+ * allowlist keeps `+`/`-`), so we neutralize at the serialization boundary with a
+ * leading apostrophe — but never on a real numeric literal, since money decimal
+ * strings (`-6000.00`) and log_index sentinels (`-1`/`-2`/`-3`) legitimately lead
+ * with `-`.
  */
 export type CsvValue = string | number;
+
+const FORMULA_LEAD = /^[=+\-@\t\r\n]/;
+const NUMERIC = /^-?\d+(\.\d+)?$/;
 
 function escapeField(v: CsvValue): string {
   let s: string;
@@ -21,6 +32,12 @@ function escapeField(v: CsvValue): string {
     s = String(v);
   } else {
     s = v;
+  }
+  // Formula-injection guard (defense-in-depth; do not rely on the upstream
+  // sanitizer's allowlist). Numeric literals are exempt so signed amounts and
+  // log_index sentinels pass through unchanged.
+  if (s.length > 0 && FORMULA_LEAD.test(s) && !NUMERIC.test(s)) {
+    s = `'${s}`;
   }
   // Quote when the field contains a delimiter/quote/newline, or has edge whitespace
   // a naive parser would trim. Internal quotes are doubled.

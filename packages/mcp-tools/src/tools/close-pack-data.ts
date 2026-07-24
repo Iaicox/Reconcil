@@ -9,6 +9,7 @@
  * bundle describe exactly the same figures.
  */
 import type { CoverageRef, FxRef, PriceRef, Scope, Valuation, Warning } from '@pet-crypto/core';
+import { compareDecimals } from '@pet-crypto/exporters';
 import type {
   BalanceExportRow, CounterpartyExportRow, ExportPeriod, ExportScope, GasExportRow,
   JournalInput, JournalMovement, TokenLabel, TransactionExportRow,
@@ -140,7 +141,7 @@ export async function computeCloseData(ctx: ToolContext, input: CloseDataInput):
   const balancesClosing = closingBal.rows.map((r, i) => balanceExport(r, closingFiat[i]));
 
   // --- transactions (all events in the month, paginated) --------------------
-  const events = await listAllEvents(ctx, { scope: { addresses }, period: ledgerPeriod });
+  const { events, truncated: eventsTruncated } = await listAllEvents(ctx, { scope: { addresses }, period: ledgerPeriod });
   const transactions = events.map(transactionExport);
 
   // --- gas (per chain), valued ----------------------------------------------
@@ -152,7 +153,7 @@ export async function computeCloseData(ctx: ToolContext, input: CloseDataInput):
   const gasTotalFiat = totalFiat(gasFiat);
 
   // --- per-token net flows → journal draft ----------------------------------
-  const flows = await computeFlows(ctx.db, { scope: { addresses }, period: ledgerPeriod });
+  const flows = await computeFlows(ctx.db, { scope: { addresses }, period: ledgerPeriod, includeUnverified: false });
   const flowFiat = merge(
     await valueQuantities(ctx.db, flows.rows.map((r) => needFor(r.token, end, r.net)), wireValuation),
   );
@@ -165,7 +166,7 @@ export async function computeCloseData(ctx: ToolContext, input: CloseDataInput):
   const netFlowsFiat = totalFiat(movements.map((m) => m.netFiat));
 
   // --- counterparties (turnover per counterparty, per token), valued --------
-  const cpResult = await computeCounterparties(ctx.db, { scope: { addresses }, period: ledgerPeriod, topN: 500 });
+  const cpResult = await computeCounterparties(ctx.db, { scope: { addresses }, period: ledgerPeriod, topN: 500, includeUnverified: false });
   const counterparties: CounterpartyExportRow[] = [];
   const cpNeeds: ValueNeed[] = []; // [inflow, outflow] interleaved per flat row
   for (const row of cpResult.rows) {
@@ -195,7 +196,7 @@ export async function computeCloseData(ctx: ToolContext, input: CloseDataInput):
   });
   const topCounterparties = [...turnoverByCounterparty.entries()]
     .map(([name, parts]) => ({ name, fiatTurnover: parts.length > 0 ? sumDecimals(parts) : '0' }))
-    .sort((a, b) => Number(b.fiatTurnover) - Number(a.fiatTurnover))
+    .sort((a, b) => compareDecimals(b.fiatTurnover, a.fiatTurnover)) // decimal order, no float round-trip
     .slice(0, 5);
 
   // --- citations: coverage (C5) + event refs (C3) ---------------------------
@@ -205,6 +206,13 @@ export async function computeCloseData(ctx: ToolContext, input: CloseDataInput):
     ...pricingWarnings,
     { code: 'UNVERIFIED_EXCLUDED', message: 'unverified (spam-suspected) tokens were excluded from the close pack' },
   ];
+  if (eventsTruncated) {
+    warnings.push({
+      code: 'COVERAGE_INCOMPLETE',
+      message: `transactions.csv was truncated at ${String(events.length)} events; use analytics_list_events to enumerate the full set`,
+      context: { truncated_events: events.length },
+    });
+  }
   const backings: BackingEvents[] = [
     ...closingBal.rows.map((r) => r.backing),
     ...flows.rows.map((r) => r.backing),
@@ -274,18 +282,25 @@ function gasExport(r: GasRow, fiat: string | undefined): GasExportRow {
   };
 }
 
-/** Drain `analytics_list_events` pagination so the close pack lists every event. */
+const MAX_EVENT_PAGES = 500; // × limit 200 = 100k events
+
+/**
+ * Drain `analytics_list_events` pagination so the close pack lists every event.
+ * `truncated: true` means the page cap was hit with more pages pending — the
+ * caller surfaces that as a COVERAGE_INCOMPLETE warning rather than silently
+ * dropping the tail. Only verified events (default spam filter) are listed.
+ */
 async function listAllEvents(
   ctx: ToolContext,
   params: { scope: { addresses: string[] }; period: { from: string; to: string } },
-): Promise<EventListItem[]> {
+): Promise<{ events: EventListItem[]; truncated: boolean }> {
   const all: EventListItem[] = [];
   let cursor: string | undefined;
-  for (let page = 0; page < 500; page += 1) {
-    const res = await listEvents(ctx.db, { ...params, limit: 200, ...(cursor ? { cursor } : {}) });
+  for (let page = 0; page < MAX_EVENT_PAGES; page += 1) {
+    const res = await listEvents(ctx.db, { ...params, limit: 200, includeUnverified: false, ...(cursor ? { cursor } : {}) });
     all.push(...res.events);
-    if (res.nextCursor === undefined) break;
+    if (res.nextCursor === undefined) return { events: all, truncated: false };
     cursor = res.nextCursor;
   }
-  return all;
+  return { events: all, truncated: true };
 }

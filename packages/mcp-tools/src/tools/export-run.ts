@@ -54,6 +54,22 @@ export async function runExport<T>(
     throw new ToolError('INTERNAL', `${opts.toolName} failed to write export files: ${String(err)}`);
   }
 
+  // Build + validate the output BEFORE any DB write, so a contract violation can't
+  // leave an orphan `done` exports row (the files already on disk are harmless).
+  const outputData = { export_id: provenance.exportId, kind: opts.kind, period: data.period, files };
+  let validated: T;
+  try {
+    validated = outputSchema.parse(outputData);
+  } catch (err) {
+    throw new ToolError('INTERNAL', `${opts.toolName} produced an output that violates its contract: ${String(err)}`);
+  }
+
+  // FOLLOW-UP (write-tool atomicity, C2): the exports insert and the tool_call persist
+  // are two separate transactions, so a persistToolCall failure in the brief window
+  // after the insert commits leaves a `done` row without its audit record. Same
+  // limitation as directory_upsert_entity; the clean fix threads a single transaction
+  // through the shared persistToolCall (ToolContext.db typed Db, not a PgTransaction —
+  // typing-invasive) and is worth building once when the recon_* write tools land.
   await ctx.db.insert(exportsTable).values({
     id: provenance.exportId,
     tenantId: ctx.tenantId,
@@ -67,14 +83,6 @@ export async function runExport<T>(
     manifest: rendered.manifest,
     completedAt: new Date(),
   });
-
-  const outputData = { export_id: provenance.exportId, kind: opts.kind, period: data.period, files };
-  let validated: T;
-  try {
-    validated = outputSchema.parse(outputData);
-  } catch (err) {
-    throw new ToolError('INTERNAL', `${opts.toolName} produced an output that violates its contract: ${String(err)}`);
-  }
 
   const residueWarnings: Warning[] = rendered.roundingResidues
     .filter((r) => Number(r.residue) !== 0)

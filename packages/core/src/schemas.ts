@@ -517,8 +517,10 @@ export type LedgerTraceToolCallOutput = z.infer<typeof ledgerTraceToolCallOutput
 export const exportKindSchema = z.enum(['close_pack', 'pdf_summary', 'journal_qbo', 'journal_xero']);
 export type ExportKind = z.infer<typeof exportKindSchema>;
 
-/** Accounting month on the wire (UTC calendar month); the close period is the whole month. */
-export const monthString = z.string().regex(/^\d{4}-\d{2}$/, 'must be a month (YYYY-MM)');
+/** Accounting month on the wire (UTC calendar month); the close period is the whole month.
+ *  Month is range-checked (01–12) so an impossible month fails as INVALID_INPUT rather than
+ *  flowing into date math and surfacing as an opaque INTERNAL. */
+export const monthString = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'must be a month (YYYY-MM)');
 
 /** The resolved [start, end] ISO dates the export actually covered (echoed back, citable). */
 export const exportPeriodSchema = z.object({ start: isoDateString, end: isoDateString }).strict();

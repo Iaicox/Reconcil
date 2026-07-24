@@ -94,14 +94,19 @@ describe('export_close_pack — materialization, manifest, tenancy', () => {
     expect(manifest.files).toHaveLength(6);
     expect(manifest.rounding_residues).toEqual([{ currency: 'USD', residue: '0.00' }]);
 
-    // --- journal balances per currency ---
+    // --- journal balances per currency, with the expected amounts ---
     const journalPath = env.data.files.find((f) => f.name === 'journal_draft.csv')!.path;
     const journal = await readFile(journalPath, 'utf8');
     expect(journal).toContain('DRAFT — REVIEW REQUIRED');
-    const rows = journal.trimEnd().split('\n').slice(2);
-    const debit = rows.reduce((a, r) => a + Number(r.split(',')[3] ?? 0), 0);
-    const credit = rows.reduce((a, r) => a + Number(r.split(',')[4] ?? 0), 0);
+    const rows = journal.trimEnd().split('\n').slice(2).map((r) => r.split(',')); // [date,account,desc,debit,credit,ccy]
+    const debit = rows.reduce((a, r) => a + Number(r[3] ?? 0), 0);
+    const credit = rows.reduce((a, r) => a + Number(r[4] ?? 0), 0);
+    // Net ETH −3 @ 2000 = −6000 (asset credit), gas 1 ETH @ 2000 = 2000 (expense debit).
     expect(debit).toBeCloseTo(credit, 2);
+    expect(debit).toBeCloseTo(8000, 2);
+    const gasLines = rows.filter((r) => r[1] === 'Network Fees (gas)');
+    expect(gasLines).toHaveLength(1); // gas counted once, not double
+    expect(gasLines[0]?.[3]).toBe('2000.00');
 
     // --- citations ---
     expect(env.citations.tool_call_id).toBeDefined();
@@ -125,9 +130,13 @@ describe('export_close_pack — materialization, manifest, tenancy', () => {
     expect(tc[0]).toMatchObject({ id: env.citations.tool_call_id, tenant_id: TENANT, tool_name: 'export_close_pack' });
   });
 
-  it('rejects a malformed month with INVALID_INPUT', async () => {
+  it('rejects a malformed or impossible month with INVALID_INPUT (not opaque INTERNAL)', async () => {
     await seedWorld();
     await expect(exportClosePack(ctx(), { month: '2026-6', valuation: { currency: 'USD' } })).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+    });
+    // Impossible month (13) must fail cleanly at the schema, not flow into date math.
+    await expect(exportClosePack(ctx(), { month: '2026-13', valuation: { currency: 'USD' } })).rejects.toMatchObject({
       code: 'INVALID_INPUT',
     });
   });

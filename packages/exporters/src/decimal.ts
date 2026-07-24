@@ -37,3 +37,8 @@ export function isNegative(value: string): boolean {
 export function absDecimal(value: string): DecimalString {
   return new D(value).abs().toFixed() as DecimalString;
 }
+
+/** Order two decimal strings without a float round-trip: -1 | 0 | 1 (a<b|a==b|a>b). */
+export function compareDecimals(a: string, b: string): number {
+  return new D(a).comparedTo(b);
+}

@@ -65,15 +65,29 @@ describe('renderClosePack — the 7-file close bundle', () => {
     );
   });
 
-  it('renders a balanced, DRAFT-labeled journal (invariant #8)', () => {
+  it('renders the expected balanced journal — amounts, signs, no gas double-count (invariant #8)', () => {
     const files = byName(renderClosePack(fixture()).files);
     const journal = text(files.get('journal_draft.csv'));
     expect(journal).toContain('DRAFT — REVIEW REQUIRED');
 
-    const rows = journal.trimEnd().split('\n').slice(2); // drop header + banner
-    const debit = rows.reduce((a, r) => a.plus(r.split(',')[3] ?? '0'), new Decimal(0));
-    const credit = rows.reduce((a, r) => a.plus(r.split(',')[4] ?? '0'), new Decimal(0));
-    expect(debit.equals(credit)).toBe(true);
+    // [date, account, description, debit, credit, currency] — no field here contains a comma.
+    const rows = journal.trimEnd().split('\n').slice(2).map((r) => r.split(',')); // drop header + banner
+    const line = (account: string, description: string): string[] | undefined =>
+      rows.find((r) => r[1] === account && r[2] === description);
+
+    // Net ETH movement was -6000 (outflow) → assets DOWN (credit), Suspense debit — sign correct.
+    expect(line('Crypto Assets', 'Net ETH movement (DRAFT)')).toEqual(
+      ['2026-06-30', 'Crypto Assets', 'Net ETH movement (DRAFT)', '0.00', '6000.00', 'USD'],
+    );
+    expect(line('Suspense — unclassified', 'Net ETH movement (DRAFT)')?.[3]).toBe('6000.00');
+    // Gas 2000 appears exactly once (one expense debit + one asset credit) — not double-counted.
+    expect(line('Network Fees (gas)', 'Gas fees (DRAFT)')?.[3]).toBe('2000.00');
+    expect(rows.filter((r) => r[1] === 'Network Fees (gas)')).toHaveLength(1);
+
+    const debit = rows.reduce((a, r) => a.plus(r[3] ?? '0'), new Decimal(0));
+    const credit = rows.reduce((a, r) => a.plus(r[4] ?? '0'), new Decimal(0));
+    expect(debit.toFixed(2)).toBe('8000.00');
+    expect(credit.toFixed(2)).toBe('8000.00');
   });
 
   it('builds a manifest citing every file hash, marked draft, with a zero residue', () => {
