@@ -48,16 +48,19 @@ export function canonicalDecimal(raw: string): string | null {
  * not invent a negative. The pattern is bounded (the lookbehind is zero-width, no nested
  * quantifier over an overlapping class), so it is ReDoS-safe.
  *
- * 0x-hex runs (addresses, tx hashes, tool_call/event ids) are stripped first, so their
- * incidental digits never register as figures — on either side of the anti-fabrication
- * check. Without this, an agent that quotes a *truncated* hash ("0x765b…310a") would emit
- * digit runs absent from the full hash in the tool result and read as fabricated numbers.
+ * Full 0x-hex runs (addresses, tx hashes) are stripped first, so their incidental digits
+ * never register as figures — on either side of the anti-fabrication check. A hash the
+ * agent copies verbatim from a tool result is thus dropped on both sides. It does NOT
+ * catch a hash the agent *truncates* with an ellipsis ("0x765b…310a" leaves the tail
+ * "310a" → "310"); the backstop for that is G2 tracing the whole envelope (data +
+ * citations), so anything genuinely in the tool result already counts as provided.
  *
- * Remaining limitation (weakens, doesn't break): structural integers in tool results
- * (decimals: 18, chain_id: 1) enter the anti-fabrication "provided" set, so a fabricated
- * 18 or 1 can slip through (false negative). A magnitude/context-aware match is the
- * follow-up, to be calibrated against the real transcripts the runner (PR #15) produces.
- * ReDoS-safe: both regexes are single bounded char classes, no overlapping quantifiers.
+ * Two limitations (weaken, don't break): structural integers in tool results
+ * (decimals: 18, chain_id: 1) enter the "provided" set, so a fabricated 18 or 1 can slip
+ * through (false negative); and a ULID tool_call_id (not 0x-hex, so not stripped here) is
+ * only safe because G2 traces citations. A magnitude/context-aware match is the follow-up,
+ * calibrated against real transcripts. ReDoS-safe: both regexes are single bounded char
+ * classes, no overlapping quantifiers.
  */
 export function extractNumbers(text: string): Set<string> {
   const scrubbed = text.replace(/0x[0-9a-fA-F]+/g, ' ');

@@ -15,6 +15,7 @@ import { coreDatasetPath, loadDataset, type EvalCase } from '@pet-crypto/evals';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 
+import { parseArgs } from './evals/args.js';
 import { makeAgentProducer } from './evals/agent.js';
 import { evaluateGate } from './evals/gate.js';
 import { runSuite } from './evals/harness.js';
@@ -23,45 +24,35 @@ import { buildReport, toJson, toMarkdown } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
 import { METRICS } from './evals/types.js';
 
-const DEFAULT_MODEL = 'claude-opus-4-8';
 // A 5-case subset spanning the metric mix for the PR smoke job (§7): balance freshness,
 // native flow, total gas, a guardrail, an injection.
 const SMOKE_IDS = new Set(['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001']);
-
-interface Args {
-  suite: string;
-  runs: number;
-  smoke: boolean;
-  model: string;
-  out: string;
-}
-
-function parseArgs(argv: string[]): Args {
-  const args: Args = { suite: 'core', runs: 3, smoke: false, model: DEFAULT_MODEL, out: 'eval-reports' };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--smoke') args.smoke = true;
-    else if (a === '--suite') args.suite = argv[++i] ?? args.suite;
-    else if (a === '--runs') args.runs = Number(argv[++i] ?? args.runs);
-    else if (a === '--model') args.model = argv[++i] ?? args.model;
-    else if (a === '--out') args.out = argv[++i] ?? args.out;
-    else if (a === 'run') continue; // tolerate `evals run …`
-  }
-  if (args.smoke) args.runs = 1;
-  return args;
-}
 
 /** DATABASE_URL if provided, else a throwaway container. Returns db + a disposer. */
 async function provisionDb(): Promise<{ db: Db; dispose: () => Promise<void> }> {
   const url = process.env['DATABASE_URL'];
   if (url !== undefined && url !== '') {
     const pool = new Pool({ connectionString: url });
-    await runMigrations(pool);
+    // If migrations throw, close the pool before rethrowing — nothing owns it yet.
+    try {
+      await runMigrations(pool);
+    } catch (err) {
+      await pool.end().catch(() => {});
+      throw err;
+    }
     return { db: createDb(pool), dispose: () => pool.end() };
   }
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer('postgres:16').start();
   const pool = new Pool({ connectionString: container.getConnectionUri() });
-  await runMigrations(pool);
+  // The disposer isn't returned yet, so a migration failure here would orphan the
+  // container — tear both down before rethrowing.
+  try {
+    await runMigrations(pool);
+  } catch (err) {
+    await pool.end().catch(() => {});
+    await container.stop().catch(() => {});
+    throw err;
+  }
   return {
     db: createDb(pool),
     dispose: async () => {

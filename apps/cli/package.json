@@ -18,7 +18,6 @@
     "@pet-crypto/core": "workspace:*",
     "@pet-crypto/db": "workspace:*",
     "@pet-crypto/evals": "workspace:*",
-    "@pet-crypto/ingestion": "workspace:*",
     "@pet-crypto/mcp-tools": "workspace:*",
     "@testcontainers/postgresql": "^11.0.0",
     "drizzle-orm": "^0.45.2",

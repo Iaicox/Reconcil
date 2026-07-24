@@ -77,12 +77,24 @@ jobs:
       # DB-derived ground-truth numbers (numbers.itest.ts) — deterministic, no LLM key.
       - run: pnpm --filter @pet-crypto/evals test:integration
 
+  # Resolve secret presence into a job output. A job-level `if:` can't reference secrets.*,
+  # but a step expression can — so the eval jobs gate on this output and SKIP (grey) when
+  # ANTHROPIC_API_KEY is unset, instead of running and failing red at the key check.
+  evals-preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      has_key: ${{ steps.k.outputs.has_key }}
+    steps:
+      - id: k
+        run: echo "has_key=${{ secrets.ANTHROPIC_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
+
   # Live agent smoke (5 cases × 1 run): the only cheap catch for contract/prompt drift.
-  # Same-repo PRs only — fork PRs have no secrets, so this is skipped there rather than
-  # failing. Docker (testcontainers) is present on ubuntu-latest; the runner spins its own
-  # throwaway Postgres. ANTHROPIC_API_KEY is used here and in evals-full, nowhere else.
+  # Runs only when the secret exists AND on a same-repo PR (fork PRs have no secrets).
+  # Docker (testcontainers) is present on ubuntu-latest; the runner spins its own throwaway
+  # Postgres. ANTHROPIC_API_KEY is used here and in evals-full, nowhere else.
   evals-smoke:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: evals-preflight
+    if: needs.evals-preflight.outputs.has_key == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +113,8 @@ jobs:
   # never on every PR (cost). Applies the demo-readiness gate (§6): a failure exits
   # non-zero and marks the run red.
   evals-full:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: evals-preflight
+    if: needs.evals-preflight.outputs.has_key == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -10,7 +10,6 @@
     { "path": "../../packages/core" },
     { "path": "../../packages/db" },
     { "path": "../../packages/evals" },
-    { "path": "../../packages/ingestion" },
     { "path": "../../packages/mcp-tools" }
   ]
 }

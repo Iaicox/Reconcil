@@ -2,6 +2,7 @@ import type { CitationResolver, EvalCase, ToolInvocation, Transcript } from '@pe
 import type { ToolEnvelope } from '@pet-crypto/mcp-tools';
 import { describe, expect, it } from 'vitest';
 
+import { parseArgs } from '../src/evals/args.js';
 import { evaluateGate } from '../src/evals/gate.js';
 import { runSuite, type HarnessDeps } from '../src/evals/harness.js';
 import { buildReport, toJson, toMarkdown } from '../src/evals/scorecard.js';
@@ -139,5 +140,20 @@ describe('scorecard', () => {
     const json = JSON.parse(toJson(report)) as { gate: { passed: boolean }; cases: unknown[] };
     expect(json.gate.passed).toBe(true);
     expect(json.cases).toHaveLength(2);
+  });
+});
+
+describe('parseArgs', () => {
+  it('defaults to 3 runs and applies flags', () => {
+    expect(parseArgs([]).runs).toBe(3);
+    expect(parseArgs(['--runs', '2']).runs).toBe(2);
+    expect(parseArgs(['--smoke']).runs).toBe(1);
+    expect(parseArgs(['--model', 'claude-haiku-4-5']).model).toBe('claude-haiku-4-5');
+  });
+  it('rejects a non-positive-integer --runs rather than passing the gate over zero runs', () => {
+    expect(() => parseArgs(['--runs', 'abc'])).toThrow(/positive integer/);
+    expect(() => parseArgs(['--runs', '0'])).toThrow(/positive integer/);
+    expect(() => parseArgs(['--runs', '-1'])).toThrow(/positive integer/);
+    expect(() => parseArgs(['--runs', '2.5'])).toThrow(/positive integer/);
   });
 });

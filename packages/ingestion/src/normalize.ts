@@ -95,8 +95,13 @@ export function normalize(
       blockNumber: BigInt(it.blockNumber),
       blockTime: new Date(Number(it.timeStamp) * 1000),
       provider: ctx.provider,
-      // tx-level from/to mirror the internal endpoints — chain_events.tx_from/tx_to
-      // are NOT NULL, and an internal transfer has no distinct outer tx envelope here.
+      // tx-level from/to mirror the internal endpoints — chain_events.tx_from/tx_to are
+      // NOT NULL and an internal transfer has no distinct outer tx envelope here. So
+      // counterparty/initiator analytics over an internal inflow see the internal sender
+      // (the contract that sent the value), not the outer tx's originator. For an inflow
+      // that internal sender IS the meaningful counterparty, so this is a deliberate choice,
+      // not a misattribution; a txlist⋈txlistinternal join could recover the outer
+      // originator if initiator-level analytics ever need it (follow-up, not needed today).
       txFrom: it.from.toLowerCase(),
       txTo: it.to.toLowerCase(),
       raw: it,
