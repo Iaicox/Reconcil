@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 
-import { apiKeys, tenants, type Db } from '@pet-crypto/db';
+import { apiKeys, type Db } from '@pet-crypto/db';
 import { and, eq, isNull } from 'drizzle-orm';
 
 /** sha256 hex of a presented bearer key — matches `api_keys.key_hash` (plaintext never stored). */
@@ -42,20 +42,4 @@ export async function resolveTenantByBearer(db: Db, presentedKey: string): Promi
     .where(and(eq(apiKeys.keyHash, hashKey(presentedKey)), isNull(apiKeys.revokedAt)))
     .limit(1);
   return rows[0]?.tenantId ?? null;
-}
-
-/**
- * Idempotent self-host tenant (P10: single-tenant self-host). The stdio entry
- * resolves its fixed tenant through here on boot, creating it on first run so a
- * fresh container just works with no manual seeding.
- */
-export async function ensureSelfHostTenant(db: Db, slug: string, name: string): Promise<string> {
-  const rows = await db
-    .insert(tenants)
-    .values({ slug, name })
-    .onConflictDoUpdate({ target: tenants.slug, set: { name } })
-    .returning({ id: tenants.id });
-  const id = rows[0]?.id;
-  if (id === undefined) throw new Error('ensureSelfHostTenant: upsert returned no row');
-  return id;
 }

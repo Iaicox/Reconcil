@@ -1,11 +1,11 @@
 /**
  * Thin CLI agent (P11): the demo REPL + the eval runner, built on the Anthropic SDK
  * Tool Runner (04-testing.md §5). Tools are bound in-process from @pet-crypto/mcp-tools —
- * no server process in the eval loop (ADR-012). The Anthropic API key is needed only here
+ * no server process in the loop (ADR-012). The Anthropic API key is needed only here
  * and in the eval harness, never by the server or worker.
  *
- * `evals run` lives in `run.ts` (the `evals` package script); the demo REPL is the next
- * slice. This entry documents the surface and points at the runner.
+ * `evals run` lives in `run.ts` (the `evals` package script); `repl` starts the
+ * interactive demo agent (`repl.ts`). The shared prompt + tool binding live in `agent/core.ts`.
  */
 const usage = `pet-crypto CLI
 
@@ -15,12 +15,25 @@ Commands:
                  pnpm --filter @pet-crypto/cli evals -- --smoke        # 5 cases × 1 run
                flags: --model <id> (default claude-opus-4-8), --out <dir>
                needs ANTHROPIC_API_KEY; DATABASE_URL or Docker (testcontainers).
-  repl         interactive demo agent — not implemented yet (next slice).
+  repl         interactive demo agent over the tenant's tracked wallets
+                 pnpm --filter @pet-crypto/cli dev repl
+               flags: --model <id> (default claude-opus-4-8)
+               needs ANTHROPIC_API_KEY + DATABASE_URL (a running stack).
 `;
 
-const command = process.argv[2];
-if (command === 'evals') {
-  console.log('Run the eval suite via the package script:\n  pnpm --filter @pet-crypto/cli evals -- --suite core');
-} else {
-  console.log(usage);
+async function main(): Promise<void> {
+  const command = process.argv[2];
+  if (command === 'repl') {
+    const { runRepl } = await import('./repl.js');
+    await runRepl();
+  } else if (command === 'evals') {
+    console.log('Run the eval suite via the package script:\n  pnpm --filter @pet-crypto/cli evals -- --suite core');
+  } else {
+    console.log(usage);
+  }
 }
+
+main().catch((err: unknown) => {
+  console.error('cli failed:', err);
+  process.exit(1);
+});
