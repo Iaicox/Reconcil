@@ -1,4 +1,4 @@
-import type { Logger } from '@pet-crypto/core';
+import type { Logger } from '@reconcil/core';
 
 /**
  * A structured JSON Logger that writes to STDERR. stdio.ts and keygen.ts need it

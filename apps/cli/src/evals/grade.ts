@@ -13,7 +13,7 @@ import {
   type CitationResolver,
   type EvalExpect,
   type Transcript,
-} from '@pet-crypto/evals';
+} from '@reconcil/evals';
 
 import type { RunGrades } from './types.js';
 

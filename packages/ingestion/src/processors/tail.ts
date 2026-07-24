@@ -1,5 +1,5 @@
 import { and, eq } from 'drizzle-orm';
-import { ingestionCheckpoints } from '@pet-crypto/db';
+import { ingestionCheckpoints } from '@reconcil/db';
 import { ingestOnce, type IngestTarget, type ProcessorDeps } from './ingest.js';
 
 /**

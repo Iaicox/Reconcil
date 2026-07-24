@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/recon",
+  "name": "@reconcil/recon",
   "version": "0.0.0",
   "private": true,
   "description": "Source-agnostic matching engine, match lifecycle, status derivation (HITL).",
@@ -18,8 +18,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*"
+    "@reconcil/core": "workspace:*",
+    "@reconcil/db": "workspace:*"
   },
   "devDependencies": {
     "eslint": "catalog:",

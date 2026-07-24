@@ -1,4 +1,4 @@
-import type { ToolEnvelope } from '@pet-crypto/mcp-tools';
+import type { ToolEnvelope } from '@reconcil/mcp-tools';
 
 /** Compact one-line shape of `data`: arrays as counts, nested objects elided, scalars verbatim. */
 function summarizeData(data: unknown): string {

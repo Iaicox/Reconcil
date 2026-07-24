@@ -8,7 +8,7 @@
  * REPL via agent/core.ts.
  */
 import type Anthropic from '@anthropic-ai/sdk';
-import type { ToolInvocation } from '@pet-crypto/evals';
+import type { ToolInvocation } from '@reconcil/evals';
 
 import { buildRunnableTools, buildSystemPrompt } from '../agent/core.js';
 import type { SessionInput, SessionProducer } from './types.js';

@@ -7,7 +7,7 @@
 import {
   directoryListEntitiesInput, directoryListEntitiesOutput,
   type DirectoryListEntitiesOutput,
-} from '@pet-crypto/core';
+} from '@reconcil/core';
 
 import type { ToolContext } from '../context.js';
 import { listEntities } from '../directory/repo.js';

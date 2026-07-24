@@ -1,5 +1,5 @@
 {
-  "name": "pet-crypto",
+  "name": "reconcil",
   "version": "0.0.0",
   "private": true,
   "description": "Self-hostable, MCP-native on-chain ledger for crypto accounting",
@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
-    "@pet-crypto/ingestion": "workspace:*",
+    "@reconcil/ingestion": "workspace:*",
     "dependency-cruiser": "^18.1.0",
     "eslint": "catalog:",
     "tsx": "catalog:",

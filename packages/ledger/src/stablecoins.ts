@@ -4,7 +4,7 @@
  * the stablecoin token-id set (optionally one peg), then reuse the flow fold.
  * Per-peg *fiat* subtotals need valuation and are composed above ledger (pricing).
  */
-import { tokens, type Db } from '@pet-crypto/db';
+import { tokens, type Db } from '@reconcil/db';
 import { and, eq, inArray } from 'drizzle-orm';
 
 import { computeFlows } from './flows.js';

@@ -5,8 +5,8 @@
  * `PricingWarning` into the envelope `Warning`. Shared by balances/flows/gas/
  * stablecoin so a citation-mapping change lands in one place (C4/C5).
  */
-import type { FxRef, PriceRef, Warning } from '@pet-crypto/core';
-import type { Valuation, ValuationResult } from '@pet-crypto/pricing';
+import type { FxRef, PriceRef, Warning } from '@reconcil/core';
+import type { Valuation, ValuationResult } from '@reconcil/pricing';
 
 /**
  * A pricing `Valuation` with no `undefined` policy key — the Zod-inferred input

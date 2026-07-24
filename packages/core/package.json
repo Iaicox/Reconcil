@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/core",
+  "name": "@reconcil/core",
   "version": "0.0.0",
   "private": true,
   "description": "Shared kernel: domain types, zod schemas, Money, sanitizer, chains config, structured logger. No network/DB I/O.",

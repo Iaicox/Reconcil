@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type { ToolContext } from '@pet-crypto/mcp-tools';
+import type { ToolContext } from '@reconcil/mcp-tools';
 import { describe, expect, it } from 'vitest';
 
 import { createServer } from '../src/server.js';

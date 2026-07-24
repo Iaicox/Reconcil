@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Executable Drizzle schema in `@pet-crypto/db` mirroring `docs/architecture/schema.sql` (16 tables), with a generated SQL migration `0000` proven byte-identical (via `pg_dump` diff) to the reference DDL on Postgres 16.
+**Goal:** Executable Drizzle schema in `@reconcil/db` mirroring `docs/architecture/schema.sql` (16 tables), with a generated SQL migration `0000` proven byte-identical (via `pg_dump` diff) to the reference DDL on Postgres 16.
 
 **Architecture:** TS-schema-first (approved spec: `docs/superpowers/specs/2026-07-14-drizzle-schema-migration-design.md`). `src/schema.ts` is hand-written in the same section order as `schema.sql`; `drizzle-kit generate` produces the migration; parity is verified by applying migration and reference DDL to two fresh databases in one disposable postgres:16 container and diffing schema-only dumps.
 
@@ -21,7 +21,7 @@
   Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_016HbUzUGj8AoYa5qWgequyv
   ```
-- Node >= 22.12, pnpm 11. Run package scripts via `pnpm --filter @pet-crypto/db <script>` from the repo root.
+- Node >= 22.12, pnpm 11. Run package scripts via `pnpm --filter @reconcil/db <script>` from the repo root.
 - No unit tests for schema shape (spec decision): the verification cycle per task is `tsc -b` build; the end-to-end test is the live-Postgres parity diff (Task 7). `vitest` stays `--passWithNoTests`.
 
 ---
@@ -165,8 +165,8 @@ Note: `bytea` is intentionally unused until Task 5 — if the linter flags the u
 
 - [ ] **Step 2: Build**
 
-Run: `pnpm --filter @pet-crypto/db build`
-Expected: exit 0 (compiles `@pet-crypto/core` then `db` via project references). If it fails on `'bytea' is declared but its value is never read`, apply the note from Step 1 (defer the `bytea` helper to Task 5) and rebuild.
+Run: `pnpm --filter @reconcil/db build`
+Expected: exit 0 (compiles `@reconcil/core` then `db` via project references). If it fails on `'bytea' is declared but its value is never read`, apply the note from Step 1 (defer the `bytea` helper to Task 5) and rebuild.
 
 - [ ] **Step 3: Commit**
 
@@ -278,7 +278,7 @@ export const chainEvents = pgTable(
 
 - [ ] **Step 2: Build**
 
-Run: `pnpm --filter @pet-crypto/db build`
+Run: `pnpm --filter @reconcil/db build`
 Expected: exit 0.
 
 - [ ] **Step 3: Commit**
@@ -425,7 +425,7 @@ export const entityAddresses = pgTable(
 
 - [ ] **Step 2: Build**
 
-Run: `pnpm --filter @pet-crypto/db build`
+Run: `pnpm --filter @reconcil/db build`
 Expected: exit 0.
 
 - [ ] **Step 3: Commit**
@@ -637,7 +637,7 @@ export const ingestionCheckpoints = pgTable(
 
 - [ ] **Step 2: Build**
 
-Run: `pnpm --filter @pet-crypto/db build`
+Run: `pnpm --filter @reconcil/db build`
 Expected: exit 0.
 
 - [ ] **Step 3: Commit**
@@ -803,7 +803,7 @@ In the `"scripts"` block, after `"test"`, add:
 
 - [ ] **Step 5: Build and lint**
 
-Run: `pnpm --filter @pet-crypto/db build && pnpm --filter @pet-crypto/db lint`
+Run: `pnpm --filter @reconcil/db build && pnpm --filter @reconcil/db lint`
 Expected: both exit 0. Fix any lint findings (formatting only — no logic changes) before committing.
 
 - [ ] **Step 6: Commit**
@@ -826,7 +826,7 @@ git commit -m "feat(db): interface tables (tool_calls, integration_credentials, 
 
 - [ ] **Step 1: Generate**
 
-Run: `pnpm --filter @pet-crypto/db db:generate`
+Run: `pnpm --filter @reconcil/db db:generate`
 Expected: output ends with `Your SQL migration file ➜ migrations/0000_<random-name>.sql 🚀` and reports 16 tables. No errors.
 
 - [ ] **Step 2: Hand-review the generated SQL against `docs/architecture/schema.sql`** (ADR-002: the migration is an audit artifact)
@@ -896,7 +896,7 @@ Expected: `diff` exits 0 with empty output — **zero differences is the accepta
 If there are differences:
 - Name deltas (constraint/index named differently) → fix the explicit name in `src/schema.ts`.
 - Type/default/nullability deltas → fix the column definition in `src/schema.ts`.
-- Then: delete `packages/db/migrations/` contents, `pnpm --filter @pet-crypto/db build`, regenerate (Task 6 Step 1), re-run Steps 2–3 of this task (drop and recreate both databases first: `docker exec schema_parity psql -U postgres -c 'DROP DATABASE from_migration' -c 'DROP DATABASE from_reference'`, then repeat from Step 1's CREATE DATABASE command). Commit the fix as `fix(db): align schema with reference DDL (parity diff)`.
+- Then: delete `packages/db/migrations/` contents, `pnpm --filter @reconcil/db build`, regenerate (Task 6 Step 1), re-run Steps 2–3 of this task (drop and recreate both databases first: `docker exec schema_parity psql -U postgres -c 'DROP DATABASE from_migration' -c 'DROP DATABASE from_reference'`, then repeat from Step 1's CREATE DATABASE command). Commit the fix as `fix(db): align schema with reference DDL (parity diff)`.
 
 - [ ] **Step 4: Tear down**
 

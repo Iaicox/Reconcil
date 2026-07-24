@@ -4,7 +4,7 @@
  * value). A price gap = a verified token on a UTC activity date with no market
  * snapshot yet ('peg' rows don't count — they aren't a market price).
  */
-import { chainEvents, tokens, type Db } from '@pet-crypto/db';
+import { chainEvents, tokens, type Db } from '@reconcil/db';
 import { and, eq, sql } from 'drizzle-orm';
 
 export interface PriceGap {

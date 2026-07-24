@@ -1,13 +1,13 @@
 /**
  * `export_pdf_summary` (contract §6.5) — a one-page PDF of the month's headline
  * figures + an audit manifest. Reuses `computeCloseData` (identical figures to
- * the close pack), renders through the pure `@pet-crypto/exporters` layer, and
+ * the close pack), renders through the pure `@reconcil/exporters` layer, and
  * returns the citation envelope. Non-read-only, never destructive (P8).
  */
 import { randomUUID } from 'node:crypto';
 
-import { exportPdfSummaryInput, exportPdfSummaryOutput, type ExportPdfSummaryOutput } from '@pet-crypto/core';
-import { renderPdfSummary } from '@pet-crypto/exporters';
+import { exportPdfSummaryInput, exportPdfSummaryOutput, type ExportPdfSummaryOutput } from '@reconcil/core';
+import { renderPdfSummary } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';

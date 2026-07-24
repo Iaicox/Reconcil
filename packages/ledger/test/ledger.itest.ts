@@ -1,4 +1,4 @@
-import { createDb, runMigrations, chainEvents, type Db } from '@pet-crypto/db';
+import { createDb, runMigrations, chainEvents, type Db } from '@reconcil/db';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import fc from 'fast-check';
 import { Pool } from 'pg';

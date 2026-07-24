@@ -3,8 +3,8 @@ import { pathToFileURL } from 'node:url';
 import rateLimit from '@fastify/rate-limit';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { createLogger, serializeError, type Logger } from '@pet-crypto/core';
-import { createDb, type Db } from '@pet-crypto/db';
+import { createLogger, serializeError, type Logger } from '@reconcil/core';
+import { createDb, type Db } from '@reconcil/db';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { Pool } from 'pg';
 

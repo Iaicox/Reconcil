@@ -1,6 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createDb, runMigrations, type Db } from '@pet-crypto/db';
-import { createLogger } from '@pet-crypto/core';
+import { createDb, runMigrations, type Db } from '@reconcil/db';
+import { createLogger } from '@reconcil/core';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ProviderBundle } from '../src/providers/provider-factory.js';

@@ -4,7 +4,7 @@
  * on `bigint`. Ledger is tenant-agnostic: scope is an explicit address set, and
  * tenant→wallet resolution lives above (mcp-tools/db).
  */
-import type { DecimalString } from '@pet-crypto/core';
+import type { DecimalString } from '@reconcil/core';
 
 export type EventKind = 'native_transfer' | 'erc20_transfer' | 'gas_fee' | 'opening_balance';
 

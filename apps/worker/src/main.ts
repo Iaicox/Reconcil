@@ -1,19 +1,19 @@
 /**
  * Worker host (ADR-008, 00-overview §2). Boot order: load env → migrate → db →
  * redis → queues + workers → repeatable tail per chain. All provider I/O and
- * retries live here; the domain logic runs in @pet-crypto/ingestion. Errors are
+ * retries live here; the domain logic runs in @reconcil/ingestion. Errors are
  * logged via serializeError — err.cause (hostile) never reaches the log (ADR-011).
  */
 import { Pool } from 'pg';
 import { Queue, Worker } from 'bullmq';
-import { chains, createLogger, serializeError } from '@pet-crypto/core';
-import { createDb, runMigrations } from '@pet-crypto/db';
+import { chains, createLogger, serializeError } from '@reconcil/core';
+import { createDb, runMigrations } from '@reconcil/db';
 import {
   buildProviderBundle, realFetchJson, runAnchor, runBackfillPage, runProbe, runTailTick, type ProcessorDeps,
-} from '@pet-crypto/ingestion';
+} from '@reconcil/ingestion';
 import {
   buildPriceProviderBundle, realFetchJson as realPriceFetchJson, throttled, runPriceFill,
-} from '@pet-crypto/pricing';
+} from '@reconcil/pricing';
 import { loadConfig } from './config.js';
 import { enqueueBackfills, runOnboardScan } from './onboard.js';
 import {
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
 
   // Onboarding scanner (ADR-008): fan queued/anchoring/unprobed checkpoints out to
   // the backfill, anchor, and probe queues. The read + enqueue live in
-  // @pet-crypto/ingestion + onboard.ts; this is the tick host.
+  // @reconcil/ingestion + onboard.ts; this is the tick host.
   const onboardWorker = new Worker(
     ONBOARD_QUEUE,
     async () => { await runOnboardScan(db, { backfill: backfillQueue, anchor: anchorQueue, probe: probeQueue }); },

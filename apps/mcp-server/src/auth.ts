@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 
-import { apiKeys, type Db } from '@pet-crypto/db';
+import { apiKeys, type Db } from '@reconcil/db';
 import { and, eq, isNull } from 'drizzle-orm';
 
 /** sha256 hex of a presented bearer key — matches `api_keys.key_hash` (plaintext never stored). */

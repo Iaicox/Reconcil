@@ -6,7 +6,7 @@
  * Pure rendering layer: functions take already-computed domain shapes and return
  * in-memory files (name + bytes + sha256) + a manifest. No fs/db/network — the
  * mcp-tools composition layer computes (ledger + pricing), materializes the files,
- * and registers the `exports` row. Imports only `@pet-crypto/core` (ADR-011 boundary).
+ * and registers the `exports` row. Imports only `@reconcil/core` (ADR-011 boundary).
  */
 export { renderClosePack } from './close-pack.js';
 export { renderPdfSummary } from './pdf-summary.js';

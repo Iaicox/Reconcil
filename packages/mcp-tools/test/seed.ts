@@ -7,7 +7,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { chainEvents, type Db } from '@pet-crypto/db';
+import { chainEvents, type Db } from '@reconcil/db';
 import type { Pool } from 'pg';
 
 export const TENANT = '00000000-0000-0000-0000-000000000001';

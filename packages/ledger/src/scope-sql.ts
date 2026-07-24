@@ -4,7 +4,7 @@
  * relative to a scope set S: inbound `to∈S ∧ from∉S`, outbound `from∈S ∧ to∉S`,
  * internal `from∈S ∧ to∈S`.
  */
-import { chainEvents } from '@pet-crypto/db';
+import { chainEvents } from '@reconcil/db';
 import { and, type SQL, gte, inArray, lte, notInArray, or, sql } from 'drizzle-orm';
 
 import type { FlowDirection, Period } from './types.js';

@@ -1,15 +1,15 @@
 /**
  * `export_close_pack` (contract §6.5) — the monthly close bundle: 6 CSVs + an
  * audit manifest, written to disk and registered in `exports`. Composes ledger +
- * pricing via `computeCloseData`, renders through the pure `@pet-crypto/exporters`
+ * pricing via `computeCloseData`, renders through the pure `@reconcil/exporters`
  * layer (rounding happens there, ADR-004), and returns the citation envelope.
  * Non-read-only, never destructive (P8). The tool_call id is minted up front so
  * the manifest cites the same id the envelope carries (C2).
  */
 import { randomUUID } from 'node:crypto';
 
-import { exportClosePackInput, exportClosePackOutput, type ExportClosePackOutput } from '@pet-crypto/core';
-import { renderClosePack } from '@pet-crypto/exporters';
+import { exportClosePackInput, exportClosePackOutput, type ExportClosePackOutput } from '@reconcil/core';
+import { renderClosePack } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';

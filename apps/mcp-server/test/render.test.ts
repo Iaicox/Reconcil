@@ -1,4 +1,4 @@
-import type { ToolEnvelope } from '@pet-crypto/mcp-tools';
+import type { ToolEnvelope } from '@reconcil/mcp-tools';
 import { describe, expect, it } from 'vitest';
 
 import { renderEnvelope } from '../src/render.js';

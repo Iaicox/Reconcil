@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/evals",
+  "name": "@reconcil/evals",
   "version": "0.0.0",
   "private": true,
   "description": "Golden fixtures (wallets, recorded provider responses), eval datasets, deterministic graders.",
@@ -19,11 +19,11 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*",
-    "@pet-crypto/ingestion": "workspace:*",
-    "@pet-crypto/ledger": "workspace:*",
-    "@pet-crypto/mcp-tools": "workspace:*",
+    "@reconcil/core": "workspace:*",
+    "@reconcil/db": "workspace:*",
+    "@reconcil/ingestion": "workspace:*",
+    "@reconcil/ledger": "workspace:*",
+    "@reconcil/mcp-tools": "workspace:*",
     "yaml": "^2.6.0",
     "zod": "catalog:"
   },

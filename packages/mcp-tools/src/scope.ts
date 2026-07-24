@@ -4,10 +4,10 @@
  * fields intersect; default (no scope) = all of the tenant's wallets. Unknown
  * wallet ids / untracked addresses are loud domain errors, not silent empties.
  */
-import { clients, wallets } from '@pet-crypto/db';
+import { clients, wallets } from '@reconcil/db';
 import { eq, sql } from 'drizzle-orm';
 
-import type { Scope } from '@pet-crypto/core';
+import type { Scope } from '@reconcil/core';
 
 import type { ToolContext } from './context.js';
 import { ToolError } from './errors.js';

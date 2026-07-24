@@ -38,7 +38,7 @@ importers:
       '@eslint/js':
         specifier: ^10.0.0
         version: 10.0.1(eslint@10.7.0)
-      '@pet-crypto/ingestion':
+      '@reconcil/ingestion':
         specifier: workspace:*
         version: link:packages/ingestion
       dependency-cruiser:
@@ -65,16 +65,16 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.114.0
         version: 0.114.0(zod@4.4.3)
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@pet-crypto/evals':
+      '@reconcil/evals':
         specifier: workspace:*
         version: link:../../packages/evals
-      '@pet-crypto/mcp-tools':
+      '@reconcil/mcp-tools':
         specifier: workspace:*
         version: link:../../packages/mcp-tools
       '@testcontainers/postgresql':
@@ -114,13 +114,13 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.29.0(zod@4.4.3)
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@pet-crypto/mcp-tools':
+      '@reconcil/mcp-tools':
         specifier: workspace:*
         version: link:../../packages/mcp-tools
       drizzle-orm:
@@ -160,16 +160,16 @@ importers:
 
   apps/worker:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@pet-crypto/ingestion':
+      '@reconcil/ingestion':
         specifier: workspace:*
         version: link:../../packages/ingestion
-      '@pet-crypto/pricing':
+      '@reconcil/pricing':
         specifier: workspace:*
         version: link:../../packages/pricing
       bullmq:
@@ -228,7 +228,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../core
       drizzle-orm:
@@ -262,19 +262,19 @@ importers:
 
   packages/evals:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../db
-      '@pet-crypto/ingestion':
+      '@reconcil/ingestion':
         specifier: workspace:*
         version: link:../ingestion
-      '@pet-crypto/ledger':
+      '@reconcil/ledger':
         specifier: workspace:*
         version: link:../ledger
-      '@pet-crypto/mcp-tools':
+      '@reconcil/mcp-tools':
         specifier: workspace:*
         version: link:../mcp-tools
       yaml:
@@ -308,7 +308,7 @@ importers:
 
   packages/exporters:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../core
       decimal.js:
@@ -339,10 +339,10 @@ importers:
 
   packages/ingestion:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../db
       drizzle-orm:
@@ -379,10 +379,10 @@ importers:
 
   packages/ledger:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../db
       drizzle-orm:
@@ -416,22 +416,22 @@ importers:
 
   packages/mcp-tools:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../db
-      '@pet-crypto/exporters':
+      '@reconcil/exporters':
         specifier: workspace:*
         version: link:../exporters
-      '@pet-crypto/ledger':
+      '@reconcil/ledger':
         specifier: workspace:*
         version: link:../ledger
-      '@pet-crypto/pricing':
+      '@reconcil/pricing':
         specifier: workspace:*
         version: link:../pricing
-      '@pet-crypto/recon':
+      '@reconcil/recon':
         specifier: workspace:*
         version: link:../recon
       drizzle-orm:
@@ -468,10 +468,10 @@ importers:
 
   packages/pricing:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../db
       decimal.js:
@@ -511,10 +511,10 @@ importers:
 
   packages/recon:
     dependencies:
-      '@pet-crypto/core':
+      '@reconcil/core':
         specifier: workspace:*
         version: link:../core
-      '@pet-crypto/db':
+      '@reconcil/db':
         specifier: workspace:*
         version: link:../db
     devDependencies:

@@ -2,7 +2,7 @@ import { Decimal } from 'decimal.js';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import type { DecimalString } from '@pet-crypto/core';
+import type { DecimalString } from '@reconcil/core';
 
 import type { FxResolved, SnapshotRow, ValueNeed } from '../src/types.js';
 import { valueOne } from '../src/value.js';

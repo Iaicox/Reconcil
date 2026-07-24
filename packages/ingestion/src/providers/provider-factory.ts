@@ -7,7 +7,7 @@
  * receipt-level provider failover is out of scope this slice; BullMQ retry
  * covers transient receipt errors (D8).
  */
-import { chainById } from '@pet-crypto/core';
+import { chainById } from '@reconcil/core';
 import { ProviderError, type ChainDataProvider, type FetchJson, type PageQuery, type RawReceipt } from '../types.js';
 import { etherscanV2Adapter } from './etherscan-v2.js';
 import { blockscoutAdapter } from './blockscout.js';

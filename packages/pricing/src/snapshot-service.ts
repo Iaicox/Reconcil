@@ -4,7 +4,7 @@
  * unique keys — re-running a fill inserts nothing new (ON CONFLICT DO NOTHING).
  * Peg rows are materialized so peg-policy valuations cite a real snapshot.
  */
-import { fxRates, priceSnapshots, type Db } from '@pet-crypto/db';
+import { fxRates, priceSnapshots, type Db } from '@reconcil/db';
 import { sql } from 'drizzle-orm';
 
 export interface SnapshotInsert {

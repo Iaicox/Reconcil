@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/exporters",
+  "name": "@reconcil/exporters",
   "version": "0.0.0",
   "private": true,
   "description": "Close pack CSVs, PDF summary, QBO/Xero journal drafts, audit manifests.",
@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@pet-crypto/core": "workspace:*",
+    "@reconcil/core": "workspace:*",
     "decimal.js": "catalog:",
     "pdfkit": "^0.15.0"
   },

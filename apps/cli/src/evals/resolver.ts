@@ -5,10 +5,10 @@
  * `chain_events` are global (C3). Keeping this behind the ResolverFactory seam lets the
  * grader stay pure and unit-testable while the real lookups live here.
  */
-import type { EventRef } from '@pet-crypto/core';
-import { chainEvents, toolCalls } from '@pet-crypto/db';
-import type { Transcript } from '@pet-crypto/evals';
-import type { ToolContext } from '@pet-crypto/mcp-tools';
+import type { EventRef } from '@reconcil/core';
+import { chainEvents, toolCalls } from '@reconcil/db';
+import type { Transcript } from '@reconcil/evals';
+import type { ToolContext } from '@reconcil/mcp-tools';
 import { and, eq, inArray, or, type SQL } from 'drizzle-orm';
 
 import type { CitationResolver, ResolverFactory } from './types.js';

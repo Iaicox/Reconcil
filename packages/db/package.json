@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/db",
+  "name": "@reconcil/db",
   "version": "0.0.0",
   "private": true,
   "description": "Drizzle schema, SQL migrations, tenant-scoped repositories.",
@@ -22,7 +22,7 @@
     "db:check": "drizzle-kit check"
   },
   "dependencies": {
-    "@pet-crypto/core": "workspace:*",
+    "@reconcil/core": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0"
   },

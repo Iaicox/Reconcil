@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/cli",
+  "name": "@reconcil/cli",
   "version": "0.0.0",
   "private": true,
   "description": "Thin CLI agent (Anthropic SDK Tool Runner): demo REPL + eval runs; tools bound in-process.",
@@ -15,10 +15,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.114.0",
-    "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*",
-    "@pet-crypto/evals": "workspace:*",
-    "@pet-crypto/mcp-tools": "workspace:*",
+    "@reconcil/core": "workspace:*",
+    "@reconcil/db": "workspace:*",
+    "@reconcil/evals": "workspace:*",
+    "@reconcil/mcp-tools": "workspace:*",
     "@testcontainers/postgresql": "^11.0.0",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0"

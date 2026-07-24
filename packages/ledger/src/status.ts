@@ -4,8 +4,8 @@
  * ANCHORED_BASELINE, DATA_STALE). Reads checkpoints, not chain height, so
  * `backfillProgress` is best-effort/omitted (a stored head is an ingestion change).
  */
-import { ANCHOR_SUGGEST_TX_THRESHOLD } from '@pet-crypto/core';
-import { chainEvents, ingestionCheckpoints, type Db } from '@pet-crypto/db';
+import { ANCHOR_SUGGEST_TX_THRESHOLD } from '@reconcil/core';
+import { chainEvents, ingestionCheckpoints, type Db } from '@reconcil/db';
 import { and, inArray, sql } from 'drizzle-orm';
 
 import type { StatusParams, StreamStatus, WalletCoverage } from './types.js';

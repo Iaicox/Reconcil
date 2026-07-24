@@ -7,7 +7,7 @@
  */
 import { Decimal } from 'decimal.js';
 
-import type { DecimalString } from '@pet-crypto/core';
+import type { DecimalString } from '@reconcil/core';
 
 // A private clone so global Decimal config elsewhere can't perturb money math.
 const D = Decimal.clone({ precision: 40, rounding: Decimal.ROUND_HALF_UP });

@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/worker",
+  "name": "@reconcil/worker",
   "version": "0.0.0",
   "private": true,
   "description": "BullMQ processors: backfill, live tail, prices, token resolve, integrity checks, exports.",
@@ -13,10 +13,10 @@
     "dev": "tsx src/main.ts"
   },
   "dependencies": {
-    "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*",
-    "@pet-crypto/ingestion": "workspace:*",
-    "@pet-crypto/pricing": "workspace:*",
+    "@reconcil/core": "workspace:*",
+    "@reconcil/db": "workspace:*",
+    "@reconcil/ingestion": "workspace:*",
+    "@reconcil/pricing": "workspace:*",
     "bullmq": "^5.34.0",
     "ioredis": "^5.4.0",
     "pg": "^8.22.0",

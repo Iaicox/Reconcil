@@ -16,8 +16,8 @@
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chainById } from '@pet-crypto/core';
-import { tokens, type Db } from '@pet-crypto/db';
+import { chainById } from '@reconcil/core';
+import { tokens, type Db } from '@reconcil/db';
 import {
   blockscoutAdapter,
   collectAllPages,
@@ -29,7 +29,7 @@ import {
   type ChainDataProvider,
   type PageQuery,
   type WalletManifestEntry,
-} from '@pet-crypto/ingestion';
+} from '@reconcil/ingestion';
 
 const FIXTURES = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'fixtures', 'providers');
 

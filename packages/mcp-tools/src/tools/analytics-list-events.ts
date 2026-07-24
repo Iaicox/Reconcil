@@ -11,8 +11,8 @@
 import {
   analyticsListEventsInput, analyticsListEventsOutput,
   type AddressView, type AnalyticsListEventsOutput, type EventListItemView, type Warning,
-} from '@pet-crypto/core';
-import { getLedgerStatus, listEvents, type EventListItem, type ListEventsParams } from '@pet-crypto/ledger';
+} from '@reconcil/core';
+import { getLedgerStatus, listEvents, type EventListItem, type ListEventsParams } from '@reconcil/ledger';
 
 import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';

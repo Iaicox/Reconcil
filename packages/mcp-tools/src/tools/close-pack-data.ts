@@ -3,22 +3,22 @@
  * month → period, then composes ledger (balances at open/close, transactions,
  * gas, counterparties, per-token flows) with pricing (`valueQuantities`) — the
  * SAME deterministic calls the analytics_* tools use — and maps the results into
- * the pure `@pet-crypto/exporters` render shapes. Rounding is NOT done here; it
+ * the pure `@reconcil/exporters` render shapes. Rounding is NOT done here; it
  * happens once, in exporters, at the export boundary (ADR-004). Both
  * `export_close_pack` and `export_pdf_summary` call this so the PDF and the CSV
  * bundle describe exactly the same figures.
  */
-import type { CoverageRef, FxRef, PriceRef, Scope, Valuation, Warning } from '@pet-crypto/core';
-import { compareDecimals } from '@pet-crypto/exporters';
+import type { CoverageRef, FxRef, PriceRef, Scope, Valuation, Warning } from '@reconcil/core';
+import { compareDecimals } from '@reconcil/exporters';
 import type {
   BalanceExportRow, CounterpartyExportRow, ExportPeriod, ExportScope, GasExportRow,
   JournalInput, JournalMovement, TokenLabel, TransactionExportRow,
-} from '@pet-crypto/exporters';
+} from '@reconcil/exporters';
 import {
   computeBalances, computeCounterparties, computeFlows, computeGas, getLedgerStatus, listEvents,
   type BackingEvents, type BalanceRow, type EventListItem, type GasRow, type TokenMeta,
-} from '@pet-crypto/ledger';
-import { sumDecimals, valueQuantities, type ValuationResult, type ValueNeed } from '@pet-crypto/pricing';
+} from '@reconcil/ledger';
+import { sumDecimals, valueQuantities, type ValuationResult, type ValueNeed } from '@reconcil/pricing';
 
 import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';

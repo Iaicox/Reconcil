@@ -1,9 +1,9 @@
-import { createDb, runMigrations, type Db } from '@pet-crypto/db';
+import { createDb, runMigrations, type Db } from '@reconcil/db';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import type { DecimalString } from '@pet-crypto/core';
+import type { DecimalString } from '@reconcil/core';
 
 import type { ValueNeed } from '../src/types.js';
 import { valueQuantities } from '../src/value.js';

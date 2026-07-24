@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/mcp-tools",
+  "name": "@reconcil/mcp-tools",
   "version": "0.0.0",
   "private": true,
   "description": "Transport-agnostic MCP tool implementations: citation envelope, sanitized output, tenancy scoping.",
@@ -19,12 +19,12 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*",
-    "@pet-crypto/exporters": "workspace:*",
-    "@pet-crypto/ledger": "workspace:*",
-    "@pet-crypto/pricing": "workspace:*",
-    "@pet-crypto/recon": "workspace:*",
+    "@reconcil/core": "workspace:*",
+    "@reconcil/db": "workspace:*",
+    "@reconcil/exporters": "workspace:*",
+    "@reconcil/ledger": "workspace:*",
+    "@reconcil/pricing": "workspace:*",
+    "@reconcil/recon": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "zod": "catalog:"
   },

@@ -1,5 +1,5 @@
-import { createLogger } from '@pet-crypto/core';
-import { createDb, runMigrations, type Db } from '@pet-crypto/db';
+import { createLogger } from '@reconcil/core';
+import { createDb, runMigrations, type Db } from '@reconcil/db';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';

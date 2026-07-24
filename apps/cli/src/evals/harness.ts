@@ -5,7 +5,7 @@
  * a fake session producer with no API key in the hermetic `test` job, and against the
  * real Tool Runner + Postgres in `evals-*`.
  */
-import type { EvalCase } from '@pet-crypto/evals';
+import type { EvalCase } from '@reconcil/evals';
 
 import { aggregateCase } from './gate.js';
 import { gradeTranscript } from './grade.js';

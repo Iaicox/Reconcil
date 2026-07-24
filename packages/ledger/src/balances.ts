@@ -4,8 +4,8 @@
  * aggregated raw in SQL and scaled once at the edge (ADR-004). Ledger returns
  * quantities only; valuation is layered on above (pricing → mcp-tools).
  */
-import { formatUnits } from '@pet-crypto/core';
-import { chainEvents, type Db } from '@pet-crypto/db';
+import { formatUnits } from '@reconcil/core';
+import { chainEvents, type Db } from '@reconcil/db';
 import { and, type SQL, inArray, lte, or, sql } from 'drizzle-orm';
 
 import { resolveAsOf } from './as-of.js';

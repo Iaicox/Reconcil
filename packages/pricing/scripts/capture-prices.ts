@@ -4,7 +4,7 @@
  * worker's fill does) and records every DefiLlama/CoinGecko/ECB response via
  * recordingTransport, so recorded fixtures match what a replay would request.
  *
- *   pnpm --filter @pet-crypto/pricing capture       # DATABASE_URL from the env / root .env
+ *   pnpm --filter @reconcil/pricing capture       # DATABASE_URL from the env / root .env
  *
  * DefiLlama and ECB are keyless; COINGECKO_API_KEY (optional) raises the secondary
  * source's rate limits. Fixtures land in packages/evals/fixtures/providers/prices.
@@ -12,8 +12,8 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createLogger } from '@pet-crypto/core';
-import { createDb } from '@pet-crypto/db';
+import { createLogger } from '@reconcil/core';
+import { createDb } from '@reconcil/db';
 import { Pool } from 'pg';
 
 import { runPriceFill } from '../src/fill.js';

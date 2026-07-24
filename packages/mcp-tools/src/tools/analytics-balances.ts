@@ -10,9 +10,9 @@ import {
   analyticsBalancesInput, analyticsBalancesOutput,
   type AnalyticsBalancesInput, type AnalyticsBalancesOutput,
   type FxRef, type PriceRef, type Warning,
-} from '@pet-crypto/core';
-import { computeBalances, getLedgerStatus } from '@pet-crypto/ledger';
-import { sumDecimals, valueQuantities, type ValueNeed } from '@pet-crypto/pricing';
+} from '@reconcil/core';
+import { computeBalances, getLedgerStatus } from '@reconcil/ledger';
+import { sumDecimals, valueQuantities, type ValueNeed } from '@reconcil/pricing';
 
 import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';

@@ -1,5 +1,5 @@
-import type { CoverageRef } from '@pet-crypto/core';
-import { buildEnvelope } from '@pet-crypto/mcp-tools';
+import type { CoverageRef } from '@reconcil/core';
+import { buildEnvelope } from '@reconcil/mcp-tools';
 import { describe, expect, it } from 'vitest';
 
 import type { EvalExpect } from '../src/dataset.js';

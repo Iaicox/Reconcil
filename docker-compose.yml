@@ -8,7 +8,7 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: pet_crypto
+      POSTGRES_DB: reconcil
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -33,7 +33,7 @@ services:
     command: node apps/mcp-server/dist/http.js
     env_file: .env
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/pet_crypto
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/reconcil
       REDIS_URL: redis://redis:6379
       SELF_HOST_TENANT_SLUG: ${SELF_HOST_TENANT_SLUG:-self-host}
     ports:
@@ -51,7 +51,7 @@ services:
     command: node apps/worker/dist/main.js
     env_file: .env
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/pet_crypto
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/reconcil
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:

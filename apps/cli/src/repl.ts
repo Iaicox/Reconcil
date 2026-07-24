@@ -16,8 +16,8 @@
 import { createInterface } from 'node:readline/promises';
 
 import Anthropic from '@anthropic-ai/sdk';
-import { createDb, ensureSelfHostTenant } from '@pet-crypto/db';
-import type { ToolContext } from '@pet-crypto/mcp-tools';
+import { createDb, ensureSelfHostTenant } from '@reconcil/db';
+import type { ToolContext } from '@reconcil/mcp-tools';
 import { Pool } from 'pg';
 
 import { buildRunnableTools, buildSystemPrompt, type Invocation } from './agent/core.js';
@@ -114,7 +114,7 @@ export async function runRepl(argv: string[] = process.argv.slice(3)): Promise<v
     };
     const runnableTools = buildRunnableTools(ctx, onInvocation);
 
-    console.log(`pet-crypto demo REPL — tenant "${slug}", model ${model}, today ${referenceDate}.`);
+    console.log(`reconcil demo REPL — tenant "${slug}", model ${model}, today ${referenceDate}.`);
     console.log('Type /help for commands, /exit to quit.');
 
     for (;;) {
