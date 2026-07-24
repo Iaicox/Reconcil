@@ -1,11 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createDb, runMigrations, type Db } from '@pet-crypto/db';
+import { createDb, ensureSelfHostTenant, runMigrations, type Db } from '@pet-crypto/db';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { ensureSelfHostTenant, hashKey, resolveTenantByBearer } from '../src/auth.js';
+import { hashKey, resolveTenantByBearer } from '../src/auth.js';
 import { mintKey } from '../src/keygen.js';
 import { createServer } from '../src/server.js';
 
