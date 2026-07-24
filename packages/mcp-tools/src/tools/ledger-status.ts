@@ -10,8 +10,8 @@
 import {
   decimalString, ledgerStatusInput, ledgerStatusOutput,
   type LedgerStatusOutput, type LedgerWalletStatusView,
-} from '@pet-crypto/core';
-import { getLedgerStatus } from '@pet-crypto/ledger';
+} from '@reconcil/core';
+import { getLedgerStatus } from '@reconcil/ledger';
 import { z } from 'zod';
 
 import type { ToolContext } from '../context.js';

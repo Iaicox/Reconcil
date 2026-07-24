@@ -106,7 +106,7 @@ core imports nothing internal. Nothing imports apps.
 pnpm workspaces + Turborepo (ADR-001).
 
 ```
-pet_crypto/
+reconcil/
 ├── apps/
 │   ├── mcp-server/        # stdio entry + Fastify host for streamable HTTP (/mcp, /healthz)
 │   ├── worker/            # BullMQ processors (ingestion, prices, exports, integrity)

@@ -13,9 +13,9 @@ import {
   analyticsGasInput, analyticsGasOutput,
   type AnalyticsGasInput, type AnalyticsGasOutput, type GasRowView,
   type FxRef, type PriceRef, type Warning,
-} from '@pet-crypto/core';
-import { computeGas, getLedgerStatus, type GasRow } from '@pet-crypto/ledger';
-import { valueQuantities, type ValueNeed } from '@pet-crypto/pricing';
+} from '@reconcil/core';
+import { computeGas, getLedgerStatus, type GasRow } from '@reconcil/ledger';
+import { valueQuantities, type ValueNeed } from '@reconcil/pricing';
 
 import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';

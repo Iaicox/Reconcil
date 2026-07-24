@@ -17,12 +17,12 @@
  * stale failed job before re-adding) belongs with the backfill error-surfacing
  * slice. Continuation pages use auto-ids, so only page-1 can wedge this way.
  */
-import { anchorJobId, backfillJobId, probeJobId } from '@pet-crypto/core';
-import type { Db } from '@pet-crypto/db';
+import { anchorJobId, backfillJobId, probeJobId } from '@reconcil/core';
+import type { Db } from '@reconcil/db';
 import {
   listAnchoringCheckpoints, listProbeTargets, listQueuedCheckpoints,
   type AnchorTarget, type BackfillTarget,
-} from '@pet-crypto/ingestion';
+} from '@reconcil/ingestion';
 import type { JobsOptions } from 'bullmq';
 
 import { jobOptions } from './queues.js';

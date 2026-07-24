@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { DecimalString } from '@pet-crypto/core';
+import type { DecimalString } from '@reconcil/core';
 
 import { pickSnapshot } from '../src/resolve.js';
 import type { SnapshotRow, ValueNeed } from '../src/types.js';

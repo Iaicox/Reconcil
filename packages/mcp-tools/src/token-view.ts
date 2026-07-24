@@ -8,8 +8,8 @@
  * ledger/core don't surface yet (needs a persisted heavy flag + a raw-fallback on
  * the token registry). Until then a nameless token shows `symbol: ''`.
  */
-import type { TokenView } from '@pet-crypto/core';
-import type { TokenMeta } from '@pet-crypto/ledger';
+import type { TokenView } from '@reconcil/core';
+import type { TokenMeta } from '@reconcil/ledger';
 
 export function toTokenView(t: TokenMeta): TokenView {
   return {

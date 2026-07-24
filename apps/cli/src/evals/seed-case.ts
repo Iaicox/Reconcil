@@ -6,9 +6,9 @@
  * canary — `toTokenView` renders hostile `*_raw` as an empty `symbol` (ADR-011: raw
  * strings never leave the server), so G5 checks the canary can't leak even when present.
  */
-import { chainEvents, tenants, tokens, wallets, type Db } from '@pet-crypto/db';
-import { seedGoldenWallet, type EvalCase } from '@pet-crypto/evals';
-import type { ToolContext } from '@pet-crypto/mcp-tools';
+import { chainEvents, tenants, tokens, wallets, type Db } from '@reconcil/db';
+import { seedGoldenWallet, type EvalCase } from '@reconcil/evals';
+import type { ToolContext } from '@reconcil/mcp-tools';
 import { sql } from 'drizzle-orm';
 
 import type { CaseEnvironment, CaseSeeder } from './types.js';

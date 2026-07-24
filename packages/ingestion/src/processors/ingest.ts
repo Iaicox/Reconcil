@@ -5,9 +5,9 @@
  * backfilling; short page ⇒ cursor = safeHead, status live. Receipts feed gas
  * (opstack), erc20 logIndex, and tx-level from/to (spec §6).
  */
-import type { Logger } from '@pet-crypto/core';
-import { chainById } from '@pet-crypto/core';
-import type { Db } from '@pet-crypto/db';
+import type { Logger } from '@reconcil/core';
+import { chainById } from '@reconcil/core';
+import type { Db } from '@reconcil/db';
 import { assignErc20Metadata } from '../logindex.js';
 import { normalize } from '../normalize.js';
 import type { ProviderBundle } from '../providers/provider-factory.js';

@@ -4,7 +4,7 @@
  * log_index, token_id) DO NOTHING. blockNumber is mode 'number' (< 2^53, not
  * money); amountRaw is bigint (ADR-004).
  */
-import { chainEvents, type Db } from '@pet-crypto/db';
+import { chainEvents, type Db } from '@reconcil/db';
 import type { NormalizedEvent } from '../types.js';
 
 // The single source of truth for the append-only idempotency key (ADR-005).

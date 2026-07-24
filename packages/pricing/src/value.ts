@@ -4,8 +4,8 @@
  * `PriceRef` (+ `FxRef` on cross-currency) so it is reproducible and citable
  * (C4). Missing price ⇒ no value + PRICE_MISSING, never interpolation (ADR-007).
  */
-import type { DecimalString } from '@pet-crypto/core';
-import type { Db } from '@pet-crypto/db';
+import type { DecimalString } from '@reconcil/core';
+import type { Db } from '@reconcil/db';
 
 import { divide, multiply } from './decimal.js';
 import { resolveFxRates } from './fx.js';

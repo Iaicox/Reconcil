@@ -4,11 +4,16 @@
 # stdio mode for Claude Desktop/Code runs the same image:
 #   docker compose run --rm mcp-server node apps/mcp-server/dist/stdio.js
 
+name: reconcil # pin the Compose project name (else it tracks the directory)
+
 services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: pet_crypto
+      # Renamed from pet_crypto: POSTGRES_DB only takes effect on an empty data dir.
+      # Existing volume? rename in-DB, or `docker compose down -v` to start clean:
+      #   docker compose exec postgres psql -U postgres -c 'ALTER DATABASE pet_crypto RENAME TO reconcil'
+      POSTGRES_DB: reconcil
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -33,7 +38,7 @@ services:
     command: node apps/mcp-server/dist/http.js
     env_file: .env
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/pet_crypto
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/reconcil
       REDIS_URL: redis://redis:6379
       SELF_HOST_TENANT_SLUG: ${SELF_HOST_TENANT_SLUG:-self-host}
     ports:
@@ -51,7 +56,7 @@ services:
     command: node apps/worker/dist/main.js
     env_file: .env
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/pet_crypto
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/reconcil
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:

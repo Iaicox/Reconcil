@@ -9,9 +9,9 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import type { Warning } from '@pet-crypto/core';
-import { exportsTable } from '@pet-crypto/db';
-import type { RenderedExport } from '@pet-crypto/exporters';
+import type { Warning } from '@reconcil/core';
+import { exportsTable } from '@reconcil/db';
+import type { RenderedExport } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
@@ -32,7 +32,7 @@ export interface ExportRunOptions {
 
 function baseDir(outDir?: string): string {
   // out_dir is operator-facing (self-host); the <export_id> subdir isolates runs.
-  return resolve(outDir ?? process.env.PET_CRYPTO_EXPORT_DIR ?? join(process.cwd(), 'exports'));
+  return resolve(outDir ?? process.env.RECONCIL_EXPORT_DIR ?? join(process.cwd(), 'exports'));
 }
 
 export async function runExport<T>(

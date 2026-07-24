@@ -71,14 +71,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @pet-crypto/db test:integration
-      - run: pnpm --filter @pet-crypto/ingestion test:integration
-      - run: pnpm --filter @pet-crypto/ledger test:integration
-      - run: pnpm --filter @pet-crypto/pricing test:integration
-      - run: pnpm --filter @pet-crypto/mcp-tools test:integration
+      - run: pnpm --filter @reconcil/db test:integration
+      - run: pnpm --filter @reconcil/ingestion test:integration
+      - run: pnpm --filter @reconcil/ledger test:integration
+      - run: pnpm --filter @reconcil/pricing test:integration
+      - run: pnpm --filter @reconcil/mcp-tools test:integration
       # Golden-wallet reconciliation (native balance == recorded eth_get_balance) and the
       # DB-derived ground-truth numbers (numbers.itest.ts) — deterministic, no LLM key.
-      - run: pnpm --filter @pet-crypto/evals test:integration
+      - run: pnpm --filter @reconcil/evals test:integration
 
   # Resolve secret presence into a job output. A job-level `if:` can't reference secrets.*,
   # but a step expression can — so the eval jobs gate on this output and SKIP (grey) when
@@ -108,7 +108,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @pet-crypto/cli evals -- --smoke
+      - run: pnpm --filter @reconcil/cli evals -- --smoke
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
@@ -128,7 +128,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @pet-crypto/cli evals -- --suite core --runs 3 --out eval-reports
+      - run: pnpm --filter @reconcil/cli evals -- --suite core --runs 3 --out eval-reports
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - if: always()

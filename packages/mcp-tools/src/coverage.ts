@@ -4,8 +4,8 @@
  * (a stream still backfilling/errored), ANCHORED_BASELINE (figures rest on an
  * opening_balance anchor), DATA_STALE (a checkpoint past the freshness threshold).
  */
-import type { CoverageRef, Warning } from '@pet-crypto/core';
-import type { WalletCoverage } from '@pet-crypto/ledger';
+import type { CoverageRef, Warning } from '@reconcil/core';
+import type { WalletCoverage } from '@reconcil/ledger';
 
 export function mapCoverage(cov: WalletCoverage[]): { coverageRefs: CoverageRef[]; coverageWarnings: Warning[] } {
   const refs: CoverageRef[] = [];

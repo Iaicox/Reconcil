@@ -2,8 +2,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { serializeError, type Logger } from '@pet-crypto/core';
-import { describeTool, tools, ToolError, type ToolContext } from '@pet-crypto/mcp-tools';
+import { serializeError, type Logger } from '@reconcil/core';
+import { describeTool, tools, ToolError, type ToolContext } from '@reconcil/mcp-tools';
 
 import { renderEnvelope } from './render.js';
 
@@ -26,7 +26,7 @@ function errorResult(payload: ErrorPayload): CallToolResult {
 
 /**
  * One tool registry, two transports (ADR-012): stdio.ts and http.ts both build a
- * server here. This is a thin adapter — the tools in @pet-crypto/mcp-tools
+ * server here. This is a thin adapter — the tools in @reconcil/mcp-tools
  * self-validate input, build+validate their envelope, and persist the tool_call
  * before returning (C2); the server only maps transport ↔ registry and shapes
  * errors. `makeContext` supplies the per-call ToolContext: a fixed self-host
@@ -35,7 +35,7 @@ function errorResult(payload: ErrorPayload): CallToolResult {
  */
 export function createServer(makeContext: () => ToolContext, logger?: Logger): Server {
   const server = new Server(
-    { name: 'pet-crypto', version: '0.0.0' },
+    { name: 'reconcil', version: '0.0.0' },
     { capabilities: { tools: {} } },
   );
 

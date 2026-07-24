@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn `apps/worker` into a BullMQ ingestion host and grow `@pet-crypto/ingestion` into a full pipeline — checkpoint state machine, idempotent `chain_events` writes, receipt-derived erc20 `logIndex` + tx-level from/to, the `receipts-opstack` RPC fee path, and programmatic drizzle `migrate()` on boot.
+**Goal:** Turn `apps/worker` into a BullMQ ingestion host and grow `@reconcil/ingestion` into a full pipeline — checkpoint state machine, idempotent `chain_events` writes, receipt-derived erc20 `logIndex` + tx-level from/to, the `receipts-opstack` RPC fee path, and programmatic drizzle `migrate()` on boot.
 
 **Architecture:** All provider I/O and write logic are injected-dependency async functions in `packages/ingestion` (testable against testcontainers Postgres + `FixtureTransport`, no Redis). `apps/worker` is a thin BullMQ adapter that wraps them, registers repeatables, and owns retry/backoff + shutdown. One `eth_getTransactionReceipt` per tx feeds gas, erc20 `logIndex`, and tx-level from/to. Spec: `docs/superpowers/specs/2026-07-18-worker-ingestion-design.md`.
 
@@ -13,7 +13,7 @@
 - **Money is never `number`** (ADR-004): amounts are `bigint` in code / `NUMERIC(78,0)` in DB / decimal strings on the wire. `Number()` may only touch timestamps, log indexes, block numbers.
 - **`chain_events` is append-only** (ADR-005): the only write is `INSERT … ON CONFLICT (chain_id, tx_hash, log_index, token_id) DO NOTHING`. No UPDATE/DELETE. Ingestion never queries past `safeHead = head − finalityDepth(chain)`.
 - **`err.cause` and raw token strings are hostile** (ADR-011): never `console.log`/interpolate them. Only `serializeError`'s `{name,message,kind}` is logged. `*_raw`/`raw` columns are server-side only.
-- **No signing/key library** (P8, dependency-cruiser `no-signing-libraries`): Base RPC is raw JSON-RPC over `fetch`; bullmq/ioredis are clean. `packages/ingestion` imports only `@pet-crypto/db` and `@pet-crypto/core`.
+- **No signing/key library** (P8, dependency-cruiser `no-signing-libraries`): Base RPC is raw JSON-RPC over `fetch`; bullmq/ioredis are clean. `packages/ingestion` imports only `@reconcil/db` and `@reconcil/core`.
 - **No `schema.sql`/migration change** in this slice — the `schema-parity` CI job must stay green.
 - **NodeNext ESM**: relative imports in `.ts` need the `.js` extension. TS strict extras: `exactOptionalPropertyTypes` (omit optional keys, never `{k: undefined}`), `noUncheckedIndexedAccess` (indexing returns `T | undefined`).
 - Catalog deps: `"zod": "catalog:"`, `"vitest": "catalog:"`, `"tsx": "catalog:"`, `"@types/node": "catalog:"`. New third-party deps pin an explicit caret range.
@@ -23,7 +23,7 @@
 
 ---
 
-### Task 1: `@pet-crypto/core` — logger, `serializeError`, `chains.config` `rpcUrlEnv`
+### Task 1: `@reconcil/core` — logger, `serializeError`, `chains.config` `rpcUrlEnv`
 
 **Files:**
 - Create: `packages/core/src/logger.ts`
@@ -81,7 +81,7 @@ describe('createLogger', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/core exec vitest run test/logger.test.ts`
+Run: `pnpm --filter @reconcil/core exec vitest run test/logger.test.ts`
 Expected: FAIL — `Cannot find module '../src/logger.js'`
 
 - [ ] **Step 3: Write the implementation**
@@ -127,7 +127,7 @@ export function createLogger(opts?: { name?: string }): Logger {
 
 - [ ] **Step 4: Run the logger test — expect PASS**
 
-Run: `pnpm --filter @pet-crypto/core exec vitest run test/logger.test.ts`
+Run: `pnpm --filter @reconcil/core exec vitest run test/logger.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Add `rpcUrlEnv` to `chains.config.ts`**
@@ -163,20 +163,20 @@ In `packages/core/src/index.ts` add:
 export { createLogger, serializeError, type Logger } from './logger.js';
 ```
 
-Run: `pnpm --filter @pet-crypto/core exec vitest run`
+Run: `pnpm --filter @reconcil/core exec vitest run`
 Expected: PASS (logger + chains.config).
 
 - [ ] **Step 8: Build + lint + commit**
 
 ```bash
-pnpm --filter @pet-crypto/core build && pnpm --filter @pet-crypto/core lint
+pnpm --filter @reconcil/core build && pnpm --filter @reconcil/core lint
 git add packages/core
 git commit -m "feat(core): structured logger + serializeError (drops err.cause); chains rpcUrlEnv"
 ```
 
 ---
 
-### Task 2: `@pet-crypto/db` — programmatic `runMigrations(pool)`
+### Task 2: `@reconcil/db` — programmatic `runMigrations(pool)`
 
 **Files:**
 - Create: `packages/db/src/migrate.ts`
@@ -265,7 +265,7 @@ Expected: `@testcontainers/postgresql` resolved.
 
 - [ ] **Step 3: Run the integration test to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/db test:integration`
+Run: `pnpm --filter @reconcil/db test:integration`
 Expected: FAIL — `Cannot find module '../src/migrate.js'`. (Requires Docker running.)
 
 - [ ] **Step 4: Write the implementation**
@@ -299,20 +299,20 @@ In `packages/db/src/index.ts` add:
 export { runMigrations } from './migrate.js';
 ```
 
-Run: `pnpm --filter @pet-crypto/db test:integration`
+Run: `pnpm --filter @reconcil/db test:integration`
 Expected: PASS (both tests).
 
 - [ ] **Step 6: Build + lint + commit**
 
 ```bash
-pnpm --filter @pet-crypto/db build && pnpm --filter @pet-crypto/db lint
+pnpm --filter @reconcil/db build && pnpm --filter @reconcil/db lint
 git add packages/db pnpm-lock.yaml
 git commit -m "feat(db): programmatic runMigrations(pool) via drizzle node-postgres migrator"
 ```
 
 ---
 
-### Task 3: `@pet-crypto/ingestion` types + receipt adapters gain logs / from / to
+### Task 3: `@reconcil/ingestion` types + receipt adapters gain logs / from / to
 
 **Files:**
 - Modify: `packages/ingestion/src/types.ts` (add `RawLog`; extend `RawReceipt`, `NormalizedEvent`)
@@ -374,7 +374,7 @@ describe('mapReceipt with logs', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/receipt.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/receipt.test.ts`
 Expected: FAIL — `receiptResult` has no `logs`/`from`/`to` (Zod strips/rejects), `RawReceipt` has no `logs`.
 
 - [ ] **Step 3: Extend the types**
@@ -447,13 +447,13 @@ export function mapReceipt(r: z.infer<typeof receiptResult>): RawReceipt {
 
 - [ ] **Step 5: Run the receipt test — expect PASS**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/receipt.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/receipt.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Build + lint + commit**
 
 ```bash
-pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint
+pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint
 git add packages/ingestion
 git commit -m "feat(ingestion): RawLog + receipt logs/from/to on RawReceipt and mapReceipt"
 ```
@@ -552,7 +552,7 @@ describe('buildProviderBundle', () => {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/rpc.test.ts test/provider-factory.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/rpc.test.ts test/provider-factory.test.ts`
 Expected: FAIL — modules not found.
 
 - [ ] **Step 3: Write `rpc.ts`**
@@ -605,7 +605,7 @@ export async function rpcGetReceipts(rpc: RpcCall, hashes: string[]): Promise<Ra
  * Receipts route to the public RPC on receipts-opstack chains, to the indexer
  * otherwise.
  */
-import { chainById } from '@pet-crypto/core';
+import { chainById } from '@reconcil/core';
 import { ProviderError, type ChainDataProvider, type FetchJson, type PageQuery, type RawReceipt } from '../types.js';
 import { etherscanV2Adapter } from './etherscan-v2.js';
 import { blockscoutAdapter } from './blockscout.js';
@@ -681,13 +681,13 @@ export function buildProviderBundle(opts: {
 
 - [ ] **Step 5: Run the tests — expect PASS**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/rpc.test.ts test/provider-factory.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/rpc.test.ts test/provider-factory.test.ts`
 Expected: PASS.
 
 - [ ] **Step 6: Build + lint + commit**
 
 ```bash
-pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint
+pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint
 git add packages/ingestion
 git commit -m "feat(ingestion): JSON-RPC receipt path + provider factory with ordered failover"
 ```
@@ -775,7 +775,7 @@ describe('assignErc20Metadata', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/logindex.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/logindex.test.ts`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Write the implementation**
@@ -843,13 +843,13 @@ export function assignErc20Metadata(
 
 - [ ] **Step 4: Run the test — expect PASS**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/logindex.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/logindex.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Build + lint + commit**
 
 ```bash
-pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint
+pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint
 git add packages/ingestion
 git commit -m "feat(ingestion): assignErc20Metadata — receipt-derived logIndex + tx from/to"
 ```
@@ -920,7 +920,7 @@ describe('normalize — tx-level fields and erc20 enrichment', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/normalize.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/normalize.test.ts`
 Expected: FAIL — `txFrom`/`raw`/token metadata absent; erc20 branch still expects `RawErc20Transfer`.
 
 - [ ] **Step 3: Extend `NormalizedEvent`**
@@ -979,12 +979,12 @@ Replace the erc20 loop with (rows are already receipt-enriched — no more `thro
 
 - [ ] **Step 5: Run the normalize suite — expect PASS**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/normalize.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/normalize.test.ts`
 Expected: PASS. Fix any older normalize cases that build `NormalizedEvent` expectations by hand (add the new fields to their expected objects — the golden native/gas counts are unchanged).
 
 - [ ] **Step 6: Build + full ingestion suite + lint + commit**
 
-Run: `pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion exec vitest run && pnpm --filter @pet-crypto/ingestion lint`
+Run: `pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion exec vitest run && pnpm --filter @reconcil/ingestion lint`
 Expected: PASS.
 
 ```bash
@@ -1002,7 +1002,7 @@ git commit -m "feat(ingestion): normalize fills tx-level from/to + raw; erc20 co
 - Create: `packages/ingestion/test/write.itest.ts`
 
 **Interfaces:**
-- Consumes: `chainEvents`, `tokens`, `ingestionCheckpoints`, `createDb`, `Db` from `@pet-crypto/db`; `and`, `eq`, `isNull` from `drizzle-orm`; `chainById`, `ChainConfig` from `@pet-crypto/core`; `NormalizedEvent`.
+- Consumes: `chainEvents`, `tokens`, `ingestionCheckpoints`, `createDb`, `Db` from `@reconcil/db`; `and`, `eq`, `isNull` from `drizzle-orm`; `chainById`, `ChainConfig` from `@reconcil/core`; `NormalizedEvent`.
 - Produces: `tokenInsertValues(ev, chain): typeof tokens.$inferInsert`; `toChainEventRow(ev, tokenId): typeof chainEvents.$inferInsert`; `insertEventRows(db: Db, rows): Promise<number>`; `getCheckpoint(db, chainId, address, stream): Promise<CheckpointRow | undefined>`; `seedCheckpoint(db, chainId, address, stream): Promise<void>`; `commitPage(db, target, events, next, chain): Promise<number>` where `target = BackfillTarget`, `next = { lastProcessedBlock: number; status: 'backfilling' | 'live' }`.
 
 - [ ] **Step 1: Add testcontainers wiring (mirror Task 2)**
@@ -1015,9 +1015,9 @@ Create `packages/ingestion/test/write.itest.ts`:
 
 ```ts
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createDb, type Db } from '@pet-crypto/db';
-import { runMigrations } from '@pet-crypto/db';
-import { chainById } from '@pet-crypto/core';
+import { createDb, type Db } from '@reconcil/db';
+import { runMigrations } from '@reconcil/db';
+import { chainById } from '@reconcil/core';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NormalizedEvent } from '../src/types.js';
@@ -1087,7 +1087,7 @@ describe('write layer', () => {
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion test:integration`
+Run: `pnpm --filter @reconcil/ingestion test:integration`
 Expected: FAIL — write modules not found. (Docker required.)
 
 - [ ] **Step 4: Write `token-repo.ts`**
@@ -1099,8 +1099,8 @@ Expected: FAIL — write modules not found. (Docker required.)
  * strings and NULL display until a later token-resolve slice. decimals is
  * coerced into the DDL's 0..36 CHECK — the base-unit ledger stays exact.
  */
-import type { ChainConfig } from '@pet-crypto/core';
-import { tokens } from '@pet-crypto/db';
+import type { ChainConfig } from '@reconcil/core';
+import { tokens } from '@reconcil/db';
 import type { NormalizedEvent } from '../types.js';
 
 export function tokenKey(ev: NormalizedEvent): string {
@@ -1134,7 +1134,7 @@ export function tokenInsertValues(ev: NormalizedEvent, chain: ChainConfig): type
  * log_index, token_id) DO NOTHING. blockNumber is mode 'number' (< 2^53, not
  * money); amountRaw is bigint (ADR-004).
  */
-import { chainEvents, type Db } from '@pet-crypto/db';
+import { chainEvents, type Db } from '@reconcil/db';
 import type { NormalizedEvent } from '../types.js';
 
 export function toChainEventRow(ev: NormalizedEvent, tokenId: number): typeof chainEvents.$inferInsert {
@@ -1167,8 +1167,8 @@ export async function insertEventRows(db: Db, rows: (typeof chainEvents.$inferIn
  * resolution, event insert, and cursor advance in one Postgres transaction — a
  * crash mid-page re-runs the page for free (idempotency key dedupes).
  */
-import type { ChainConfig } from '@pet-crypto/core';
-import { chainEvents, ingestionCheckpoints, tokens, type Db } from '@pet-crypto/db';
+import type { ChainConfig } from '@reconcil/core';
+import { chainEvents, ingestionCheckpoints, tokens, type Db } from '@reconcil/db';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { NormalizedEvent } from '../types.js';
 import { toChainEventRow } from './event-writer.js';
@@ -1266,13 +1266,13 @@ export async function commitPage(
 
 - [ ] **Step 7: Run the integration test — expect PASS**
 
-Run: `pnpm --filter @pet-crypto/ingestion test:integration`
+Run: `pnpm --filter @reconcil/ingestion test:integration`
 Expected: PASS (all three cases).
 
 - [ ] **Step 8: Build + lint + commit**
 
 ```bash
-pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint
+pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint
 git add packages/ingestion pnpm-lock.yaml
 git commit -m "feat(ingestion): write layer — token upsert, idempotent event insert, transactional cursor"
 ```
@@ -1296,8 +1296,8 @@ Create `packages/ingestion/test/processors.itest.ts`:
 
 ```ts
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createDb, runMigrations, type Db } from '@pet-crypto/db';
-import { createLogger } from '@pet-crypto/core';
+import { createDb, runMigrations, type Db } from '@reconcil/db';
+import { createLogger } from '@reconcil/core';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ProviderBundle } from '../src/providers/provider-factory.js';
@@ -1368,7 +1368,7 @@ describe('runBackfillPage', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion test:integration`
+Run: `pnpm --filter @reconcil/ingestion test:integration`
 Expected: FAIL — `runBackfillPage` module not found.
 
 - [ ] **Step 3: Write `ingest.ts` (shared core)**
@@ -1381,9 +1381,9 @@ Expected: FAIL — `runBackfillPage` module not found.
  * backfilling; short page ⇒ cursor = safeHead, status live. Receipts feed gas
  * (opstack), erc20 logIndex, and tx-level from/to (spec §6).
  */
-import type { Logger } from '@pet-crypto/core';
-import { chainById } from '@pet-crypto/core';
-import type { Db } from '@pet-crypto/db';
+import type { Logger } from '@reconcil/core';
+import { chainById } from '@reconcil/core';
+import type { Db } from '@reconcil/db';
 import { assignErc20Metadata } from '../logindex.js';
 import { normalize } from '../normalize.js';
 import type { ProviderBundle } from '../providers/provider-factory.js';
@@ -1474,7 +1474,7 @@ export function runBackfillPage(deps: ProcessorDeps, target: BackfillTarget): Pr
 
 ```ts
 import { eq } from 'drizzle-orm';
-import { ingestionCheckpoints } from '@pet-crypto/db';
+import { ingestionCheckpoints } from '@reconcil/db';
 import { ingestOnce, type ProcessorDeps } from './ingest.js';
 
 /** One tail tick: advance every live stream of a chain up to safeHead. */
@@ -1510,12 +1510,12 @@ export { tokenInsertValues } from './write/token-repo.js';
 
 - [ ] **Step 6: Run the integration test — expect PASS**
 
-Run: `pnpm --filter @pet-crypto/ingestion test:integration`
+Run: `pnpm --filter @reconcil/ingestion test:integration`
 Expected: PASS (both cases).
 
 - [ ] **Step 7: Build + hermetic suite + lint + commit**
 
-Run: `pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion exec vitest run && pnpm --filter @pet-crypto/ingestion lint`
+Run: `pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion exec vitest run && pnpm --filter @reconcil/ingestion lint`
 Expected: PASS (hermetic suite unaffected; integration is a separate script).
 
 ```bash
@@ -1534,7 +1534,7 @@ git commit -m "feat(ingestion): backfill + tail processors over the safeHead-gua
 - Create: `apps/worker/test/config.test.ts`
 
 **Interfaces:**
-- Consumes: `runMigrations`, `createDb`, `type Db` from `@pet-crypto/db`; `createLogger`, `serializeError`, `chains` from `@pet-crypto/core`; `buildProviderBundle`, `realFetchJson`, `runBackfillPage`, `runTailTick`, `seedCheckpoint`, `type BackfillTarget` from `@pet-crypto/ingestion`.
+- Consumes: `runMigrations`, `createDb`, `type Db` from `@reconcil/db`; `createLogger`, `serializeError`, `chains` from `@reconcil/core`; `buildProviderBundle`, `realFetchJson`, `runBackfillPage`, `runTailTick`, `seedCheckpoint`, `type BackfillTarget` from `@reconcil/ingestion`.
 - Produces (worker-internal): `loadConfig(env?): WorkerConfig`; `TAIL_QUEUE`, `BACKFILL_QUEUE`, `makeConnection(url)`, `backfillJobOptions`, `backoffStrategy`; `seedWallet(db, queue, chainId, address)`.
 
 - [ ] **Step 1: Add dependencies**
@@ -1581,7 +1581,7 @@ describe('loadConfig', () => {
 });
 ```
 
-Run: `pnpm --filter @pet-crypto/worker exec vitest run test/config.test.ts`
+Run: `pnpm --filter @reconcil/worker exec vitest run test/config.test.ts`
 Expected: FAIL — module not found. (No `vitest.config.ts` needed — the worker's `test` script is `vitest run --passWithNoTests`; the file runs directly.)
 
 Also update the worker's lint script to cover the new test dir — in `apps/worker/package.json` change `"lint": "eslint src"` to `"lint": "eslint src test"`.
@@ -1611,7 +1611,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
 Note: `apps/worker/package.json` has no `zod` dep yet — add `"zod": "catalog:"` to `dependencies` and re-run `pnpm install`.
 
-Run: `pnpm --filter @pet-crypto/worker exec vitest run test/config.test.ts`
+Run: `pnpm --filter @reconcil/worker exec vitest run test/config.test.ts`
 Expected: PASS.
 
 - [ ] **Step 4: Write `queues.ts`**
@@ -1664,8 +1664,8 @@ export const tailJobOptions: JobsOptions = {
  * (server slice), so this seeds the queued checkpoints and enqueues the initial
  * backfill for both streams. Used by `docker compose` smoke runs, not in CI.
  */
-import { seedCheckpoint, type BackfillTarget } from '@pet-crypto/ingestion';
-import type { Db } from '@pet-crypto/db';
+import { seedCheckpoint, type BackfillTarget } from '@reconcil/ingestion';
+import type { Db } from '@reconcil/db';
 import type { Queue } from 'bullmq';
 import { backfillJobOptions } from './queues.js';
 
@@ -1685,16 +1685,16 @@ export async function seedWallet(db: Db, backfillQueue: Queue, chainId: number, 
 /**
  * Worker host (ADR-008, 00-overview §2). Boot order: load env → migrate → db →
  * redis → queues + workers → repeatable tail per chain. All provider I/O and
- * retries live here; the domain logic runs in @pet-crypto/ingestion. Errors are
+ * retries live here; the domain logic runs in @reconcil/ingestion. Errors are
  * logged via serializeError — err.cause (hostile) never reaches the log (ADR-011).
  */
 import { Pool } from 'pg';
 import { Queue, Worker } from 'bullmq';
-import { chains, createLogger, serializeError } from '@pet-crypto/core';
-import { createDb, runMigrations } from '@pet-crypto/db';
+import { chains, createLogger, serializeError } from '@reconcil/core';
+import { createDb, runMigrations } from '@reconcil/db';
 import {
   buildProviderBundle, realFetchJson, runBackfillPage, runTailTick, type ProcessorDeps,
-} from '@pet-crypto/ingestion';
+} from '@reconcil/ingestion';
 import { loadConfig } from './config.js';
 import {
   BACKFILL_QUEUE, TAIL_QUEUE, backfillJobOptions, backoffStrategy, makeConnection, tailJobOptions,
@@ -1771,7 +1771,7 @@ main().catch((err: unknown) => {
 
 - [ ] **Step 7: Build + lint + full worker test + commit**
 
-Run: `pnpm --filter @pet-crypto/worker build && pnpm --filter @pet-crypto/worker exec vitest run && pnpm --filter @pet-crypto/worker lint`
+Run: `pnpm --filter @reconcil/worker build && pnpm --filter @reconcil/worker exec vitest run && pnpm --filter @reconcil/worker lint`
 Expected: PASS.
 
 ```bash
@@ -1833,7 +1833,7 @@ In `packages/ingestion/scripts/capture.ts`, after the erc20 pages are walked for
 - Cap receipts at the same 40-distinct-tx bound the capture already applies to token-meta/balance calls (spam wallets), and throttle ≥ 250 ms between etherscan calls.
 - Update `manifest.json` with a `receipts` count per wallet/chain via `upsertManifest`.
 
-This step runs live (dev only, never CI): `pnpm --filter @pet-crypto/ingestion capture -- --wallet 0x… --role freelancer --chains 1,8453`. It requires `ETHERSCAN_API_KEY` and, for Base, `BASE_RPC_URL` in `.env`. Wallets are the already-captured golden set (`freelancer`, `smb-stables`, `edge-spam`).
+This step runs live (dev only, never CI): `pnpm --filter @reconcil/ingestion capture -- --wallet 0x… --role freelancer --chains 1,8453`. It requires `ETHERSCAN_API_KEY` and, for Base, `BASE_RPC_URL` in `.env`. Wallets are the already-captured golden set (`freelancer`, `smb-stables`, `edge-spam`).
 
 > Sequencing note: this is the one non-hermetic step. Land it after the code tasks so the erc20 end-to-end golden (Step 3) has real fixtures. If the capture is deferred (no network), the slice still ships — the erc20 logIndex logic is fully unit-tested (Task 5/6) and the write path is integration-tested with synthetic receipts (Task 7/8); only the *real-fixture* erc20 golden waits.
 
@@ -1864,8 +1864,8 @@ In `.github/workflows/ci.yml`, add a job (Docker is available on `ubuntu-latest`
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @pet-crypto/db test:integration
-      - run: pnpm --filter @pet-crypto/ingestion test:integration
+      - run: pnpm --filter @reconcil/db test:integration
+      - run: pnpm --filter @reconcil/ingestion test:integration
 ```
 
 (Match the existing jobs' exact `uses`/version pins and pnpm setup from the `check`/`test` jobs.)
@@ -1887,8 +1887,8 @@ pnpm build
 pnpm lint
 pnpm depcruise                       # boundaries + no-signing-libraries
 pnpm test                            # hermetic unit/golden suites, all packages
-pnpm --filter @pet-crypto/db test:integration
-pnpm --filter @pet-crypto/ingestion test:integration
+pnpm --filter @reconcil/db test:integration
+pnpm --filter @reconcil/ingestion test:integration
 bash scripts/check-schema-parity.sh  # unchanged DDL still matches schema.sql
 ```
 

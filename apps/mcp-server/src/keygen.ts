@@ -3,13 +3,13 @@
  * ADR-012). Inserts sha256(key) into api_keys and prints the plaintext ONCE — it
  * is never stored and cannot be recovered. Not wired into boot or CI. Run against
  * the compose stack (DATABASE_URL from the environment):
- *   pnpm --filter @pet-crypto/mcp-server exec tsx src/keygen.ts <tenant-slug> [label]
+ *   pnpm --filter @reconcil/mcp-server exec tsx src/keygen.ts <tenant-slug> [label]
  */
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-import { serializeError } from '@pet-crypto/core';
-import { apiKeys, createDb, tenants, type Db } from '@pet-crypto/db';
+import { serializeError } from '@reconcil/core';
+import { apiKeys, createDb, tenants, type Db } from '@reconcil/db';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 

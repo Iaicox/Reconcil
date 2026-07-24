@@ -9,7 +9,7 @@
 import {
   directoryUpsertEntityInput, directoryUpsertEntityOutput,
   type DirectoryUpsertEntityOutput,
-} from '@pet-crypto/core';
+} from '@reconcil/core';
 
 import type { ToolContext } from '../context.js';
 import { upsertEntity } from '../directory/repo.js';

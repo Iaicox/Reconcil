@@ -4,7 +4,7 @@
  * `shifted` so the caller can emit FX_DATE_SHIFTED — the used date is visible in
  * citations, never silently substituted. ECB publishes EUR-based rates.
  */
-import { fxRates, type Db } from '@pet-crypto/db';
+import { fxRates, type Db } from '@reconcil/db';
 import { and, eq, lte } from 'drizzle-orm';
 
 import type { FxResolved, FxRow } from './types.js';

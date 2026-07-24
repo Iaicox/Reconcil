@@ -7,7 +7,7 @@
  */
 import type {
   CoverageRef, EventRef, EventRefSummary, FxRef, PriceRef, Warning,
-} from '@pet-crypto/core';
+} from '@reconcil/core';
 
 export interface Citations {
   tool_call_id: string;

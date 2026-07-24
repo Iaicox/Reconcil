@@ -5,7 +5,7 @@
  * under peg policy. A target-currency snapshot beats a USD one that would need
  * FX. No winner ⇒ the caller emits PRICE_MISSING (never interpolates, C4).
  */
-import { priceSnapshots, type Db } from '@pet-crypto/db';
+import { priceSnapshots, type Db } from '@reconcil/db';
 import { and, inArray } from 'drizzle-orm';
 
 import type { Currency, SnapshotRow, ValuationPolicy, ValueNeed } from './types.js';

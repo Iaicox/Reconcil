@@ -1,7 +1,7 @@
 # Drizzle schema + initial migration — design
 
 **Date:** 2026-07-14 · **Status:** approved (approach A chosen by user) ·
-**Package:** `@pet-crypto/db`
+**Package:** `@reconcil/db`
 
 ## Goal
 
@@ -29,7 +29,7 @@ drift.
 - Running migrations from docker-compose / app startup (worker/server week).
 - Seed data for curated `entities` (tenant_id IS NULL rows).
 - `RawAmount` branded types — wired later via `.$type<RawAmount>()` once
-  `@pet-crypto/core` exposes them; until then money columns are plain `bigint`.
+  `@reconcil/core` exposes them; until then money columns are plain `bigint`.
 
 ## Package layout
 

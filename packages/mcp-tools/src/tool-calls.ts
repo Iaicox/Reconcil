@@ -6,8 +6,8 @@
  */
 import { createHash } from 'node:crypto';
 
-import type { CoverageRef } from '@pet-crypto/core';
-import { toolCalls } from '@pet-crypto/db';
+import type { CoverageRef } from '@reconcil/core';
+import { toolCalls } from '@reconcil/db';
 
 import type { ToolContext } from './context.js';
 import { ulid } from './ulid.js';

@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/ledger",
+  "name": "@reconcil/ledger",
   "version": "0.0.0",
   "private": true,
   "description": "Deterministic aggregations over chain events: balances, flows, gas, turnover.",
@@ -19,8 +19,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*",
+    "@reconcil/core": "workspace:*",
+    "@reconcil/db": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

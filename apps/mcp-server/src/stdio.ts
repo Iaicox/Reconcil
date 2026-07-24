@@ -1,6 +1,6 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { serializeError } from '@pet-crypto/core';
-import { createDb, ensureSelfHostTenant } from '@pet-crypto/db';
+import { serializeError } from '@reconcil/core';
+import { createDb, ensureSelfHostTenant } from '@reconcil/db';
 import { Pool } from 'pg';
 
 import { loadConfig } from './config.js';

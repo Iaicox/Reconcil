@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** First slice of `@pet-crypto/ingestion`: transport seam, Etherscan V2 + Blockscout adapters, pure `normalize()`, and a capture script that records frozen golden fixtures — everything testable with no network and no Postgres.
+**Goal:** First slice of `@reconcil/ingestion`: transport seam, Etherscan V2 + Blockscout adapters, pure `normalize()`, and a capture script that records frozen golden fixtures — everything testable with no network and no Postgres.
 
 **Architecture:** Adapters receive a `FetchJson` transport by injection. The capture script drives the real adapters through a `RecordingTransport` (writes every url→response pair to disk); tests drive the same adapters through a `FixtureTransport` (reads those files back). One canonical URL form is shared by both sides. Spec: `docs/superpowers/specs/2026-07-16-provider-fixtures-ingestion-design.md`.
 
@@ -24,7 +24,7 @@
 
 ---
 
-### Task 1: `chains.config.ts` in `@pet-crypto/core`
+### Task 1: `chains.config.ts` in `@reconcil/core`
 
 **Files:**
 - Create: `packages/core/src/chains.config.ts`
@@ -34,7 +34,7 @@
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `ChainConfig`, `ProviderConfig`, `FeeStrategy`, `chains: readonly ChainConfig[]`, `chainById(chainId: number): ChainConfig` — imported by the capture script (Task 6) as `import { chainById } from '@pet-crypto/core'`.
+- Produces: `ChainConfig`, `ProviderConfig`, `FeeStrategy`, `chains: readonly ChainConfig[]`, `chainById(chainId: number): ChainConfig` — imported by the capture script (Task 6) as `import { chainById } from '@reconcil/core'`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -79,7 +79,7 @@ describe('chains.config', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/core exec vitest run test/chains.config.test.ts`
+Run: `pnpm --filter @reconcil/core exec vitest run test/chains.config.test.ts`
 Expected: FAIL — `Cannot find module '../src/chains.config.js'`
 
 - [ ] **Step 3: Write the implementation**
@@ -164,12 +164,12 @@ In `packages/core/package.json` change the lint script to:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @pet-crypto/core exec vitest run test/chains.config.test.ts`
+Run: `pnpm --filter @reconcil/core exec vitest run test/chains.config.test.ts`
 Expected: PASS (6 tests)
 
 - [ ] **Step 5: Verify build + lint**
 
-Run: `pnpm --filter @pet-crypto/core build && pnpm --filter @pet-crypto/core lint`
+Run: `pnpm --filter @reconcil/core build && pnpm --filter @reconcil/core lint`
 Expected: both exit 0
 
 - [ ] **Step 6: Commit**
@@ -291,7 +291,7 @@ describe('recording → fixture round-trip', () => {
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/fixture-transport.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/fixture-transport.test.ts`
 Expected: FAIL — cannot find `../src/fixture-transport.js` / `../src/types.js`
 
 - [ ] **Step 4: Write `types.ts`**
@@ -484,13 +484,13 @@ export function realFetchJson(): FetchJson {
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/fixture-transport.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/fixture-transport.test.ts`
 Expected: PASS (6 tests)
 
 - [ ] **Step 7: Build + lint**
 
-Run: `pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint`
-Expected: exit 0 (build needs `@pet-crypto/core` built — run `pnpm build` at repo root if reference errors appear)
+Run: `pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint`
+Expected: exit 0 (build needs `@reconcil/core` built — run `pnpm build` at repo root if reference errors appear)
 
 - [ ] **Step 8: Commit**
 
@@ -766,7 +766,7 @@ describe('capabilities', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/etherscan-v2.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/etherscan-v2.test.ts`
 Expected: FAIL — cannot find `../src/providers/etherscan-v2.js`
 
 - [ ] **Step 3: Write `envelope.ts`**
@@ -994,12 +994,12 @@ export function etherscanV2Adapter(opts: {
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/etherscan-v2.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/etherscan-v2.test.ts`
 Expected: PASS (all tests)
 
 - [ ] **Step 6: Build + lint, then commit**
 
-Run: `pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint`
+Run: `pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint`
 Expected: exit 0
 
 ```bash
@@ -1171,7 +1171,7 @@ describe('capabilities (Blockscout has them all)', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/blockscout.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/blockscout.test.ts`
 Expected: FAIL — cannot find `../src/providers/blockscout.js`
 
 - [ ] **Step 3: Write `blockscout.ts`**
@@ -1331,12 +1331,12 @@ export function blockscoutAdapter(opts: {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/blockscout.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/blockscout.test.ts`
 Expected: PASS (all tests)
 
 - [ ] **Step 5: Build + lint, then commit**
 
-Run: `pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint`
+Run: `pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint`
 Expected: exit 0
 
 ```bash
@@ -1551,7 +1551,7 @@ describe('erc20 transfers', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/normalize.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/normalize.test.ts`
 Expected: FAIL — cannot find `../src/normalize.js`
 
 - [ ] **Step 3: Write `normalize.ts`**
@@ -1666,12 +1666,12 @@ function gasFee(tx: RawNativeTx, ctx: NormalizeContext): bigint {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/normalize.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/normalize.test.ts`
 Expected: PASS (all tests)
 
 - [ ] **Step 5: Build + lint, then commit**
 
-Run: `pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint`
+Run: `pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint`
 Expected: exit 0
 
 ```bash
@@ -1691,7 +1691,7 @@ git commit -m "feat(ingestion): pure normalize() — kind mapping, gas synthesis
 - Test: `packages/ingestion/test/paging.test.ts`, `packages/ingestion/test/manifest.test.ts`
 
 **Interfaces:**
-- Consumes: adapters (Tasks 3–4), transports (Task 2), `chainById` from `@pet-crypto/core` (Task 1).
+- Consumes: adapters (Tasks 3–4), transports (Task 2), `chainById` from `@reconcil/core` (Task 1).
 - Produces:
   - `collectAllPages<T extends { blockNumber: string }>(fetchPage: (q: PageQuery) => Promise<Page<T>>, q: PageQuery): Promise<T[]>` — used again by the golden tests (Task 7).
   - `manifest.ts`: `interface WalletManifestEntry { address: string; role: string; capturedAt: string; chains: Record<string, { fromBlock: string; toBlock: string; counts: Record<string, { native: number; erc20: number }> }> }` (counts keyed by provider kind), `upsertManifest(path: string, entry: WalletManifestEntry): void`, `readManifest(path: string): WalletManifestEntry[]`, `assertScrubbed(rootDir: string, secret: string): void`.
@@ -1802,7 +1802,7 @@ describe('assertScrubbed', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/paging.test.ts test/manifest.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/paging.test.ts test/manifest.test.ts`
 Expected: FAIL — modules not found
 
 - [ ] **Step 3: Write `paging.ts`**
@@ -1888,7 +1888,7 @@ export function assertScrubbed(rootDir: string, secret: string): void {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `pnpm --filter @pet-crypto/ingestion exec vitest run test/paging.test.ts test/manifest.test.ts`
+Run: `pnpm --filter @reconcil/ingestion exec vitest run test/paging.test.ts test/manifest.test.ts`
 Expected: PASS
 
 - [ ] **Step 6: Write the capture script**
@@ -1899,7 +1899,7 @@ Create `packages/ingestion/scripts/capture.ts`:
 /**
  * One-off fixture capture (spec §9). Live network — never runs in CI or tests.
  *
- *   pnpm --filter @pet-crypto/ingestion capture -- \
+ *   pnpm --filter @reconcil/ingestion capture -- \
  *     --wallet 0x… --role freelancer --chains 1,8453 [--from 0] [--to N]
  *
  * Requires ETHERSCAN_API_KEY in the environment (root .env is auto-loaded).
@@ -1907,7 +1907,7 @@ Create `packages/ingestion/scripts/capture.ts`:
 import { parseArgs } from 'node:util';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chainById } from '@pet-crypto/core';
+import { chainById } from '@reconcil/core';
 import { recordingTransport, realFetchJson } from '../src/fixture-transport.js';
 import { assertScrubbed, readManifest, upsertManifest } from '../src/manifest.js';
 import type { WalletManifestEntry } from '../src/manifest.js';
@@ -2027,12 +2027,12 @@ Update `packages/ingestion/package.json` lint script to `"eslint src test script
 
 - [ ] **Step 7: Verify script syntax without network**
 
-Run: `pnpm --filter @pet-crypto/ingestion capture`
-Expected: exits non-zero with `usage: capture --wallet 0x…` (proves imports resolve and arg parsing works; no network touched). If `@pet-crypto/core` fails to resolve, run `pnpm build` at the repo root first.
+Run: `pnpm --filter @reconcil/ingestion capture`
+Expected: exits non-zero with `usage: capture --wallet 0x…` (proves imports resolve and arg parsing works; no network touched). If `@reconcil/core` fails to resolve, run `pnpm build` at the repo root first.
 
 - [ ] **Step 8: Build + lint + full package tests, then commit**
 
-Run: `pnpm --filter @pet-crypto/ingestion build && pnpm --filter @pet-crypto/ingestion lint && pnpm --filter @pet-crypto/ingestion test`
+Run: `pnpm --filter @reconcil/ingestion build && pnpm --filter @reconcil/ingestion lint && pnpm --filter @reconcil/ingestion test`
 Expected: exit 0, all tests green
 
 ```bash
@@ -2064,9 +2064,9 @@ git commit -m "feat(ingestion): capture script, paging helper, fixture manifest 
 - [ ] **Step 3: Run capture** for each confirmed wallet:
 
 ```bash
-pnpm --filter @pet-crypto/ingestion capture -- --wallet 0x<freelancer> --role freelancer --chains 1
-pnpm --filter @pet-crypto/ingestion capture -- --wallet 0x<smb>        --role smb-stables --chains 1,8453
-pnpm --filter @pet-crypto/ingestion capture -- --wallet 0x<edge>       --role edge-spam   --chains 1
+pnpm --filter @reconcil/ingestion capture -- --wallet 0x<freelancer> --role freelancer --chains 1
+pnpm --filter @reconcil/ingestion capture -- --wallet 0x<smb>        --role smb-stables --chains 1,8453
+pnpm --filter @reconcil/ingestion capture -- --wallet 0x<edge>       --role edge-spam   --chains 1
 ```
 
 Expected: per-provider counts printed; `manifest.json` written; no scrub errors. If a Blockscout endpoint shape differs from the adapter's Zod schema (`malformed`), fix the adapter schema to match reality, per the spec §7 escape hatch, and note the deviation in the spec.
@@ -2093,7 +2093,7 @@ import type { ChainDataProvider, NormalizedEvent, PageQuery, RawReceipt } from '
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'evals', 'fixtures', 'providers');
 const manifest = readManifest(join(ROOT, 'manifest.json'));
 
-// chain fee strategies mirrored from @pet-crypto/core chains.config
+// chain fee strategies mirrored from @reconcil/core chains.config
 const FEE: Record<string, 'txlist' | 'receipts-opstack'> = { '1': 'txlist', '8453': 'receipts-opstack' };
 
 function makeProvider(kind: string, chainId: number): ChainDataProvider {
@@ -2192,7 +2192,7 @@ describe.skipIf(manifest.length === 0)('golden replay of recorded fixtures', () 
 
 - [ ] **Step 6: Run the golden suite**
 
-Run: `pnpm --filter @pet-crypto/ingestion test`
+Run: `pnpm --filter @reconcil/ingestion test`
 Expected: PASS. A cross-provider mismatch here is a finding, not a test bug: inspect which provider's data differs and fix the adapter (or record the legitimate difference in the spec) before proceeding.
 
 - [ ] **Step 7: Commit** (fixtures + manifest + golden test + spec amendment)
@@ -2263,4 +2263,4 @@ git commit -m "feat(ingestion): public exports; docs: fix stale ADR-005 key in R
 
 - **Spec coverage:** §3 architecture → Tasks 2/3/4; §4 layout → Tasks 1–6 file paths; §5 interfaces → Task 2; §6 fixture format → Task 2 (+ scrub in Task 6); §7 adapters/quirks → Tasks 3–4; §8 normalize rules 1–9 → Task 5 tests map one-to-one; §9 capture → Task 6 + Task 7 runs it; §10 test matrix → unit tests in Tasks 3–5, golden + cross-provider in Task 7; §11 open question → Task 7 Step 4; §12 + ride-along README fix → Task 8 and Global Constraints.
 - **Deliberate deviation from bite-size:** Task 7 is controller-run (network + user gate) — flagged inline.
-- **Type consistency check:** `RawReceipt.status` is `'0' | '1'` (decimal, post-mapping) while the wire schema `receiptResult.status` is `'0x0' | '0x1'` — conversion in `mapReceipt`. `FEE` map in golden test mirrors `chains.config.ts` rather than importing `@pet-crypto/core` to keep the test self-contained (values asserted equal in Task 1's tests).
+- **Type consistency check:** `RawReceipt.status` is `'0' | '1'` (decimal, post-mapping) while the wire schema `receiptResult.status` is `'0x0' | '0x1'` — conversion in `mapReceipt`. `FEE` map in golden test mirrors `chains.config.ts` rather than importing `@reconcil/core` to keep the test self-contained (values asserted equal in Task 1's tests).

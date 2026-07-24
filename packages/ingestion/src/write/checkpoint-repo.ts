@@ -3,8 +3,8 @@
  * resolution, event insert, and cursor advance in one Postgres transaction — a
  * crash mid-page re-runs the page for free (idempotency key dedupes).
  */
-import type { ChainConfig } from '@pet-crypto/core';
-import { chainEvents, ingestionCheckpoints, tokens, type Db } from '@pet-crypto/db';
+import type { ChainConfig } from '@reconcil/core';
+import { chainEvents, ingestionCheckpoints, tokens, type Db } from '@reconcil/db';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { NormalizedEvent } from '../types.js';
 import { insertEventRows, toChainEventRow } from './event-writer.js';

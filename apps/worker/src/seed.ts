@@ -3,15 +3,15 @@
  * slice), so this registers the queued checkpoints and enqueues the initial
  * backfill for both streams. Importable as seedWallet(db, queue, chain, addr),
  * and runnable directly against the compose stack for a smoke:
- *   pnpm --filter @pet-crypto/worker exec tsx src/seed.ts <chainId> <address>
+ *   pnpm --filter @reconcil/worker exec tsx src/seed.ts <chainId> <address>
  * (DATABASE_URL / REDIS_URL from the environment). Not wired into worker boot or CI.
  */
 import { pathToFileURL } from 'node:url';
 import { Pool } from 'pg';
 import { Queue } from 'bullmq';
-import { createLogger, serializeError } from '@pet-crypto/core';
-import { createDb, type Db } from '@pet-crypto/db';
-import { seedCheckpoint, type BackfillTarget } from '@pet-crypto/ingestion';
+import { createLogger, serializeError } from '@reconcil/core';
+import { createDb, type Db } from '@reconcil/db';
+import { seedCheckpoint, type BackfillTarget } from '@reconcil/ingestion';
 import { loadConfig } from './config.js';
 import { BACKFILL_QUEUE, jobOptions, makeConnection } from './queues.js';
 

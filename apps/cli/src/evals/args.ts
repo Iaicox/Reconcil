@@ -6,7 +6,7 @@
  * the gate passes vacuously over ZERO runs); and an unknown flag is a hard error, not a
  * silent no-op (a mistyped `--smoek` would otherwise fall through and run the full 30×3).
  */
-import { coreDatasetPath } from '@pet-crypto/evals';
+import { coreDatasetPath } from '@reconcil/evals';
 
 export const DEFAULT_MODEL = 'claude-opus-4-8';
 

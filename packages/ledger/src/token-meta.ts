@@ -1,5 +1,5 @@
 /** Load sanitized token facts (never *_raw hostile strings) for a set of ids. */
-import { tokens, type Db } from '@pet-crypto/db';
+import { tokens, type Db } from '@reconcil/db';
 import { inArray } from 'drizzle-orm';
 
 import type { TokenMeta } from './types.js';

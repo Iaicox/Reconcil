@@ -4,7 +4,7 @@
  * runner (evals/agent.ts) and the interactive demo REPL (repl.ts) build their sessions
  * from here, so the guardrails (P8), figure-verbatim/citation discipline (P1/P2), and
  * untrusted-key isolation (P7) live in exactly one place. Tools are bound IN-PROCESS from
- * @pet-crypto/mcp-tools — no server in the loop (ADR-012); the Anthropic API key is needed
+ * @reconcil/mcp-tools — no server in the loop (ADR-012); the Anthropic API key is needed
  * only by these two entrypoints, never by the server or worker.
  */
 import { betaTool } from '@anthropic-ai/sdk/helpers/beta/json-schema';
@@ -14,7 +14,7 @@ import {
   type ToolContext,
   type ToolEnvelope,
   type ToolHandler,
-} from '@pet-crypto/mcp-tools';
+} from '@reconcil/mcp-tools';
 
 /** One tool call within a session: the tool, its args, and the citation envelope it returned. */
 export interface Invocation {

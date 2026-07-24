@@ -1,5 +1,5 @@
-import type { ToolInvocation } from '@pet-crypto/evals';
-import { tools as toolRegistry, type ToolContext, type ToolEnvelope, type ToolHandler } from '@pet-crypto/mcp-tools';
+import type { ToolInvocation } from '@reconcil/evals';
+import { tools as toolRegistry, type ToolContext, type ToolEnvelope, type ToolHandler } from '@reconcil/mcp-tools';
 import { describe, expect, it } from 'vitest';
 
 import { buildSystemPrompt, makeToolRun, toolSpecs } from '../src/agent/core.js';

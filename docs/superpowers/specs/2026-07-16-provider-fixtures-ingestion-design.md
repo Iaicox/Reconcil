@@ -271,7 +271,7 @@ Pure, no I/O. Rules:
 
 ## 9. Capture script
 
-`pnpm --filter @pet-crypto/ingestion capture -- --wallet 0x… --role freelancer --chains 1,8453 [--from N --to N]`
+`pnpm --filter @reconcil/ingestion capture -- --wallet 0x… --role freelancer --chains 1,8453 [--from N --to N]`
 
 1. Reads `chains.config.ts` + `ETHERSCAN_API_KEY` from env (`.env`).
 2. Resolves the pin: `--to` defaults to current `safeHead` (head − finality_depth),

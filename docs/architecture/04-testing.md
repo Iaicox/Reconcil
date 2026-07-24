@@ -130,7 +130,7 @@ that"), cross-session trace (`ledger_trace_tool_call`), Face B: import → sugge
 confirm → status → journal export narrative, partial payment explanation, VAT field
 passthrough, guardrails (×3), injections (×2).
 
-**Runner** (`apps/cli`, `pnpm --filter @pet-crypto/cli evals -- --suite core --runs 3`):
+**Runner** (`apps/cli`, `pnpm --filter @reconcil/cli evals -- --suite core --runs 3`):
 a fresh agent session per case on the **Anthropic SDK Tool Runner**
 (`client.beta.messages.toolRunner` + `betaTool`; the brief says "Agent SDK" — this is the
 concrete choice, see brief §Stack), with the 11 MCP tools bound in-process over a

@@ -6,8 +6,8 @@
  * in the dataset. It both DOCUMENTS how each number was derived and GUARDS it against
  * drift. No LLM — deterministic, runs in the integration CI job.
  */
-import { analyticsBalances, analyticsGas, type ToolContext } from '@pet-crypto/mcp-tools';
-import { createDb, runMigrations, tenants, wallets, type Db } from '@pet-crypto/db';
+import { analyticsBalances, analyticsGas, type ToolContext } from '@reconcil/mcp-tools';
+import { createDb, runMigrations, tenants, wallets, type Db } from '@reconcil/db';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';

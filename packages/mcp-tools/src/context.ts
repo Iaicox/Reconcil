@@ -3,7 +3,7 @@
  * and is injected here — never read from tool arguments (ADR-006). Every tool is
  * `(ctx, input)`, and every repository read is scoped to `ctx.tenantId`.
  */
-import type { Db } from '@pet-crypto/db';
+import type { Db } from '@reconcil/db';
 
 export interface ToolContext {
   db: Db;

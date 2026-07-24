@@ -2,13 +2,13 @@
  * Exporter render inputs and outputs. The exporters package is the file-artifact
  * boundary: it takes already-computed domain shapes (balances, transactions, gas,
  * counterparties, valued flows) and renders deterministic files. It imports only
- * `@pet-crypto/core` (the wire citation shapes) — never ledger/pricing/db — so the
+ * `@reconcil/core` (the wire citation shapes) — never ledger/pricing/db — so the
  * mcp-tools composition layer maps its ledger/pricing results into these shapes.
  *
  * Money crosses as decimal strings (ADR-004); rounding happens only in this package
  * (the export boundary). `*_display`/symbol values are already sanitized (C6, ADR-011).
  */
-import type { CoverageRef, FxRef, PriceRef } from '@pet-crypto/core';
+import type { CoverageRef, FxRef, PriceRef } from '@reconcil/core';
 
 export type Currency = 'USD' | 'EUR';
 

@@ -1,7 +1,7 @@
 /**
  * One-off fixture capture (spec §9). Live network — never runs in CI or tests.
  *
- *   pnpm --filter @pet-crypto/ingestion capture -- \
+ *   pnpm --filter @reconcil/ingestion capture -- \
  *     --wallet 0x… --role freelancer --chains 1,8453 [--from 0] [--to N]
  *
  * Requires ETHERSCAN_API_KEY in the environment (root .env is auto-loaded).
@@ -10,7 +10,7 @@ import { parseArgs } from 'node:util';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chainById } from '@pet-crypto/core';
+import { chainById } from '@reconcil/core';
 import { recordingTransport, realFetchJson } from '../src/fixture-transport.js';
 import { assertScrubbed, readManifest, upsertManifest } from '../src/manifest.js';
 import type { WalletManifestEntry } from '../src/manifest.js';

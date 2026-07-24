@@ -1,5 +1,5 @@
 {
-  "name": "@pet-crypto/pricing",
+  "name": "@reconcil/pricing",
   "version": "0.0.0",
   "private": true,
   "description": "DefiLlama/CoinGecko/ECB adapters, daily snapshot service, valuation with pinned snapshot IDs.",
@@ -20,8 +20,8 @@
     "capture": "tsx scripts/capture-prices.ts"
   },
   "dependencies": {
-    "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*",
+    "@reconcil/core": "workspace:*",
+    "@reconcil/db": "workspace:*",
     "decimal.js": "catalog:",
     "drizzle-orm": "^0.45.2"
   },

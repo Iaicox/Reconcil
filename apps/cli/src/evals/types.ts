@@ -3,8 +3,8 @@
  * DB- and LLM-bound modules so the aggregation/gate/scorecard logic is pure and
  * unit-testable with canned data (no API key, no Postgres).
  */
-import type { CitationResolver, EvalCase, GradeResult, Transcript } from '@pet-crypto/evals';
-import type { ToolContext } from '@pet-crypto/mcp-tools';
+import type { CitationResolver, EvalCase, GradeResult, Transcript } from '@reconcil/evals';
+import type { ToolContext } from '@reconcil/mcp-tools';
 
 export type { CitationResolver };
 

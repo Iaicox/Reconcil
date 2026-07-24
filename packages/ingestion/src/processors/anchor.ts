@@ -8,8 +8,8 @@
  * the erc20 stream the curated verified token set. All coverage over the result
  * carries `ANCHORED_BASELINE` (C5), wired on the read side already.
  */
-import { chainById } from '@pet-crypto/core';
-import { tokens, type Db } from '@pet-crypto/db';
+import { chainById } from '@reconcil/core';
+import { tokens, type Db } from '@reconcil/db';
 import { and, eq, isNull } from 'drizzle-orm';
 
 import type { ProviderBundle } from '../providers/provider-factory.js';

@@ -8,7 +8,7 @@
  * the `to` side (fold credits `to∈S`), the zero address the `from` — the mirror
  * of a gas_fee. The append-only insert path is `insertEventRows` (event-writer).
  */
-import { chainEvents } from '@pet-crypto/db';
+import { chainEvents } from '@reconcil/db';
 import { ZERO_ADDRESS } from '../normalize.js';
 
 /** Provider-attested balance of one token at the anchor block. */

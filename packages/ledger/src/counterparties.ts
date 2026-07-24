@@ -4,8 +4,8 @@
  * value needs pricing, so ledger ranks `top_n` deterministically by activity
  * (`txCount` desc, address asc). Labeling (`entity_addresses`) lives above ledger.
  */
-import { formatUnits } from '@pet-crypto/core';
-import { chainEvents, tokens, type Db } from '@pet-crypto/db';
+import { formatUnits } from '@reconcil/core';
+import { chainEvents, tokens, type Db } from '@reconcil/db';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 
 import { bucketBacking, emptyBacking } from './backing.js';

@@ -12,8 +12,8 @@ import {
   type DirectoryListEntitiesInput,
   type DirectoryUpsertEntityInput,
   type Warning,
-} from '@pet-crypto/core';
-import { entities, entityAddresses } from '@pet-crypto/db';
+} from '@reconcil/core';
+import { entities, entityAddresses } from '@reconcil/db';
 import { and, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import type { ToolContext } from '../context.js';

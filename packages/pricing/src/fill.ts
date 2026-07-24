@@ -4,8 +4,8 @@
  * new snapshots + ECB FX — all idempotent, so a re-run is a no-op. Provider I/O
  * and retries are the worker's concern; this is the pure orchestration seam.
  */
-import { serializeError, type Logger } from '@pet-crypto/core';
-import type { Db } from '@pet-crypto/db';
+import { serializeError, type Logger } from '@reconcil/core';
+import type { Db } from '@reconcil/db';
 
 import { fxDateRange, priceGaps } from './gaps.js';
 import { firstPrice } from './providers/provider-factory.js';

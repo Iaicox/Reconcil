@@ -33,9 +33,9 @@ pnpm test         # vitest per package (--passWithNoTests on stubs)
 pnpm depcruise    # boundary rules + signing-lib ban — needs `pnpm build` first
 ```
 
-Dev entrypoints (tsx): `pnpm --filter @pet-crypto/mcp-server dev` (stdio) /
-`dev:http` (Fastify on :8484), `pnpm --filter @pet-crypto/worker dev`,
-`pnpm --filter @pet-crypto/cli dev`. Self-host stack: `docker compose up`
+Dev entrypoints (tsx): `pnpm --filter @reconcil/mcp-server dev` (stdio) /
+`dev:http` (Fastify on :8484), `pnpm --filter @reconcil/worker dev`,
+`pnpm --filter @reconcil/cli dev`. Self-host stack: `docker compose up`
 (copy `.env.example` → `.env` first).
 
 Note: `pnpm depcruise` resolves cross-package imports through built `dist/`

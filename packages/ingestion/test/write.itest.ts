@@ -1,7 +1,7 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { createDb, type Db } from '@pet-crypto/db';
-import { runMigrations } from '@pet-crypto/db';
-import { chainById } from '@pet-crypto/core';
+import { createDb, type Db } from '@reconcil/db';
+import { runMigrations } from '@reconcil/db';
+import { chainById } from '@reconcil/core';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NormalizedEvent } from '../src/types.js';

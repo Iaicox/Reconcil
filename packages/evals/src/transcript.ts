@@ -5,8 +5,8 @@
  * canonicalised with core's exact bigint scaling (ADR-004) so G2 compares
  * decimal strings, never floats.
  */
-import { formatUnits, parseUnits } from '@pet-crypto/core';
-import type { ToolEnvelope } from '@pet-crypto/mcp-tools';
+import { formatUnits, parseUnits } from '@reconcil/core';
+import type { ToolEnvelope } from '@reconcil/mcp-tools';
 
 /** One tool call within a session: the tool, its args, and the returned citation envelope. */
 export interface ToolInvocation {

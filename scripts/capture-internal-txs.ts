@@ -20,7 +20,7 @@ import {
   realFetchJson,
   recordingTransport,
   type PageQuery,
-} from '@pet-crypto/ingestion';
+} from '@reconcil/ingestion';
 
 const CHAIN_ID = 1;
 const FIXTURES = join(

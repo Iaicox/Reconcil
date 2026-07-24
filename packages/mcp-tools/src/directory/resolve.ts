@@ -6,7 +6,7 @@
  * (`chain_id NULL`) one, then lowest `entity_id`. The tool labels a bare address;
  * it never invents names (P1). Read-only, tenant-scoped (ADR-006).
  */
-import { entities, entityAddresses } from '@pet-crypto/db';
+import { entities, entityAddresses } from '@reconcil/db';
 import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 
 import type { ToolContext } from '../context.js';

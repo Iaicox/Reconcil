@@ -7,8 +7,8 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { decimalString } from '@pet-crypto/core';
-import { tools } from '@pet-crypto/mcp-tools';
+import { decimalString } from '@reconcil/core';
+import { tools } from '@reconcil/mcp-tools';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 

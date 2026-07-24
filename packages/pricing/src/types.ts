@@ -4,7 +4,7 @@
  * is reproducible and citable (ADR-007, P5, invariant C4). Pricing is
  * tenant-agnostic: it values quantities handed to it, resolution lives above.
  */
-import type { DecimalString } from '@pet-crypto/core';
+import type { DecimalString } from '@reconcil/core';
 
 export type Currency = 'USD' | 'EUR';
 export type ValuationPolicy = 'market' | 'peg_for_stables';

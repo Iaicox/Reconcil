@@ -1,5 +1,5 @@
-import type { Logger } from '@pet-crypto/core';
-import type { Db } from '@pet-crypto/db';
+import type { Logger } from '@reconcil/core';
+import type { Db } from '@reconcil/db';
 import { describe, expect, it } from 'vitest';
 
 import { buildHttpApp } from '../src/http.js';

@@ -10,8 +10,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import Anthropic from '@anthropic-ai/sdk';
-import { createDb, runMigrations, type Db } from '@pet-crypto/db';
-import { loadDataset, type EvalCase } from '@pet-crypto/evals';
+import { createDb, runMigrations, type Db } from '@reconcil/db';
+import { loadDataset, type EvalCase } from '@reconcil/evals';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 

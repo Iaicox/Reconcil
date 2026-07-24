@@ -10,8 +10,8 @@
 import {
   ledgerTraceToolCallInput, ledgerTraceToolCallOutput,
   type CoverageRef, type LedgerTraceToolCallOutput,
-} from '@pet-crypto/core';
-import { toolCalls } from '@pet-crypto/db';
+} from '@reconcil/core';
+import { toolCalls } from '@reconcil/db';
 import { and, eq } from 'drizzle-orm';
 
 import type { ToolContext } from '../context.js';

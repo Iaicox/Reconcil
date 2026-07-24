@@ -15,9 +15,9 @@ import {
   type AnalyticsCounterpartiesInput, type AnalyticsCounterpartiesOutput,
   type CounterpartyPerTokenView, type CounterpartyRef, type CounterpartyRowView,
   type FxRef, type PriceRef, type Warning,
-} from '@pet-crypto/core';
-import { computeCounterparties, getLedgerStatus } from '@pet-crypto/ledger';
-import { sumDecimals, valueQuantities, type ValueNeed } from '@pet-crypto/pricing';
+} from '@reconcil/core';
+import { computeCounterparties, getLedgerStatus } from '@reconcil/ledger';
+import { sumDecimals, valueQuantities, type ValueNeed } from '@reconcil/pricing';
 
 import type { ToolContext } from '../context.js';
 import { mapCoverage } from '../coverage.js';

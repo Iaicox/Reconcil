@@ -5,7 +5,7 @@
  * lookups are injected via `CitationResolver`; the Agent-SDK runner (PR #15) wires a
  * real DB-backed resolver, keeping this grader pure and unit-testable.
  */
-import { analyticsListEventsInput, type EventRef } from '@pet-crypto/core';
+import { analyticsListEventsInput, type EventRef } from '@reconcil/core';
 
 import type { GradeResult, Transcript } from '../transcript.js';
 

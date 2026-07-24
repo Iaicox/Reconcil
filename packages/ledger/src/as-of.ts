@@ -5,7 +5,7 @@
  * checkpoints. "Balance on May 31" is well-defined against that anchor; block
  * number and block time are maxed independently (monotonic on real chains).
  */
-import { chainEvents, type Db } from '@pet-crypto/db';
+import { chainEvents, type Db } from '@reconcil/db';
 import { and, inArray, lte, or, sql } from 'drizzle-orm';
 
 import type { AsOfResolved } from './types.js';

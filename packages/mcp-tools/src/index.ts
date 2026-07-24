@@ -10,7 +10,7 @@ import {
   directoryListEntitiesInput, directoryUpsertEntityInput,
   exportClosePackInput, exportPdfSummaryInput,
   ledgerStatusInput, ledgerTraceToolCallInput, ledgerTrackWalletInput,
-} from '@pet-crypto/core';
+} from '@reconcil/core';
 import { z } from 'zod';
 
 import type { ToolContext } from './context.js';

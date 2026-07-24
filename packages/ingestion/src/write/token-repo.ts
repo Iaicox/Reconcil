@@ -4,8 +4,8 @@
  * strings and NULL display until a later token-resolve slice. decimals is
  * coerced into the DDL's 0..36 CHECK — the base-unit ledger stays exact.
  */
-import type { ChainConfig } from '@pet-crypto/core';
-import { tokens } from '@pet-crypto/db';
+import type { ChainConfig } from '@reconcil/core';
+import { tokens } from '@reconcil/db';
 import type { NormalizedEvent } from '../types.js';
 
 export function tokenKey(ev: NormalizedEvent): string {

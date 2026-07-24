@@ -1,5 +1,5 @@
-import type { CitationResolver, EvalCase, ToolInvocation, Transcript } from '@pet-crypto/evals';
-import type { ToolEnvelope } from '@pet-crypto/mcp-tools';
+import type { CitationResolver, EvalCase, ToolInvocation, Transcript } from '@reconcil/evals';
+import type { ToolEnvelope } from '@reconcil/mcp-tools';
 import { describe, expect, it } from 'vitest';
 
 import { parseArgs } from '../src/evals/args.js';
