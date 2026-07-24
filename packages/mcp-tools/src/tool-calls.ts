@@ -27,10 +27,12 @@ export interface PersistParams {
   args: Record<string, unknown>;
   coverage: CoverageRef[];
   result: unknown;
+  /** Pre-generated id (export tools mint it up front so the manifest can cite it). */
+  id?: string;
 }
 
 export async function persistToolCall(ctx: ToolContext, params: PersistParams): Promise<string> {
-  const id = ulid();
+  const id = params.id ?? ulid();
   const resultDigest = createHash('sha256').update(canonicalStringify(params.result)).digest('hex');
   await ctx.db.insert(toolCalls).values({
     id,

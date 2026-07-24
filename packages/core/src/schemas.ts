@@ -510,3 +510,72 @@ export const ledgerTraceToolCallOutput = z.object({
   drilldown: z.object({ tool: z.string(), args: z.record(z.string(), z.unknown()) }).optional(),
 });
 export type LedgerTraceToolCallOutput = z.infer<typeof ledgerTraceToolCallOutput>;
+
+// ---- export_* (§6.5) --------------------------------------------------------
+
+/** The four persisted export artifact kinds (mirrors the `exports.kind` CHECK, schema.sql). */
+export const exportKindSchema = z.enum(['close_pack', 'pdf_summary', 'journal_qbo', 'journal_xero']);
+export type ExportKind = z.infer<typeof exportKindSchema>;
+
+/** Accounting month on the wire (UTC calendar month); the close period is the whole month. */
+export const monthString = z.string().regex(/^\d{4}-\d{2}$/, 'must be a month (YYYY-MM)');
+
+/** The resolved [start, end] ISO dates the export actually covered (echoed back, citable). */
+export const exportPeriodSchema = z.object({ start: isoDateString, end: isoDateString }).strict();
+export type ExportPeriod = z.infer<typeof exportPeriodSchema>;
+
+/** One materialized artifact: its bundle-relative name, absolute path on disk, content hash. */
+export const exportFileSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/, 'must be a lowercase sha256 hex digest'),
+}).strict();
+export type ExportFileView = z.infer<typeof exportFileSchema>;
+
+/**
+ * `export_close_pack` (contract §6.5) — monthly close bundle (6 CSVs + manifest).
+ * Non-read-only (writes files, registers an `exports` row) but never destructive.
+ * `valuation` is required: the pack values balances/flows and derives a journal draft.
+ */
+export const exportClosePackInput = z
+  .object({
+    month: monthString,
+    scope: scopeSchema.optional(),
+    client_id: z.string().optional(),
+    valuation: valuationSchema,
+    out_dir: z.string().optional(),
+  })
+  .strict();
+export type ExportClosePackInput = z.infer<typeof exportClosePackInput>;
+
+export const exportClosePackOutput = z
+  .object({
+    export_id: z.string(),
+    kind: z.literal('close_pack'),
+    period: exportPeriodSchema,
+    files: z.array(exportFileSchema),
+  })
+  .strict();
+export type ExportClosePackOutput = z.infer<typeof exportClosePackOutput>;
+
+/** `export_pdf_summary` (contract §6.5) — one-page PDF summary + manifest. Same input shape. */
+export const exportPdfSummaryInput = z
+  .object({
+    month: monthString,
+    scope: scopeSchema.optional(),
+    client_id: z.string().optional(),
+    valuation: valuationSchema,
+    out_dir: z.string().optional(),
+  })
+  .strict();
+export type ExportPdfSummaryInput = z.infer<typeof exportPdfSummaryInput>;
+
+export const exportPdfSummaryOutput = z
+  .object({
+    export_id: z.string(),
+    kind: z.literal('pdf_summary'),
+    period: exportPeriodSchema,
+    files: z.array(exportFileSchema),
+  })
+  .strict();
+export type ExportPdfSummaryOutput = z.infer<typeof exportPdfSummaryOutput>;

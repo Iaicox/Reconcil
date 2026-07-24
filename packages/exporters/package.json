@@ -14,15 +14,19 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run"
   },
   "dependencies": {
     "@pet-crypto/core": "workspace:*",
-    "@pet-crypto/db": "workspace:*"
+    "decimal.js": "catalog:",
+    "pdfkit": "^0.15.0"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/pdfkit": "^0.13.5",
     "eslint": "catalog:",
+    "fast-check": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

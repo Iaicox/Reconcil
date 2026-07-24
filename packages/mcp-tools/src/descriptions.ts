@@ -26,6 +26,10 @@ const BASE: Record<string, string> = {
   ledger_trace_tool_call:
     'Replay the full provenance (coverage, events, prices) of a previously returned answer by its tool_call_id.',
   ledger_track_wallet: 'Begin tracking a wallet: seed ingestion checkpoints and enqueue backfill (full or anchored).',
+  export_close_pack:
+    'Generate the monthly close pack (opening/closing balances, transactions, gas, counterparty summary, and a DRAFT journal) as CSVs plus an audit manifest; writes files and returns their paths and hashes.',
+  export_pdf_summary:
+    'Generate a one-page PDF summary of the month (portfolio value, net flows, gas, top counterparties), clearly labeled DRAFT, plus an audit manifest.',
 };
 
 /** Declaration description for a tool, always suffixed with the untrusted-data note (§7). */
