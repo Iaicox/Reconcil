@@ -1,6 +1,7 @@
 # CI plan: docs/architecture/04-testing.md §7. Jobs: `check`, `test`, `schema-parity`,
 # `integration` (testcontainers Postgres), plus the live-LLM `evals-smoke` (PR) and
-# `evals-full` (nightly + manual) — the only jobs that use ANTHROPIC_API_KEY.
+# `evals-full` (nightly + manual) — the only jobs that use ANTHROPIC_API_KEY /
+# ANTHROPIC_BASE_URL.
 
 name: ci
 
@@ -94,7 +95,8 @@ jobs:
   # Live agent smoke (5 cases × 1 run): the only cheap catch for contract/prompt drift.
   # Runs only when the secret exists AND on a same-repo PR (fork PRs have no secrets).
   # Docker (testcontainers) is present on ubuntu-latest; the runner spins its own throwaway
-  # Postgres. ANTHROPIC_API_KEY is used here and in evals-full, nowhere else.
+  # Postgres. ANTHROPIC_API_KEY (secret) + ANTHROPIC_BASE_URL (repo variable, optional
+  # gateway) are used here and in evals-full, nowhere else.
   evals-smoke:
     needs: evals-preflight
     if: needs.evals-preflight.outputs.has_key == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
@@ -111,6 +113,8 @@ jobs:
       - run: pnpm --filter @reconcil/cli evals -- --smoke
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional gateway for Anthropic traffic; empty ⇒ SDK defaults to api.anthropic.com.
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
 
   # Full suite (30 cases × 3 runs) + published scorecard. Nightly and on-demand only —
   # never on every PR (cost). Applies the demo-readiness gate (§6): a failure exits
@@ -131,6 +135,8 @@ jobs:
       - run: pnpm --filter @reconcil/cli evals -- --suite core --runs 3 --out eval-reports
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Optional gateway for Anthropic traffic; empty ⇒ SDK defaults to api.anthropic.com.
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
       - if: always()
         uses: actions/upload-artifact@v4
         with:
