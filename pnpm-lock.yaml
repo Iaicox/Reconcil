@@ -517,6 +517,9 @@ importers:
       '@reconcil/db':
         specifier: workspace:*
         version: link:../db
+      csv-parse:
+        specifier: ^5.5.0
+        version: 5.6.0
     devDependencies:
       eslint:
         specifier: 'catalog:'
@@ -1826,6 +1829,9 @@ packages:
 
   crypto-js@4.2.0:
     resolution: {integrity: sha512-KALDyEYgpY+Rlob/iriUtjV6d5Eq+Y191A5g4UqLAi8CyGP9N1+FdVbkc1SxKc2r4YAYqG8JzO2KGL+AizD70Q==}
+
+  csv-parse@5.6.0:
+    resolution: {integrity: sha512-l3nz3euub2QMg5ouu5U09Ew9Wf6/wQ8I++ch1loQ0ljmzhmfZYrH9fflS22i/PQEvsPvxCwxgz5q7UB8K1JO4Q==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -4472,6 +4478,8 @@ snapshots:
       which: 2.0.2
 
   crypto-js@4.2.0: {}
+
+  csv-parse@5.6.0: {}
 
   debug@4.4.3:
     dependencies:

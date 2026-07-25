@@ -14,12 +14,13 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b",
-    "lint": "eslint src",
+    "lint": "eslint src test",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@reconcil/core": "workspace:*",
-    "@reconcil/db": "workspace:*"
+    "@reconcil/db": "workspace:*",
+    "csv-parse": "^5.5.0"
   },
   "devDependencies": {
     "eslint": "catalog:",

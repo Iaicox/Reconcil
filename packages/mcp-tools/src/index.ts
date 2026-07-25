@@ -10,6 +10,7 @@ import {
   directoryListEntitiesInput, directoryUpsertEntityInput,
   exportClosePackInput, exportPdfSummaryInput,
   ledgerStatusInput, ledgerTraceToolCallInput, ledgerTrackWalletInput,
+  reconImportInvoicesInput,
 } from '@reconcil/core';
 import { z } from 'zod';
 
@@ -28,6 +29,7 @@ import { exportPdfSummary, TOOL_NAME as EXPORT_PDF_SUMMARY_TOOL } from './tools/
 import { ledgerStatus, TOOL_NAME as LEDGER_STATUS_TOOL } from './tools/ledger-status.js';
 import { ledgerTraceToolCall, TOOL_NAME as LEDGER_TRACE_TOOL } from './tools/ledger-trace-tool-call.js';
 import { ledgerTrackWallet, TOOL_NAME as LEDGER_TRACK_TOOL } from './tools/ledger-track-wallet.js';
+import { reconImportInvoices, TOOL_NAME as RECON_IMPORT_TOOL } from './tools/recon-import-invoices.js';
 
 export interface ToolAnnotations {
   readOnlyHint: boolean;
@@ -145,6 +147,14 @@ export const exportPdfSummaryTool: ToolDescriptor = {
   handler: exportPdfSummary,
 };
 
+/** recon_* (contract §6.4, Face B): import is a write (mutates external_records), never destructive. */
+export const reconImportInvoicesTool: ToolDescriptor = {
+  name: RECON_IMPORT_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(reconImportInvoicesInput) as Record<string, unknown>,
+  handler: reconImportInvoices,
+};
+
 /** The registry the server/cli/evals iterate to declare tools. */
 export const tools: ToolDescriptor[] = [
   analyticsBalancesTool,
@@ -160,6 +170,7 @@ export const tools: ToolDescriptor[] = [
   ledgerTrackWalletTool,
   exportClosePackTool,
   exportPdfSummaryTool,
+  reconImportInvoicesTool,
 ];
 
 export { analyticsBalances } from './tools/analytics-balances.js';
@@ -175,6 +186,8 @@ export { exportPdfSummary } from './tools/export-pdf-summary.js';
 export { ledgerStatus } from './tools/ledger-status.js';
 export { ledgerTraceToolCall } from './tools/ledger-trace-tool-call.js';
 export { ledgerTrackWallet } from './tools/ledger-track-wallet.js';
+export { reconImportInvoices } from './tools/recon-import-invoices.js';
+export { importExternalRecords, type ImportResult, type ImportedRecord } from './recon/repo.js';
 export { resolveEntities, refKey, type ResolvedEntity, type EntityRef } from './directory/resolve.js';
 export { listEntities, upsertEntity, type UpsertResult } from './directory/repo.js';
 export { buildEnvelope, type ToolEnvelope, type Citations, type EnvelopeParts } from './envelope.js';
