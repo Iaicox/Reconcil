@@ -75,6 +75,13 @@ describe('parseInvoiceCsv — validation and honest row failures', () => {
     expect(errors).toEqual([{ row: 0, code: 'NO_EXTERNAL_REF_COLUMN', message: expect.any(String) }]);
   });
 
+  it('reports a file-level error when a mapping targets a column not in the header', () => {
+    const csv = 'invoice,total,currency\nINV-1,10.00,EUR';
+    const { drafts, errors } = parseInvoiceCsv(csv, { mapping: { ghost: 'amount' } });
+    expect(drafts).toEqual([]);
+    expect(errors).toEqual([{ row: 0, code: 'MAPPED_COLUMN_NOT_FOUND', message: expect.stringContaining('ghost') }]);
+  });
+
   it('reports a file-level error on empty content', () => {
     const { drafts, errors } = parseInvoiceCsv('   ');
     expect(drafts).toEqual([]);

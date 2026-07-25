@@ -127,6 +127,18 @@ describe('recon_import_invoices — import, sanitization, audit', () => {
     ).rejects.toBeInstanceOf(ToolError);
     await expect(reconImportInvoices(ctx(), { bogus: 1 })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
+
+  it('rejects a non-UUID client_id with INVALID_INPUT (not a raw uuid-cast error)', async () => {
+    await expect(
+      reconImportInvoices(ctx(), { format: 'csv', content: CSV, client_id: 'not-a-uuid' }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  it('rejects a negative vat_rate default at input validation', async () => {
+    await expect(
+      reconImportInvoices(ctx(), { format: 'csv', content: CSV, defaults: { vat_rate: -5 } }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
 });
 
 describe('recon_import_invoices — file_path confinement & caps (security)', () => {

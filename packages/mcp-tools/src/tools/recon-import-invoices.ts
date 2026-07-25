@@ -18,6 +18,7 @@ import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
 import { readImportFile } from '../recon/import-fs.js';
 import { importExternalRecords } from '../recon/repo.js';
+import { resolveClientId } from '../scope.js';
 import { persistToolCall } from '../tool-calls.js';
 
 export const TOOL_NAME = 'recon_import_invoices';
@@ -59,8 +60,12 @@ export async function reconImportInvoices(
     };
   }
 
+  // Resolve client_id to the tenant's own before any write (ADR-006); a bad/foreign id
+  // is INVALID_INPUT, never a raw uuid-cast error. Mirrors ledger_track_wallet.
+  const clientId = await resolveClientId(ctx, input.client_id);
+
   const { drafts, errors } = parseInvoiceCsv(content, parseOpts);
-  const { inserted, skippedDuplicates } = await importExternalRecords(ctx, drafts, input.client_id ?? null);
+  const { inserted, skippedDuplicates } = await importExternalRecords(ctx, drafts, clientId);
 
   const warnings: Warning[] = [];
   let heavy = false;
@@ -91,6 +96,13 @@ export async function reconImportInvoices(
 
   // Persist the call for audit (C2). The bulky CSV `content` is redacted — the raw
   // rows live in each external_records.payload, so args only records the call shape.
+  // FOLLOW-UP (write-tool atomicity, C2): the insert (importExternalRecords) and this
+  // audit write are separate transactions, so a persistToolCall failure in the window
+  // after the insert commits leaves an un-audited import. This is the shared write-tool
+  // pattern — directory_upsert_entity, ledger_track_wallet, and export_run all carry it;
+  // the clean fix threads one transaction through persistToolCall (ToolContext.db is
+  // typed Db, not a PgTransaction — typing-invasive) and is worth building once across
+  // all write tools rather than only here.
   const persistedArgs: Record<string, unknown> = { ...input };
   if (input.content !== undefined) persistedArgs.content = `<${String(input.content.length)} chars omitted>`;
   const toolCallId = await persistToolCall(ctx, {

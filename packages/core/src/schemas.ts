@@ -605,7 +605,9 @@ export const reconImportInvoicesInput = z
       .object({
         currency: z.string().optional(),
         direction: externalRecordDirection.optional(),
-        vat_rate: z.number().optional(),
+        // Non-negative: a negative default would poison every row that relies on it
+        // (INVALID_VAT), so fail fast at input validation instead.
+        vat_rate: z.number().nonnegative().optional(),
       })
       .strict()
       .optional(),

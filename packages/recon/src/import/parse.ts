@@ -74,8 +74,9 @@ export function parseInvoiceCsv(content: string, opts: ParseOptions = {}): Parse
 
   if (rows.length === 0) return { drafts: [], errors: [{ row: 0, code: 'EMPTY', message: 'CSV has no header row' }] };
 
-  // DoS guard: bound rows before building any per-row arrays / the DB write / the
-  // response. Reject the whole file rather than silently truncating.
+  // DoS guard: bound the DB write and the response. (csv-parse/sync already
+  // materialized every row above, so parse-time allocation is bounded by the byte
+  // caps, not this.) Reject the whole file rather than silently truncating.
   const maxRows = opts.maxRows ?? 50_000;
   const dataRowCount = rows.length - 1;
   if (dataRowCount > maxRows) {
@@ -88,6 +89,14 @@ export function parseInvoiceCsv(content: string, opts: ParseOptions = {}): Parse
 
   // File-level: required columns must be resolvable, else every row would fail.
   const fileErrors: ImportRowError[] = [];
+  // A `mapping` that targets a column absent from the header would otherwise look
+  // "present" to the required-column guards below and fail every row as MISSING_FIELD;
+  // report it as one legible file-level error instead.
+  for (const csvColumn of Object.keys(opts.mapping ?? {})) {
+    if (!headers.includes(csvColumn)) {
+      fileErrors.push({ row: 0, code: 'MAPPED_COLUMN_NOT_FOUND', message: `mapped column not found in header: ${csvColumn}` });
+    }
+  }
   if (column.external_ref === undefined) fileErrors.push({ row: 0, code: 'NO_EXTERNAL_REF_COLUMN', message: 'no column maps to external_ref' });
   if (column.amount === undefined) fileErrors.push({ row: 0, code: 'NO_AMOUNT_COLUMN', message: 'no column maps to amount' });
   if (column.currency === undefined && defaults.currency === undefined) {

@@ -3,16 +3,15 @@
  * drafts idempotently: re-importing the same CSV is a no-op via the
  * `(tenant, client, kind, source, external_ref)` unique index (NULLS NOT DISTINCT,
  * ADR-006) — existing refs are skipped and counted, never updated. Tenant identity
- * comes from `ctx` (ADR-012); `client_id`, when given, must belong to the tenant.
- * Raw `counterpartyName` is stored for audit and returned as-is — the caller
- * sanitizes it at the response edge (P7/ADR-011), it never leaves un-scrubbed.
+ * comes from `ctx` (ADR-012); `clientId` arrives already resolved to the tenant's own
+ * (the caller runs `resolveClientId`, so a bad id is INVALID_INPUT, never a raw
+ * uuid-cast error here). Raw `counterpartyName` is stored for audit and returned
+ * as-is — the caller sanitizes it at the response edge (P7/ADR-011).
  */
 import type { ExternalRecordDraft } from '@reconcil/recon';
-import { clients, externalRecords } from '@reconcil/db';
-import { and, eq } from 'drizzle-orm';
+import { externalRecords } from '@reconcil/db';
 
 import type { ToolContext } from '../context.js';
-import { ToolError } from '../errors.js';
 
 /** A persisted row echoed back to the tool (counterpartyName still raw). */
 export interface ImportedRecord {
@@ -29,23 +28,15 @@ export interface ImportResult {
   skippedDuplicates: number;
 }
 
-/** Idempotency key inside one import batch (tenant/client are fixed per call). */
-const dedupeKey = (d: ExternalRecordDraft): string => `${d.kind} ${d.source} ${d.externalRef}`;
+/** Idempotency key inside one import batch (tenant/client are fixed per call).
+ *  JSON.stringify keeps the joiner unambiguous (and NUL-free) as `kind` grows. */
+const dedupeKey = (d: ExternalRecordDraft): string => JSON.stringify([d.kind, d.source, d.externalRef]);
 
 export async function importExternalRecords(
   ctx: ToolContext,
   drafts: ExternalRecordDraft[],
   clientId: string | null,
 ): Promise<ImportResult> {
-  if (clientId !== null) {
-    const owned = await ctx.db
-      .select({ id: clients.id })
-      .from(clients)
-      .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
-      .limit(1);
-    if (owned.length === 0) throw new ToolError('INVALID_INPUT', `client not found: ${clientId}`);
-  }
-
   // Collapse intra-file duplicates first (first row wins), so the DB insert never
   // sees the same key twice and the skipped count includes in-file repeats.
   const seen = new Set<string>();
