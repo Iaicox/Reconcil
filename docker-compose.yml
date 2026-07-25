@@ -50,6 +50,10 @@ services:
         condition: service_healthy
     volumes:
       - exports:/app/exports
+      # Optional: mount a host directory of trusted invoice CSVs read-only to use
+      # recon_import_invoices' `file_path` input, and set RECONCIL_IMPORT_DIR=/app/imports.
+      # Left commented ⇒ file_path imports stay fail-closed (inline `content` still works).
+      #   - ./imports:/app/imports:ro
 
   worker:
     build: .

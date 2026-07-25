@@ -7,8 +7,6 @@
  * Row-level problems are returned in `errors[]`, not thrown — a partial import is a
  * normal outcome.
  */
-import { readFile } from 'node:fs/promises';
-
 import {
   reconImportInvoicesInput, reconImportInvoicesOutput, sanitize,
   type ReconImportInvoicesOutput, type ReconImportedRecordView, type Warning,
@@ -18,12 +16,15 @@ import { parseInvoiceCsv, type ParseOptions } from '@reconcil/recon';
 import type { ToolContext } from '../context.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { readImportFile } from '../recon/import-fs.js';
 import { importExternalRecords } from '../recon/repo.js';
 import { persistToolCall } from '../tool-calls.js';
 
 export const TOOL_NAME = 'recon_import_invoices';
 
 const NAME_MAX = 128;
+/** Byte-accurate cap on the resolved CSV text (contract: inline content ≤ 1 MB). */
+const MAX_CONTENT_BYTES = 1_000_000;
 
 export async function reconImportInvoices(
   ctx: ToolContext,
@@ -36,13 +37,15 @@ export async function reconImportInvoices(
   // Resolve the CSV text. Exactly one of content/file_path is guaranteed by the schema.
   let content: string;
   if (input.content !== undefined) {
+    // Inline content ≤ 1 MB (contract §6.4), byte-accurate: the schema's char-length
+    // check is a cheap pre-filter a multibyte payload can still slip past.
+    if (Buffer.byteLength(input.content, 'utf8') > MAX_CONTENT_BYTES) {
+      throw new ToolError('INVALID_INPUT', 'inline content exceeds the 1 MB limit');
+    }
     content = input.content;
   } else {
-    try {
-      content = await readFile(input.file_path!, 'utf8');
-    } catch (err) {
-      throw new ToolError('INVALID_INPUT', `could not read file_path: ${String(err)}`);
-    }
+    // file_path reads are confined to RECONCIL_IMPORT_DIR and size-capped (import-fs).
+    content = await readImportFile(input.file_path!);
   }
 
   const parseOpts: ParseOptions = {};

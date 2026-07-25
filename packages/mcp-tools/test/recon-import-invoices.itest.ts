@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { createDb, runMigrations, type Db } from '@reconcil/db';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
@@ -30,9 +34,16 @@ beforeAll(async () => {
   db = createDb(pool);
 }, 120_000);
 
-afterAll(async () => { await pool.end(); await container.stop(); });
+afterAll(async () => {
+  delete process.env.RECONCIL_IMPORT_DIR;
+  delete process.env.RECONCIL_IMPORT_MAX_BYTES;
+  await pool.end();
+  await container.stop();
+});
 
 beforeEach(async () => {
+  delete process.env.RECONCIL_IMPORT_DIR;
+  delete process.env.RECONCIL_IMPORT_MAX_BYTES;
   await pool.query('TRUNCATE tenants, clients, external_records, tool_calls RESTART IDENTITY CASCADE');
   await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'acme', 'acme')`, [TENANT]);
 });
@@ -115,5 +126,71 @@ describe('recon_import_invoices — import, sanitization, audit', () => {
       reconImportInvoices(ctx(), { format: 'csv', content: CSV, file_path: '/tmp/x.csv' }),
     ).rejects.toBeInstanceOf(ToolError);
     await expect(reconImportInvoices(ctx(), { bogus: 1 })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+});
+
+describe('recon_import_invoices — file_path confinement & caps (security)', () => {
+  const tempDir = (): Promise<string> => mkdtemp(join(tmpdir(), 'recon-import-'));
+
+  it('reads a file confined to RECONCIL_IMPORT_DIR', async () => {
+    const dir = await tempDir();
+    try {
+      await writeFile(join(dir, 'acme.csv'), CSV);
+      process.env.RECONCIL_IMPORT_DIR = dir;
+      const env = await reconImportInvoices(ctx(), { format: 'csv', file_path: 'acme.csv' });
+      expect(env.data.inserted).toBe(2);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a traversal file_path without leaking the path, and inserts nothing', async () => {
+    const dir = await tempDir();
+    try {
+      process.env.RECONCIL_IMPORT_DIR = dir;
+      let thrown: ToolError | undefined;
+      try {
+        await reconImportInvoices(ctx(), { format: 'csv', file_path: '../../../../etc/passwd' });
+      } catch (err) {
+        thrown = err as ToolError;
+      }
+      expect(thrown?.code).toBe('INVALID_INPUT');
+      expect(thrown?.message).not.toContain(dir); // no base path leaked (finding 3)
+      expect(thrown?.message).not.toContain('passwd'); // no target path leaked
+      const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM external_records`);
+      expect(rows[0]?.n).toBe('0');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('is fail-closed when RECONCIL_IMPORT_DIR is unset', async () => {
+    // beforeEach cleared the env var
+    await expect(
+      reconImportInvoices(ctx(), { format: 'csv', file_path: 'anything.csv' }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  it('rejects an oversized file (RECONCIL_IMPORT_MAX_BYTES)', async () => {
+    const dir = await tempDir();
+    try {
+      await writeFile(join(dir, 'big.csv'), 'invoice,amount,currency\nINV-1,10.00,EUR\n');
+      process.env.RECONCIL_IMPORT_DIR = dir;
+      process.env.RECONCIL_IMPORT_MAX_BYTES = '10';
+      await expect(
+        reconImportInvoices(ctx(), { format: 'csv', file_path: 'big.csv' }),
+      ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects >1 MB inline content by byte length (multibyte, under the char cap)', async () => {
+    // 400k × 3-byte '€' = 1.2 MB but only 400k chars (< the schema char pre-filter),
+    // so this exercises the handler's byte-accurate cap specifically.
+    const big = '€'.repeat(400_000);
+    await expect(
+      reconImportInvoices(ctx(), { format: 'csv', content: big }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 });

@@ -74,6 +74,14 @@ export function parseInvoiceCsv(content: string, opts: ParseOptions = {}): Parse
 
   if (rows.length === 0) return { drafts: [], errors: [{ row: 0, code: 'EMPTY', message: 'CSV has no header row' }] };
 
+  // DoS guard: bound rows before building any per-row arrays / the DB write / the
+  // response. Reject the whole file rather than silently truncating.
+  const maxRows = opts.maxRows ?? 50_000;
+  const dataRowCount = rows.length - 1;
+  if (dataRowCount > maxRows) {
+    return { drafts: [], errors: [{ row: 0, code: 'TOO_MANY_ROWS', message: `too many rows: ${String(dataRowCount)} exceeds the ${String(maxRows)} limit` }] };
+  }
+
   const headers = rows[0]!;
   const column = resolveColumns(headers, opts.mapping);
   const defaults = opts.defaults ?? {};

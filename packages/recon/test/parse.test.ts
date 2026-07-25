@@ -89,6 +89,26 @@ describe('parseInvoiceCsv — validation and honest row failures', () => {
   });
 });
 
+describe('parseInvoiceCsv — row cap (DoS guard)', () => {
+  const build = (n: number): string => {
+    const rows = ['invoice,amount,currency'];
+    for (let i = 0; i < n; i += 1) rows.push(`INV-${String(i)},10.00,EUR`);
+    return rows.join('\n');
+  };
+
+  it('rejects the whole file with TOO_MANY_ROWS past maxRows', () => {
+    const { drafts, errors } = parseInvoiceCsv(build(5), { maxRows: 3 });
+    expect(drafts).toEqual([]);
+    expect(errors).toEqual([{ row: 0, code: 'TOO_MANY_ROWS', message: expect.any(String) }]);
+  });
+
+  it('accepts a file exactly at maxRows', () => {
+    const { drafts, errors } = parseInvoiceCsv(build(3), { maxRows: 3 });
+    expect(errors).toEqual([]);
+    expect(drafts).toHaveLength(3);
+  });
+});
+
 describe('parseInvoiceCsv — hostile input stays raw here', () => {
   it('keeps a formula-lead counterparty name verbatim (sanitization is at the response edge)', () => {
     const csv = 'invoice,customer,amount,currency\nINV-1,=SUM(A1:A9),10.00,EUR';

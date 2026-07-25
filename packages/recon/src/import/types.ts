@@ -50,6 +50,8 @@ export interface ParseOptions {
   /** Original CSV column name → canonical field; overrides auto-detection. */
   mapping?: Record<string, string>;
   defaults?: { currency?: string; direction?: Direction; vatRate?: string };
+  /** DoS guard: reject the whole file past this many data rows (default 50_000). */
+  maxRows?: number;
 }
 
 export interface ParseResult {
