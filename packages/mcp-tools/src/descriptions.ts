@@ -32,6 +32,8 @@ const BASE: Record<string, string> = {
     'Generate a one-page PDF summary of the month (portfolio value, net flows, gas, top counterparties), clearly labeled DRAFT, plus an audit manifest.',
   recon_import_invoices:
     'Import invoices from a CSV into external records, idempotently per client; returns counts of inserted and skipped-duplicate rows, per-row errors, and each imported record with a sanitized counterparty name. Provide exactly one of `content` (inline CSV) or `file_path` (a self-host mounted path).',
+  recon_suggest_matches:
+    'Run the deterministic matching engine over open records and on-chain settlements and persist its DRAFT suggestions (status "suggested"); returns each suggested match with the record, the backing event, the applied amount, a confidence score, and a rule-by-rule rationale, plus counts of unmatched records and settlements. The engine scores — a human confirms via recon_confirm_match; suggestions never affect exports until confirmed.',
 };
 
 /** Declaration description for a tool, always suffixed with the untrusted-data note (§7). */
