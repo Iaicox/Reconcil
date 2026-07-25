@@ -12,6 +12,7 @@ coverage/
 
 # local runtime artifacts
 exports/
+.kanbn/
 
 # local-only Claude Code settings
 .claude/settings.local.json
