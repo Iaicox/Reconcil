@@ -30,6 +30,8 @@ const BASE: Record<string, string> = {
     'Generate the monthly close pack (opening/closing balances, transactions, gas, counterparty summary, and a DRAFT journal) as CSVs plus an audit manifest; writes files and returns their paths and hashes.',
   export_pdf_summary:
     'Generate a one-page PDF summary of the month (portfolio value, net flows, gas, top counterparties), clearly labeled DRAFT, plus an audit manifest.',
+  recon_import_invoices:
+    'Import invoices from a CSV into external records, idempotently per client; returns counts of inserted and skipped-duplicate rows, per-row errors, and each imported record with a sanitized counterparty name. Provide exactly one of `content` (inline CSV) or `file_path` (a self-host mounted path).',
 };
 
 /** Declaration description for a tool, always suffixed with the untrusted-data note (§7). */

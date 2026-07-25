@@ -581,3 +581,68 @@ export const exportPdfSummaryOutput = z
   })
   .strict();
 export type ExportPdfSummaryOutput = z.infer<typeof exportPdfSummaryOutput>;
+
+// ---- recon_* (§6.4, Face B) -------------------------------------------------
+
+/** Direction of an external record (mirrors the `external_records.direction` CHECK). */
+export const externalRecordDirection = z.enum(['receivable', 'payable']);
+export type ExternalRecordDirection = z.infer<typeof externalRecordDirection>;
+
+/**
+ * `recon_import_invoices` (contract §6.4, write, idempotent) — CSV invoice import.
+ * Exactly one of `content` (inline, capped) / `file_path` (self-host mount). Column
+ * `mapping` (CSV column → canonical field) overrides auto-detection. `vat_rate` is a
+ * rate, not money, so it rides as a number; invoice amounts never do (ADR-004).
+ */
+export const reconImportInvoicesInput = z
+  .object({
+    format: z.literal('csv'),
+    content: z.string().optional(),
+    file_path: z.string().optional(),
+    client_id: z.string().optional(),
+    mapping: z.record(z.string(), z.string()).optional(),
+    defaults: z
+      .object({
+        currency: z.string().optional(),
+        direction: externalRecordDirection.optional(),
+        // Non-negative: a negative default would poison every row that relies on it
+        // (INVALID_VAT), so fail fast at input validation instead.
+        vat_rate: z.number().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    if ((v.content === undefined) === (v.file_path === undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'exactly one of `content` or `file_path` is required' });
+    }
+    // Inline content is capped (contract: ≤ 1 MB); larger imports use file_path on
+    // the self-host mount. Character length is a sufficient guard here.
+    if (v.content !== undefined && v.content.length > 1_000_000) {
+      ctx.addIssue({ code: 'custom', path: ['content'], message: 'inline `content` exceeds 1 MB; use `file_path`' });
+    }
+  });
+export type ReconImportInvoicesInput = z.infer<typeof reconImportInvoicesInput>;
+
+/** One imported record echoed back. `counterparty_name` is hostile import text, so
+ *  it appears only sanitized, under the `untrusted` key (C6, ADR-011). */
+export const reconImportedRecordSchema = z.object({
+  id: z.string(),
+  external_ref: z.string(),
+  amount: decimalString,
+  currency: z.string(),
+  issued_on: z.string().optional(),
+  untrusted: z.object({ counterparty_name: z.string() }).optional(),
+});
+export type ReconImportedRecordView = z.infer<typeof reconImportedRecordSchema>;
+
+export const reconImportInvoicesOutput = z
+  .object({
+    inserted: z.number().int().nonnegative(),
+    skipped_duplicates: z.number().int().nonnegative(),
+    errors: z.array(z.object({ row: z.number().int(), code: z.string(), message: z.string() })),
+    records: z.array(reconImportedRecordSchema),
+  })
+  .strict();
+export type ReconImportInvoicesOutput = z.infer<typeof reconImportInvoicesOutput>;
