@@ -19,7 +19,7 @@
 import { sanitize } from '@reconcil/core';
 
 import { toCsv, type CsvValue } from './csv.js';
-import { absDecimal, isNegative, isZero, netOfVat, roundHalfUp, subtract, sumDecimals } from './decimal.js';
+import { isZero, netOfVat, roundHalfUp, subtract, sumDecimals } from './decimal.js';
 import { sha256 } from './sha256.js';
 import type {
   JournalCategory, JournalDraftsInput, JournalDraftsResult, JournalManifest, RoundingResidue,
@@ -107,28 +107,39 @@ export function renderJournalDrafts(input: JournalDraftsInput): JournalDraftsRes
       cmp(a.currency, b.currency) || cmp(a.date, b.date) ||
       cmp(a.externalRef, b.externalRef) || cmp(a.direction, b.direction),
   );
-  const built = sorted.flatMap((e, i) => entryLines(e, String(i + 1)));
+  // Journal numbers are contiguous over the ENTRIES that produce lines: a zero-valued
+  // entry emits nothing and must not consume a number (else 1,3,4…).
+  let journalNo = 0;
+  const built = sorted.flatMap((e) => {
+    const lines = entryLines(e, String(journalNo + 1));
+    if (lines.length > 0) journalNo += 1;
+    return lines;
+  });
 
-  // Balance each currency independently; append a rounding line only on divergence.
+  // Order lines by currency and assert each currency balances. Under face-value valuation
+  // every entry is internally balanced (Dr V == Cr net+vat), so the per-currency sum is
+  // exact and the residue is always 0.00 — the file is balanced BY CONSTRUCTION, not by a
+  // correction line. A non-zero residue would mean a confirmed-leg entry failed to balance
+  // internally: an invariant violation, NOT something to paper over with a standalone
+  // rounding line (which, being single-sided, is itself an unbalanced journal that QBO/Xero
+  // reject on import). If a future volatile-token valuation ever breaks per-entry balance it
+  // must fold the correction into that entry's own journal before this point — see the
+  // non-stablecoin-valuation slice.
   const currencies = [...new Set(built.map((l) => l.currency))].sort();
   const roundingResidues: RoundingResidue[] = [];
   const ordered: TaggedLine[] = [];
-  let roundingNo = sorted.length + 1;
   for (const currency of currencies) {
     const group = built.filter((l) => l.currency === currency);
     const residue = roundHalfUp(
       subtract(sumDecimals(group.map((l) => l.debit)), sumDecimals(group.map((l) => l.credit))),
       2,
     );
-    ordered.push(...group);
     if (!isZero(residue)) {
-      const magnitude = roundHalfUp(absDecimal(residue), 2);
-      ordered.push(line(
-        `R-${String(roundingNo)}`, input.period.end, 'rounding', 'Rounding residue (DRAFT)',
-        isNegative(residue) ? 'debit' : 'credit', magnitude, currency,
-      ));
-      roundingNo += 1;
+      throw new Error(
+        `journal-drafts: ${currency} debits and credits diverge by ${residue}; a confirmed-leg entry did not balance internally (invariant violation)`,
+      );
     }
+    ordered.push(...group);
     roundingResidues.push({ currency, residue });
   }
 
@@ -147,9 +158,12 @@ export function renderJournalDrafts(input: JournalDraftsInput): JournalDraftsRes
     banner,
     ...ordered.map((l) => {
       const account = accountFor(l.category);
+      // QBO groups a journal by explicit *JournalNo; Xero groups by narration, so the
+      // journal number rides the narration (`#N …`) — otherwise two distinct legs sharing a
+      // ref+counterparty+date would merge into one Xero journal while staying separate in QBO.
       return target === 'qbo'
         ? [l.journalNo, l.date, account, l.debit, l.credit, l.description, l.currency]
-        : [l.description, l.date, account, l.description, l.debit, l.credit, l.currency];
+        : [`#${l.journalNo} ${l.description}`, l.date, account, l.description, l.debit, l.credit, l.currency];
     }),
   ];
 

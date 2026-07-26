@@ -91,13 +91,32 @@ describe('renderJournalDrafts — recon-backed QBO/Xero draft (§6.5)', () => {
     );
     const csv = text(out.file);
     expect(csv.startsWith('*Narration,*Date,*AccountCode,*Description,Debit,Credit,Currency\n')).toBe(true);
-    // asset credited gross; payable + input VAT debited net + vat
-    expect(csv).toContain('BILL-9 — Vendor,2026-06-20,1010,BILL-9 — Vendor,0.00,1210.00,EUR');
-    expect(csv).toContain('BILL-9 — Vendor,2026-06-20,2000,BILL-9 — Vendor,1000.00,0.00,EUR');
-    expect(csv).toContain('BILL-9 — Vendor,2026-06-20,1300,BILL-9 — Vendor,210.00,0.00,EUR');
+    // asset credited gross; payable + input VAT debited net + vat. Narration carries `#N`.
+    expect(csv).toContain('#1 BILL-9 — Vendor,2026-06-20,1010,BILL-9 — Vendor,0.00,1210.00,EUR');
+    expect(csv).toContain('#1 BILL-9 — Vendor,2026-06-20,2000,BILL-9 — Vendor,1000.00,0.00,EUR');
+    expect(csv).toContain('#1 BILL-9 — Vendor,2026-06-20,1300,BILL-9 — Vendor,210.00,0.00,EUR');
     expect(out.file.name).toBe('journal_draft_xero_DRAFT.csv');
     const totals = columnTotals(csv, 'xero').get('EUR')!;
     expect(totals.debit.toFixed(2)).toBe(totals.credit.toFixed(2));
+  });
+
+  it('gives two same-ref/counterparty/date legs distinct Xero journal identity (#N)', () => {
+    // Xero merges rows sharing a narration; without the `#N` prefix a partially-matched
+    // invoice's two same-day legs would collapse into one journal (unlike QBO). The prefix
+    // keeps each journal distinct on both targets.
+    const out = renderJournalDrafts(
+      input({
+        target: 'xero',
+        accountMapping: MAPPING,
+        entries: [
+          { externalRef: 'DUP', counterparty: 'Same', direction: 'receivable', grossFiat: '100.00', vatRate: null, currency: 'EUR', date: '2026-06-07' },
+          { externalRef: 'DUP', counterparty: 'Same', direction: 'receivable', grossFiat: '200.00', vatRate: null, currency: 'EUR', date: '2026-06-07' },
+        ],
+      }),
+    );
+    const csv = text(out.file);
+    expect(csv).toContain('#1 DUP — Same,2026-06-07,');
+    expect(csv).toContain('#2 DUP — Same,2026-06-07,');
   });
 
   it('emits a 2-line entry (no VAT category) when the record carries no rate', () => {
