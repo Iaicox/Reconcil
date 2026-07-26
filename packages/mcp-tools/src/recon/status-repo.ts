@@ -10,23 +10,28 @@
  *                            count recon_suggest_matches defers to (its own can under-report);
  *   - overpayments:          the excess (Σ confirmed fiat − amount) per overpaid record.
  *
+ * A settlement is a verified-stablecoin transfer with **exactly one** endpoint a tracked
+ * (client-scoped) wallet — inbound receivable-settlements and outbound payable-settlements.
+ * Internal wallet↔wallet transfers (both endpoints in scope) are NOT settlements and are
+ * excluded via `externalCondition` (the shared, no-drift direction definition, scope-sql.ts);
+ * an outbound flow with no matching payable legitimately stays counted (a real unreconciled
+ * outflow). The count reflects ingested `chain_events`; its freshness is surfaced by the
+ * caller via envelope coverage (getLedgerStatus).
+ *
  * Period semantics: records filter on `issued_on` (parity with the matcher and the
- * `external_records_period_idx`); settlements filter on `block_time` (parity with the
- * analytics tools). `clientId` arrives already resolved to the tenant's own (the caller
- * runs `resolveClientId`); tenant identity always comes from `ctx` (ADR-006/012).
+ * `external_records_period_idx`); settlements filter on `block_time` via the shared
+ * `periodRange`/`timeBetween`. `clientId` arrives already resolved to the tenant's own (the
+ * caller runs `resolveClientId`); tenant identity always comes from `ctx` (ADR-006/012).
  * Only confirmed legs are real — suggested/rejected legs never move a figure here (P8).
  */
 import { chainEvents, externalRecords, matches, tokens, wallets } from '@reconcil/db';
-import { and, eq, gt, gte, inArray, lt, lte, or, sql } from 'drizzle-orm';
+import { externalCondition, periodRange, timeBetween, transferKinds } from '@reconcil/ledger';
+import { and, eq, gt, gte, inArray, lte, sql } from 'drizzle-orm';
 
 import type { ToolContext } from '../context.js';
 
-const MS_PER_DAY = 86_400_000;
-
 /** Records still carrying an outstanding balance (mutable array for drizzle inference). */
 const OPEN_STATES: ('open' | 'partially_matched')[] = ['open', 'partially_matched'];
-/** Same candidate gate as the matcher (`match-repo.ts`): transfers only, gas excluded. */
-const SETTLEMENT_KINDS: ('erc20_transfer' | 'native_transfer')[] = ['erc20_transfer', 'native_transfer'];
 
 export interface ReconStatusParams {
   period?: { from: string; to: string };
@@ -39,6 +44,8 @@ export interface ReconStatusResult {
   openAmounts: { currency: string; value: string }[];
   unmatchedSettlements: { count: number; sample: { chainId: number; txHash: string; logIndex: number }[] };
   overpayments: { recordId: string; externalRef: string; excess: string; currency: string }[];
+  /** The resolved settlement wallet set — the caller derives coverage/freshness over it. */
+  addresses: string[];
 }
 
 export async function computeReconStatus(
@@ -107,15 +114,15 @@ export async function computeReconStatus(
 
       let unmatchedSettlements: ReconStatusResult['unmatchedSettlements'] = { count: 0, sample: [] };
       if (addresses.length > 0) {
+        const window = period !== undefined ? periodRange(period) : undefined;
         const settlementScope = and(
-          or(inArray(chainEvents.fromAddr, addresses), inArray(chainEvents.toAddr, addresses)),
-          inArray(chainEvents.eventKind, SETTLEMENT_KINDS),
+          // Exactly one endpoint in scope: inbound + outbound settlements, internal excluded.
+          externalCondition(addresses, 'both'),
+          transferKinds(), // erc20/native transfers only (gas etc. excluded)
           gt(chainEvents.amountRaw, 0n), // 0-value spam transfers settle nothing
           eq(tokens.isStablecoin, true),
           eq(tokens.verified, true),
-          period !== undefined ? gte(chainEvents.blockTime, new Date(period.from)) : undefined,
-          // < (to + 1 day) covers the whole 'to' day regardless of intraday time.
-          period !== undefined ? lt(chainEvents.blockTime, new Date(Date.parse(period.to) + MS_PER_DAY)) : undefined,
+          window !== undefined ? timeBetween(window.from, window.to) : undefined,
           sql`not exists (select 1 from ${matches} where ${matches.chainEventId} = ${chainEvents.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed')`,
         );
 
@@ -138,7 +145,7 @@ export async function computeReconStatus(
         };
       }
 
-      return { records, openAmounts, unmatchedSettlements, overpayments };
+      return { records, openAmounts, unmatchedSettlements, overpayments, addresses };
     },
     { isolationLevel: 'repeatable read' },
   );

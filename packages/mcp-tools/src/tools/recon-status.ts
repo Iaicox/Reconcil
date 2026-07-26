@@ -10,8 +10,10 @@
  * analytics_list_events drilldown (C3), so no extra envelope refs are needed.
  */
 import { reconStatusInput, reconStatusOutput, type ReconStatusOutput } from '@reconcil/core';
+import { getLedgerStatus } from '@reconcil/ledger';
 
 import type { ToolContext } from '../context.js';
+import { mapCoverage } from '../coverage.js';
 import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
 import { computeReconStatus, type ReconStatusParams } from '../recon/status-repo.js';
@@ -49,8 +51,16 @@ export async function reconStatus(
       sample: result.unmatchedSettlements.sample.map((e) => ({
         chain_id: e.chainId, tx_hash: e.txHash, log_index: e.logIndex,
       })),
-      // Executable re-enumeration of the backing events (C3); scoped by period when given.
-      drilldown: { tool: 'analytics_list_events', args: input.period !== undefined ? { period: input.period } : {} },
+      // Executable re-enumeration of the backing events (C3): scoped to the SAME wallet
+      // subset and period the figure was computed over (superset — list_events can't
+      // express "no confirmed leg"/"stablecoin-only" — but never wider on client scope).
+      drilldown: {
+        tool: 'analytics_list_events',
+        args: {
+          ...(input.client_id !== undefined ? { scope: { client_id: input.client_id } } : {}),
+          ...(input.period !== undefined ? { period: input.period } : {}),
+        },
+      },
     },
     overpayments: result.overpayments.map((o) => ({
       record_id: o.recordId, external_ref: o.externalRef, excess: o.excess, currency: o.currency,
@@ -63,9 +73,15 @@ export async function reconStatus(
     throw new ToolError('INTERNAL', `recon_status produced an output that violates its contract: ${String(err)}`);
   }
 
+  // C5: unmatched_settlements reads chain_events, so its "authoritative" count is only as
+  // complete as ingestion. Surface coverage/staleness over the same wallet set, exactly as
+  // analytics_list_events does (getLedgerStatus → mapCoverage). Empty addresses → no coverage.
+  const coverage = await getLedgerStatus(ctx.db, { addresses: result.addresses });
+  const { coverageRefs, coverageWarnings } = mapCoverage(coverage);
+
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: { ...input }, coverage: [], result: data,
+    toolName: TOOL_NAME, args: { ...input }, coverage: coverageRefs, result: data,
   });
 
-  return buildEnvelope(data, { toolCallId, coverage: [] });
+  return buildEnvelope(data, { toolCallId, coverage: coverageRefs, warnings: coverageWarnings });
 }

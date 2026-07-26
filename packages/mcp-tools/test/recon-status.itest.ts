@@ -39,7 +39,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await pool.query(
-    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls RESTART IDENTITY CASCADE',
+    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls, ingestion_checkpoints RESTART IDENTITY CASCADE',
   );
   await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'acme', 'acme')`, [TENANT]);
   await pool.query(`INSERT INTO clients (id, tenant_id, name) VALUES ($1, $2, 'Client One')`, [CLIENT, TENANT]);
@@ -217,6 +217,37 @@ describe('recon_status — unmatched settlements (authoritative view)', () => {
     const { rows } = await pool.query<{ tx_hash: string }>(`SELECT tx_hash FROM chain_events WHERE id = $1`, [unmatched]);
     expect(env.data.unmatched_settlements.sample[0]!.tx_hash).toBe(rows[0]!.tx_hash);
   });
+
+  it('excludes internal wallet↔wallet transfers, includes outbound payable settlements', async () => {
+    const eur = await seedToken();
+    // internal: both endpoints are the tenant's own wallets → not a settlement of any record.
+    await seedEvent(eur, '1000000000', { logIndex: 1, from: WALLET, to: WALLET2 });
+    // outbound: from a tracked wallet to an outsider → a payable-shaped settlement, still counted.
+    const outbound = await seedEvent(eur, '2000000000', { logIndex: 2, from: WALLET, to: OUTSIDER });
+
+    const env = await reconStatus(ctx(), {});
+
+    expect(env.data.unmatched_settlements.count).toBe(1);
+    expect(env.data.unmatched_settlements.sample).toHaveLength(1);
+    const { rows } = await pool.query<{ tx_hash: string }>(`SELECT tx_hash FROM chain_events WHERE id = $1`, [outbound]);
+    expect(env.data.unmatched_settlements.sample[0]!.tx_hash).toBe(rows[0]!.tx_hash);
+  });
+});
+
+describe('recon_status — coverage / staleness (C5)', () => {
+  it('surfaces a coverage warning when a wallet in scope is still backfilling', async () => {
+    const eur = await seedToken();
+    await seedEvent(eur, '1000000000', { logIndex: 1 }); // a settlement to read from chain_events
+    await pool.query(
+      `INSERT INTO ingestion_checkpoints (chain_id, address, stream, status) VALUES (1, $1, 'erc20', 'backfilling')`,
+      [WALLET],
+    );
+
+    const env = await reconStatus(ctx(), {});
+
+    expect(env.citations.coverage.length).toBeGreaterThan(0);
+    expect(env.warnings).toContainEqual(expect.objectContaining({ code: 'COVERAGE_INCOMPLETE' }));
+  });
 });
 
 describe('recon_status — client and period scoping', () => {
@@ -233,6 +264,8 @@ describe('recon_status — client and period scoping', () => {
     expect(env.data.open_amounts).toEqual([{ currency: 'EUR', value: '1000.00' }]);
     expect(env.data.unmatched_settlements.count).toBe(1);
     expect(env.data.unmatched_settlements.sample[0]).toMatchObject({ log_index: 1 });
+    // The self-citing drilldown must re-enumerate the SAME wallet subset (C3), not the tenant.
+    expect(env.data.unmatched_settlements.drilldown.args).toEqual({ scope: { client_id: CLIENT } });
   });
 
   it('rejects an unknown client_id with INVALID_INPUT', async () => {
@@ -244,13 +277,15 @@ describe('recon_status — client and period scoping', () => {
     await seedInvoice('INV-JUN', '1000.00', { status: 'open', issuedOn: '2026-06-10' });
     await seedInvoice('INV-AUG', '1000.00', { status: 'open', issuedOn: '2026-08-10' });
     await seedEvent(tokenId, '1000000000', { logIndex: 1, blockTime: '2026-06-14T10:00:00Z' });
+    // Intraday event on the 'to' day must land inside the (inclusive) period window.
+    await seedEvent(tokenId, '1000000000', { logIndex: 3, blockTime: '2026-06-30T23:30:00Z' });
     await seedEvent(tokenId, '1000000000', { logIndex: 2, blockTime: '2026-08-14T10:00:00Z' });
 
     const env = await reconStatus(ctx(), { period: { from: '2026-06-01', to: '2026-06-30' } });
 
     expect(env.data.records.open).toBe(1);
     expect(env.data.open_amounts).toEqual([{ currency: 'EUR', value: '1000.00' }]);
-    expect(env.data.unmatched_settlements.count).toBe(1);
-    expect(env.data.unmatched_settlements.sample[0]).toMatchObject({ log_index: 1 });
+    expect(env.data.unmatched_settlements.count).toBe(2); // both June events, incl. the to-day one
+    expect(env.data.unmatched_settlements.sample.map((s) => s.log_index).sort()).toEqual([1, 3]);
   });
 });
