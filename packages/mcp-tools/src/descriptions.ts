@@ -34,6 +34,10 @@ const BASE: Record<string, string> = {
     'Import invoices from a CSV into external records, idempotently per client; returns counts of inserted and skipped-duplicate rows, per-row errors, and each imported record with a sanitized counterparty name. Provide exactly one of `content` (inline CSV) or `file_path` (a self-host mounted path).',
   recon_suggest_matches:
     'Run the deterministic matching engine over open records and on-chain settlements and persist its DRAFT suggestions (status "suggested"); returns each suggested match with the record, the backing event, the applied amount, a confidence score, and a rule-by-rule rationale, plus counts of unmatched records and settlements. The engine scores — a human confirms via recon_confirm_match; suggestions never affect exports until confirmed.',
+  recon_confirm_match:
+    'Confirm one suggested match leg by id, transitioning it to "confirmed" and pinning its valuation; re-checks that the settlement is not over-applied and returns the parent record\'s freshly derived status (open/partially_matched/matched/overpaid). Only confirmed legs feed exports. Fails NOT_SUGGESTED if the leg was already actioned, MATCH_CONFLICT if confirming would over-apply the event.',
+  recon_reject_match:
+    'Reject one suggested match leg by id, transitioning it to "rejected"; a rejected leg no longer counts toward the record\'s matched total, the event\'s applied amount, or any export. Returns the parent record\'s freshly derived status. Fails NOT_SUGGESTED if the leg was already actioned.',
 };
 
 /** Declaration description for a tool, always suffixed with the untrusted-data note (§7). */
