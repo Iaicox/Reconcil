@@ -10,12 +10,20 @@ const DATASET = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'fixtur
 describe('core-30 dataset', () => {
   const cases = loadDataset(DATASET);
 
-  it('loads and validates against the schema (≈22 Face A cases)', () => {
-    expect(cases.length).toBeGreaterThanOrEqual(22);
+  it('loads and validates the full 30-case set (24 Face A + 6 Face B)', () => {
+    expect(cases).toHaveLength(30);
+    expect(cases.filter((c) => c.face === 'A').length).toBeGreaterThanOrEqual(22);
   });
 
-  it('is Face A only in this slice — Face B lands with the recon slice', () => {
-    expect(cases.every((c) => c.face === 'A')).toBe(true);
+  it('includes the Face B recon narrative (import → suggest → confirm → status → journal)', () => {
+    const faceB = cases.filter((c) => c.face === 'B');
+    expect(faceB.length).toBeGreaterThanOrEqual(6);
+    // Every Face B case seeds the recon-smb scenario, and the five recon tools are all exercised.
+    expect(faceB.every((c) => c.setup?.fixture === 'recon-smb')).toBe(true);
+    const exercised = new Set(faceB.flatMap((c) => c.expect.tools_expected ?? []));
+    for (const t of ['recon_import_invoices', 'recon_suggest_matches', 'recon_confirm_match', 'recon_status', 'export_journal_drafts']) {
+      expect(exercised.has(t)).toBe(true);
+    }
   });
 
   it('has unique ids', () => {
@@ -23,9 +31,12 @@ describe('core-30 dataset', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('covers the §5 case mix', () => {
+  it('covers the §5 case mix (Face A analytics + Face B recon)', () => {
     const ids = cases.map((c) => c.id).join(' ');
-    for (const prefix of ['bal-', 'flow-', 'gas-', 'cp-', 'stable-', 'cover-', 'drill-', 'trace-', 'guard-', 'inj-']) {
+    for (const prefix of [
+      'bal-', 'flow-', 'gas-', 'cp-', 'stable-', 'cover-', 'drill-', 'trace-', 'guard-', 'inj-',
+      'import-', 'suggest-', 'confirm-', 'recon-status-', 'partial-', 'journal-',
+    ]) {
       expect(ids).toContain(prefix);
     }
   });

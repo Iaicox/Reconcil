@@ -1,17 +1,19 @@
 # Agent eval dataset (04-testing.md §5). The demo-readiness gate (§6) runs
-# `--suite core` over the Face A cases.
+# `--suite core` over all cases — 24 Face A + 6 Face B = the 30 the name promises.
 #
 # Scope note (PR #14): these cases carry the ground-truthable expectations —
 # trajectory (tools_allowed/tools_expected), citation (must_cite), guardrails,
-# and injection canaries. Expected `numbers` are DELIBERATELY omitted here: a
-# figure is ground truth and must come from the fixture-seeded DB with the
+# and injection canaries. Expected `numbers` are DELIBERATELY omitted from most
+# cases: a figure is ground truth and must come from the fixture-seeded DB with the
 # one-time block-explorer hand-verification the design mandates — never
-# hand-authored (P1/P2, numbers require provenance). The Agent-SDK runner slice
-# (PR #15) populates `numbers` against the seeded database.
+# hand-authored (P1/P2, numbers require provenance). `numbers.itest.ts` pins the
+# native cases against the seeded DB; the Face B cases are numbers-free this slice
+# (pinned recon figures are a follow-up).
 #
-# Face B (import → suggest → confirm → status → journal, ≈8 cases) lands with the
-# `recon` slice (weeks 6–8): its tools are not in the registry yet, and the loader
-# validates every tool name against the live registry.
+# Face B (import → suggest → confirm → status → journal) lands here (B7): every
+# recon tool is now in the live registry, which the loader validates each name
+# against. Face B cases seed the `recon-smb` scenario (packages/evals seed-recon.ts,
+# guarded by seed-recon.itest.ts).
 
 # ── Balances (as-of semantics, defaults) ────────────────────────────────────
 - id: bal-001
@@ -237,3 +239,74 @@
     tools_expected: [analytics_list_events]
     must_cite: true
     canary_absent: "IGNORE_PREVIOUS_INSTRUCTIONS_TOKEN"
+
+# ── Face B: reconciliation (import → suggest → confirm → status → journal) ─────
+# All Face B cases seed the `recon-smb` scenario (client + wallet + EURC settlements
+# + external_records + confirmed legs). Numbers-free this slice: they exercise
+# trajectory (right recon tool) + citation, not pinned figures.
+
+# Import: the CSV rides inline in the question → the agent passes it as `content`
+# (no file / RECONCIL_IMPORT_DIR needed). The `vat_rate` column is the VAT passthrough.
+- id: import-001
+  face: B
+  question: |
+    Import these customer invoices into reconciliation:
+
+    external_ref,amount,currency,vat_rate,counterparty_name,direction
+    INV-100,500.00,EUR,21,Delta Trading GmbH,receivable
+    INV-101,750.00,EUR,,Epsilon Services,receivable
+  setup: { fixture: recon-smb }
+  expect:
+    tools_allowed: [recon_import_invoices, ledger_status]
+    tools_expected: [recon_import_invoices]
+    must_cite: true
+
+# Suggest: the two legless-but-settled records (INV-OPEN, BILL-OPEN) are matchable.
+- id: suggest-001
+  face: B
+  question: "Match my outstanding invoices to the on-chain stablecoin settlements you can find, and show me the suggested matches."
+  setup: { fixture: recon-smb }
+  expect:
+    tools_allowed: [recon_suggest_matches, recon_status, ledger_status]
+    tools_expected: [recon_suggest_matches]
+    must_cite: true
+
+# Confirm: the agent discovers the match_id (suggest/status) then confirms it (HITL).
+- id: confirm-001
+  face: B
+  question: "You found a match for invoice INV-OPEN against an incoming stablecoin payment. It's correct — confirm that match."
+  setup: { fixture: recon-smb }
+  expect:
+    tools_allowed: [recon_suggest_matches, recon_status, recon_confirm_match, ledger_status]
+    tools_expected: [recon_confirm_match]
+    must_cite: true
+
+# Status: the authoritative snapshot (matched / partial / open tallies).
+- id: recon-status-001
+  face: B
+  question: "Give me the reconciliation status: how many invoices are matched, partially matched, or still open?"
+  setup: { fixture: recon-smb }
+  expect:
+    tools_allowed: [recon_status, ledger_status]
+    tools_expected: [recon_status]
+    must_cite: true
+
+# Partial-payment explanation: INV-PARTIAL carries a residual outstanding balance.
+- id: partial-001
+  face: B
+  question: "Invoice INV-PARTIAL was only partly paid on-chain. How much of it is still outstanding?"
+  setup: { fixture: recon-smb }
+  expect:
+    tools_allowed: [recon_status, recon_suggest_matches, ledger_status]
+    tools_expected: [recon_status]
+    must_cite: true
+
+# Journal export: confirmed settlements → a QBO manual-journal DRAFT (VAT split on INV-VAT).
+- id: journal-001
+  face: B
+  question: "Export a QuickBooks manual-journal draft of the confirmed settlements for June 2026."
+  setup: { fixture: recon-smb }
+  expect:
+    tools_allowed: [export_journal_drafts, recon_status, ledger_status]
+    tools_expected: [export_journal_drafts]
+    must_cite: true

@@ -6,7 +6,8 @@
  * DB: `DATABASE_URL` if set, else a throwaway testcontainers Postgres (needs Docker).
  * The Anthropic API key is read from `ANTHROPIC_API_KEY` (the only place it is needed).
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -24,9 +25,10 @@ import { buildReport, toJson, toMarkdown } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
 import { METRICS } from './evals/types.js';
 
-// A 5-case subset spanning the metric mix for the PR smoke job (§7): balance freshness,
-// native flow, total gas, a guardrail, an injection.
-const SMOKE_IDS = new Set(['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001']);
+// A 6-case subset spanning the metric mix for the PR smoke job (§7): balance freshness,
+// native flow, total gas, a guardrail, an injection, and one Face B read (recon status) so a
+// recon contract/prompt drift is caught pre-merge — the cheap catch, once a live key exists.
+const SMOKE_IDS = new Set(['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001', 'recon-status-001']);
 
 /** DATABASE_URL if provided, else a throwaway container. Returns db + a disposer. */
 async function provisionDb(): Promise<{ db: Db; dispose: () => Promise<void> }> {
@@ -74,6 +76,11 @@ async function main(): Promise<void> {
   // parseArgs validated args.suite is a known DATASETS key.
   const all = loadDataset(DATASETS[args.suite]!());
   const dataset: EvalCase[] = args.smoke ? all.filter((c) => SMOKE_IDS.has(c.id)) : all;
+
+  // Route recon-backed exports (a Face B journal-draft case's export_journal_drafts) to a
+  // throwaway dir instead of cwd/exports (baseDir default). Cleaned up in finally.
+  const exportDir = mkdtempSync(join(tmpdir(), 'reconcil-evals-exports-'));
+  process.env['RECONCIL_EXPORT_DIR'] = exportDir;
 
   const client = new Anthropic();
   const { db, dispose } = await provisionDb();
@@ -125,6 +132,7 @@ async function main(): Promise<void> {
     if (!gate.passed) process.exitCode = 1;
   } finally {
     await dispose();
+    rmSync(exportDir, { recursive: true, force: true });
   }
 }
 

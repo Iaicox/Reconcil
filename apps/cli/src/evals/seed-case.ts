@@ -1,13 +1,15 @@
 /**
- * Per-case DB setup for the eval runner. Truncates, provisions the eval tenant, seeds
- * the case's golden-wallet fixture through the real pipeline (native+internal+gas, chain
- * 1), and tracks the wallet so the tenant-scoped tools resolve it. For injection cases it
- * also plants a crafted spam token whose RAW name is an injection payload carrying the
- * canary — `toTokenView` renders hostile `*_raw` as an empty `symbol` (ADR-011: raw
- * strings never leave the server), so G5 checks the canary can't leak even when present.
+ * Per-case DB setup for the eval runner. Truncates, provisions the eval tenant, then seeds
+ * the case's fixture. Face A cases seed a golden wallet through the real pipeline
+ * (native+internal+gas, chain 1) and track it so the tenant-scoped tools resolve it; Face B
+ * cases seed the `recon-smb` reconciliation scenario (client + records + settlements +
+ * confirmed legs) that the import/suggest/confirm/status/journal tools operate over. For
+ * injection cases it also plants a crafted spam token whose RAW name is an injection payload
+ * carrying the canary — `toTokenView` renders hostile `*_raw` as an empty `symbol` (ADR-011:
+ * raw strings never leave the server), so G5 checks the canary can't leak even when present.
  */
 import { chainEvents, tenants, tokens, wallets, type Db } from '@reconcil/db';
-import { seedGoldenWallet, type EvalCase } from '@reconcil/evals';
+import { seedGoldenWallet, seedReconFixture, type EvalCase, type ReconFixtureRole } from '@reconcil/evals';
 import type { ToolContext } from '@reconcil/mcp-tools';
 import { sql } from 'drizzle-orm';
 
@@ -18,9 +20,14 @@ const EVAL_TENANT = { slug: 'evals', name: 'Evals harness' } as const;
 /** Chain-1 golden wallets seed through the txlist path; injection cases add a crafted token. */
 export function makeSeedCase(db: Db): CaseSeeder {
   return async (evalCase: EvalCase): Promise<CaseEnvironment> => {
-    // Fresh slate per case: tenants CASCADE clears wallets/tool_calls/directory; tokens +
-    // chain_events are global (not tenant-scoped) so truncate them explicitly.
-    await db.execute(sql`TRUNCATE tenants, tokens, chain_events RESTART IDENTITY CASCADE`);
+    // Fresh slate per case. tenants CASCADE clears all tenant-scoped tables (wallets,
+    // clients, external_records, matches, tool_calls, exports, directory); tokens +
+    // chain_events are global. The recon + global tables are named explicitly so a
+    // schema change that adds a tenant table without a CASCADE FK fails loud, not silent.
+    await db.execute(sql`
+      TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records,
+               matches, tool_calls, exports, ingestion_checkpoints
+      RESTART IDENTITY CASCADE`);
 
     const [tenant] = await db
       .insert(tenants)
@@ -28,16 +35,21 @@ export function makeSeedCase(db: Db): CaseSeeder {
       .returning({ id: tenants.id });
     const tenantId = tenant!.id;
 
-    const role = evalCase.setup?.fixture;
-    if (role !== undefined) {
-      const seeded = await seedGoldenWallet(db, role, 1);
-      await db
-        .insert(wallets)
-        .values({ tenantId, address: seeded.address })
-        .onConflictDoNothing({ target: [wallets.tenantId, wallets.address] });
+    if (evalCase.face === 'B') {
+      // seedReconFixture validates the role (throws on an unknown fixture name).
+      await seedReconFixture(db, tenantId, evalCase.setup?.fixture as ReconFixtureRole);
+    } else {
+      const role = evalCase.setup?.fixture;
+      if (role !== undefined) {
+        const seeded = await seedGoldenWallet(db, role, 1);
+        await db
+          .insert(wallets)
+          .values({ tenantId, address: seeded.address })
+          .onConflictDoNothing({ target: [wallets.tenantId, wallets.address] });
 
-      if (evalCase.expect.canary_absent !== undefined) {
-        await plantInjectionToken(db, evalCase.expect.canary_absent, seeded.address);
+        if (evalCase.expect.canary_absent !== undefined) {
+          await plantInjectionToken(db, evalCase.expect.canary_absent, seeded.address);
+        }
       }
     }
 

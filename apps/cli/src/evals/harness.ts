@@ -29,12 +29,15 @@ export async function runSuite(
 ): Promise<CaseResult[]> {
   const results: CaseResult[] = [];
   for (const evalCase of dataset) {
-    // Seed once per case (seedGoldenWallet inserts the native token unconditionally, so a
-    // second seed without truncation would collide) — all runs share the static data;
-    // only the agent session and its persisted tool_calls differ between runs.
-    const env = await deps.seedCase(evalCase);
+    // Face A tools are read-only, so seed once per case and share the static data across
+    // runs (only the agent session and its persisted tool_calls differ). Face B tools
+    // WRITE — a confirm flips a leg suggested→confirmed, so run 2's suggest would find that
+    // settlement already consumed and confirm would fail; each run needs a clean scenario.
+    // seedCase truncates first, so re-seeding per run is safe (D3, 04-testing.md §5).
+    let env = await deps.seedCase(evalCase);
     const runGrades: RunGrades[] = [];
     for (let runIndex = 0; runIndex < runs; runIndex++) {
+      if (runIndex > 0 && evalCase.face === 'B') env = await deps.seedCase(evalCase);
       const transcript = await deps.produce({ eval: evalCase, ctx: env.ctx, runIndex });
       const resolver = await deps.makeResolver(env.ctx, transcript);
       runGrades.push(gradeTranscript(transcript, evalCase.expect, resolver));

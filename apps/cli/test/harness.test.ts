@@ -124,6 +124,32 @@ describe('harness → gate (hermetic)', () => {
     expect(gate.passed).toBe(false);
     expect(cases[0]!.metrics.guardrail.passedRuns).toBe(2);
   });
+
+  it('reseeds per run for Face B (write tools mutate shared state), once for Face A (D3)', async () => {
+    const RECON_CASE: EvalCase = {
+      id: 'recon-status-x',
+      face: 'B',
+      question: 'status?',
+      setup: { fixture: 'recon-smb' },
+      expect: { tools_allowed: ['recon_status', 'ledger_status'], tools_expected: ['recon_status'], must_cite: true },
+    };
+    const answers: Record<string, Transcript> = {
+      'bal-x': CLEAN_ANSWERS['bal-x']!,
+      'recon-status-x': {
+        invocations: [invocation('recon_status', { records: { matched: 2 } })],
+        finalAnswer: 'Two invoices are matched (via recon_status).',
+      },
+    };
+    const seedCalls: string[] = [];
+    const countingSeed = (c: EvalCase): Promise<{ ctx: never }> => {
+      seedCalls.push(c.id);
+      return Promise.resolve({ ctx: {} as never });
+    };
+    await runSuite([BALANCE_CASE, RECON_CASE], 3, deps(answers, { seedCase: countingSeed }));
+    // Face A is read-only → seeded once and shared across the 3 runs; Face B writes → reseeded each run.
+    expect(seedCalls.filter((id) => id === 'bal-x')).toHaveLength(1);
+    expect(seedCalls.filter((id) => id === 'recon-status-x')).toHaveLength(3);
+  });
 });
 
 describe('scorecard', () => {
