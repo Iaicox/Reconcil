@@ -646,3 +646,77 @@ export const reconImportInvoicesOutput = z
   })
   .strict();
 export type ReconImportInvoicesOutput = z.infer<typeof reconImportInvoicesOutput>;
+
+// ---- recon_suggest_matches (§6.4, ADR-010) ----------------------------------
+
+/**
+ * Match tolerances (contract §6.4). All optional; the engine applies the defaults
+ * (amount_pct 1.0, date_window_days 14). `amount_pct` is a percent, not money, so it
+ * rides as a number; `amount_abs` is money and stays a decimal string (ADR-004).
+ */
+export const reconTolerancesSchema = z
+  .object({
+    amount_pct: z.number().nonnegative().optional(),
+    amount_abs: nonNegativeDecimalString.optional(), // in the record's currency
+    date_window_days: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type ReconTolerances = z.infer<typeof reconTolerancesSchema>;
+
+export const reconSuggestMatchesInput = z
+  .object({
+    period: periodSchema.optional(),
+    client_id: z.string().optional(),
+    record_ids: z.array(z.string()).optional(),
+    tolerances: reconTolerancesSchema.optional(),
+  })
+  .strict();
+export type ReconSuggestMatchesInput = z.infer<typeof reconSuggestMatchesInput>;
+
+/** One rule hit explaining a suggestion; `weight` is the rule's contribution, so
+ *  Σ weights === confidence — the score is reproducible from the rationale (P1). */
+export const matchRationaleSchema = z.object({
+  rule: z.string(),
+  weight: z.number(),
+  detail: z.string(),
+});
+export type MatchRationaleView = z.infer<typeof matchRationaleSchema>;
+
+/** The settlement event carried on a suggestion: an EventRef plus display fields. */
+export const matchEventViewSchema = z.object({
+  chain_id: z.number(),
+  tx_hash: z.string(),
+  log_index: z.number(),
+  token: tokenViewSchema,
+  amount: decimalString,
+  block_time: z.string(),
+  from: addressViewSchema,
+});
+export type MatchEventView = z.infer<typeof matchEventViewSchema>;
+
+/** One suggested leg on the wire (a persisted `matches` row, status='suggested'). */
+export const matchSuggestionSchema = z.object({
+  match_id: z.string(),
+  record: z.object({
+    id: z.string(),
+    external_ref: z.string(),
+    amount: decimalString,
+    currency: z.string(),
+    open_amount: decimalString,
+  }),
+  event: matchEventViewSchema,
+  amount_applied: decimalString,
+  fiat_value: decimalString,
+  confidence: z.number(),
+  rationale: z.array(matchRationaleSchema),
+});
+export type MatchSuggestionView = z.infer<typeof matchSuggestionSchema>;
+
+export const reconSuggestMatchesOutput = z
+  .object({
+    suggestions: z.array(matchSuggestionSchema),
+    unmatched_records: z.number().int().nonnegative(),
+    unmatched_settlements: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ReconSuggestMatchesOutput = z.infer<typeof reconSuggestMatchesOutput>;

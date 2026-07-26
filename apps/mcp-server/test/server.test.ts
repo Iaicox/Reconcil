@@ -19,12 +19,12 @@ async function connect(makeContext: () => ToolContext): Promise<Client> {
 const noDbContext = (): ToolContext => ({ db: {} as never, tenantId: 'test-tenant' });
 
 describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
-  it('lists all 14 tools with correct annotations and object input schemas', async () => {
+  it('lists all 15 tools with correct annotations and object input schemas', async () => {
     const client = await connect(() => {
       throw new Error('handler must not run during listTools');
     });
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(14);
+    expect(tools).toHaveLength(15);
 
     const balances = tools.find((t) => t.name === 'analytics_balances');
     expect(balances?.annotations?.readOnlyHint).toBe(true);
@@ -40,6 +40,12 @@ describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
     expect(closePack?.annotations?.destructiveHint).toBe(false);
     expect(closePack?.inputSchema.type).toBe('object');
     expect(tools.some((t) => t.name === 'export_pdf_summary')).toBe(true);
+
+    // recon_suggest_matches persists suggested legs: a write, never destructive.
+    const suggest = tools.find((t) => t.name === 'recon_suggest_matches');
+    expect(suggest?.annotations?.readOnlyHint).toBe(false);
+    expect(suggest?.annotations?.destructiveHint).toBe(false);
+    expect(suggest?.inputSchema.type).toBe('object');
 
     // Every description carries the mandatory untrusted-data sentence (contract §7).
     expect(tools.every((t) => t.description?.includes('untrusted'))).toBe(true);

@@ -10,7 +10,7 @@ import {
   directoryListEntitiesInput, directoryUpsertEntityInput,
   exportClosePackInput, exportPdfSummaryInput,
   ledgerStatusInput, ledgerTraceToolCallInput, ledgerTrackWalletInput,
-  reconImportInvoicesInput,
+  reconImportInvoicesInput, reconSuggestMatchesInput,
 } from '@reconcil/core';
 import { z } from 'zod';
 
@@ -30,6 +30,7 @@ import { ledgerStatus, TOOL_NAME as LEDGER_STATUS_TOOL } from './tools/ledger-st
 import { ledgerTraceToolCall, TOOL_NAME as LEDGER_TRACE_TOOL } from './tools/ledger-trace-tool-call.js';
 import { ledgerTrackWallet, TOOL_NAME as LEDGER_TRACK_TOOL } from './tools/ledger-track-wallet.js';
 import { reconImportInvoices, TOOL_NAME as RECON_IMPORT_TOOL } from './tools/recon-import-invoices.js';
+import { reconSuggestMatches, TOOL_NAME as RECON_SUGGEST_TOOL } from './tools/recon-suggest-matches.js';
 
 export interface ToolAnnotations {
   readOnlyHint: boolean;
@@ -155,6 +156,14 @@ export const reconImportInvoicesTool: ToolDescriptor = {
   handler: reconImportInvoices,
 };
 
+/** recon_suggest_matches (ADR-010): a write (persists `suggested` legs), never destructive. */
+export const reconSuggestMatchesTool: ToolDescriptor = {
+  name: RECON_SUGGEST_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(reconSuggestMatchesInput) as Record<string, unknown>,
+  handler: reconSuggestMatches,
+};
+
 /** The registry the server/cli/evals iterate to declare tools. */
 export const tools: ToolDescriptor[] = [
   analyticsBalancesTool,
@@ -171,6 +180,7 @@ export const tools: ToolDescriptor[] = [
   exportClosePackTool,
   exportPdfSummaryTool,
   reconImportInvoicesTool,
+  reconSuggestMatchesTool,
 ];
 
 export { analyticsBalances } from './tools/analytics-balances.js';
@@ -187,7 +197,9 @@ export { ledgerStatus } from './tools/ledger-status.js';
 export { ledgerTraceToolCall } from './tools/ledger-trace-tool-call.js';
 export { ledgerTrackWallet } from './tools/ledger-track-wallet.js';
 export { reconImportInvoices } from './tools/recon-import-invoices.js';
+export { reconSuggestMatches } from './tools/recon-suggest-matches.js';
 export { importExternalRecords, type ImportResult, type ImportedRecord } from './recon/repo.js';
+export { suggestMatches, type SuggestMatchesParams, type SuggestMatchesResult, type SuggestionRow } from './recon/match-repo.js';
 export { resolveEntities, refKey, type ResolvedEntity, type EntityRef } from './directory/resolve.js';
 export { listEntities, upsertEntity, type UpsertResult } from './directory/repo.js';
 export { buildEnvelope, type ToolEnvelope, type Citations, type EnvelopeParts } from './envelope.js';
