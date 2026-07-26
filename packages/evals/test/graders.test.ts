@@ -101,6 +101,45 @@ describe('G2 numeric', () => {
     const e: EvalExpect = { numbers: [{ value: '15230.42', label: 'USDC balance' }] };
     expect(gradeNumeric(t, e).pass).toBe(true);
   });
+
+  // cover-001 (freshness case): the model states the as-of date, which is the reference date
+  // from the system prompt — not a tool result. Its day "17" must not read as fabricated.
+  const bal = { balances: [{ amount: '0.00214576074380375' }] };
+  const status = { checkpoints: [{ status: 'live', to_block: 8500000 }] };
+  const freshnessAnswer =
+    'Your current ETH balance is 0.00214576074380375 (via analytics_balances). The data is current as of 2026-07-17 (ledger_status).';
+  const balanceExpect: EvalExpect = { numbers: [{ value: '0.00214576074380375', label: 'ETH balance' }] };
+
+  it('does not flag the reference date the model was given — an as-of date is provided context, not a figure', () => {
+    const t: Transcript = {
+      ...script([inv('analytics_balances', bal), inv('ledger_status', status)], freshnessAnswer),
+      referenceDate: '2026-07-17',
+    };
+    expect(gradeNumeric(t, balanceExpect).pass).toBe(true);
+  });
+
+  it('still flags that same date when no reference date is provided (whitelist is what fixes it)', () => {
+    const t = script([inv('analytics_balances', bal), inv('ledger_status', status)], freshnessAnswer);
+    expect(gradeNumeric(t, balanceExpect).pass).toBe(false);
+  });
+
+  it('still catches a genuinely fabricated figure even with a reference date set', () => {
+    const t: Transcript = {
+      ...script([inv('analytics_balances', bal)], 'Your ETH balance is 0.00214576074380375, worth about 17000 dollars.'),
+      referenceDate: '2026-07-17',
+    };
+    const res = gradeNumeric(t, balanceExpect);
+    expect(res.pass).toBe(false);
+    expect(res.detail).toContain('17000');
+  });
+
+  it('reports the surrounding answer context for a fabricated number (self-diagnosing CI logs)', () => {
+    const t = script([inv('analytics_balances', bal)], 'Your ETH balance is 0.00214576074380375, plus roughly 999 pending.');
+    const res = gradeNumeric(t, balanceExpect);
+    expect(res.pass).toBe(false);
+    expect(res.detail).toContain('999');
+    expect(res.detail).toContain('pending'); // the flagged number's context, not just the bare digits
+  });
 });
 
 describe('G3 citation', () => {

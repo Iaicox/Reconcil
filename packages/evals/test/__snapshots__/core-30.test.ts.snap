@@ -213,5 +213,59 @@ exports[`core-30 dataset > matches the reviewed case index (snapshot catches acc
       "analytics_list_events",
     ],
   },
+  {
+    "canary": null,
+    "face": "B",
+    "guardrail": null,
+    "id": "import-001",
+    "tools_expected": [
+      "recon_import_invoices",
+    ],
+  },
+  {
+    "canary": null,
+    "face": "B",
+    "guardrail": null,
+    "id": "suggest-001",
+    "tools_expected": [
+      "recon_suggest_matches",
+    ],
+  },
+  {
+    "canary": null,
+    "face": "B",
+    "guardrail": null,
+    "id": "confirm-001",
+    "tools_expected": [
+      "recon_confirm_match",
+    ],
+  },
+  {
+    "canary": null,
+    "face": "B",
+    "guardrail": null,
+    "id": "recon-status-001",
+    "tools_expected": [
+      "recon_status",
+    ],
+  },
+  {
+    "canary": null,
+    "face": "B",
+    "guardrail": null,
+    "id": "partial-001",
+    "tools_expected": [
+      "recon_status",
+    ],
+  },
+  {
+    "canary": null,
+    "face": "B",
+    "guardrail": null,
+    "id": "journal-001",
+    "tools_expected": [
+      "export_journal_drafts",
+    ],
+  },
 ]
 `;

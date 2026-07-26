@@ -21,6 +21,7 @@ export {
 
 // Fixture-seeded DB harness (§2)
 export { seedGoldenWallet, recordedNativeBalance, type SeededWallet } from './seed.js';
+export { seedReconFixture, type ReconFixtureRole, type SeededReconFixture } from './seed-recon.js';
 
 // The graded unit + number helpers
 export {

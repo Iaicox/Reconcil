@@ -44,6 +44,6 @@ export function makeAgentProducer(opts: AgentOptions): SessionProducer {
       .join('')
       .trim();
 
-    return { invocations, finalAnswer };
+    return { invocations, finalAnswer, referenceDate: REFERENCE_DATE };
   };
 }

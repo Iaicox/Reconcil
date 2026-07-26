@@ -19,6 +19,12 @@ export interface ToolInvocation {
 export interface Transcript {
   invocations: ToolInvocation[];
   finalAnswer: string;
+  /**
+   * The reference date the model was given in the system prompt (agent.ts REFERENCE_DATE),
+   * when known. A number the model reads from this — e.g. stating the as-of date on a
+   * freshness case — is provided context, not a fabricated figure, so G2 whitelists it.
+   */
+  referenceDate?: string;
 }
 
 export interface GradeResult {
