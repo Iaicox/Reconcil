@@ -28,8 +28,8 @@ const MAX_TX_ATTEMPTS = 3;
 export interface MatchDecisionParams {
   matchId: string;
   decision: 'confirmed' | 'rejected';
-  /** Free-text note; audited via the tool_call (not stored on the row). */
-  note?: string;
+  // The optional `note` is not threaded here: it is audited by the handler via the
+  // tool_call args (persistToolCall), never stored on the row — no repo seam needed.
 }
 
 export interface MatchDecisionResult {
@@ -85,6 +85,12 @@ export async function applyMatchDecision(
           // The FK (ON DELETE CASCADE) guarantees a parent; absence would be data corruption.
           if (rec === undefined) throw new ToolError('INTERNAL', `match ${matchId} has no parent record`);
 
+          // A voided record is manual/terminal: its status is never re-derived and the
+          // output enum can't represent 'void', so neither decision is actionable. The
+          // leg is legitimately 'suggested', so this is INVALID_INPUT (the record), not
+          // NOT_SUGGESTED (the leg). A void operation owns cleanup of its own legs.
+          if (rec.status === 'void') throw new ToolError('INVALID_INPUT', `match ${matchId} belongs to a void record`);
+
           if (decision === 'confirmed') {
             // 4. Invariant: Σ amount_applied_raw over the event's confirmed legs, plus this
             //    one, must not exceed the event amount. Checked over CONFIRMED legs (not
@@ -139,15 +145,16 @@ export async function applyMatchDecision(
                 eq(matches.status, 'confirmed'),
               ),
             );
+          // Design note (ADR-010): the band is the canonical DEFAULT tolerance, not the
+          // suggest-time `tolerances` (a transient discovery param, not persisted). Status
+          // is a deterministic accounting fact, reproducible from the leg + this policy.
           const recordStatus = deriveRecordStatus(rec.amount, fiatRow?.fiat ?? '0');
 
-          // 6. Persist it — unless the record was manually voided (terminal, never derived).
-          if (rec.status !== 'void') {
-            await tx
-              .update(externalRecords)
-              .set({ status: recordStatus })
-              .where(and(eq(externalRecords.tenantId, ctx.tenantId), eq(externalRecords.id, rec.id)));
-          }
+          // 6. Persist it. Void records were rejected above, so this write is unconditional.
+          await tx
+            .update(externalRecords)
+            .set({ status: recordStatus })
+            .where(and(eq(externalRecords.tenantId, ctx.tenantId), eq(externalRecords.id, rec.id)));
 
           return { matchId, status: decision, recordStatus, valuation: { fiatValue: leg.fiatValue } };
         },

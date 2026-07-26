@@ -250,3 +250,21 @@ describe('recon_reject_match — HITL rejection', () => {
     await expect(reconConfirmMatch(ctx(), { match_id: matchId })).rejects.toMatchObject({ code: 'NOT_SUGGESTED' });
   });
 });
+
+describe('void parent record — terminal, not actionable', () => {
+  it('refuses to confirm or reject a leg whose record was voided, leaving the leg suggested', async () => {
+    const tokenId = await seedToken();
+    const eventId = await seedEvent(tokenId, '1000000000');
+    const recId = await seedInvoice('INV-100', '1000.00');
+    const matchId = await seedSuggestedLeg(recId, eventId, '1000000000', '1000.00');
+    await pool.query(`UPDATE external_records SET status = 'void' WHERE id = $1`, [recId]);
+
+    // A void record can't be represented in the output's record_status enum, and its
+    // status must never be resurrected — both decisions are refused up front.
+    await expect(reconConfirmMatch(ctx(), { match_id: matchId })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(reconRejectMatch(ctx(), { match_id: matchId })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+
+    expect(await legStatus(matchId)).toBe('suggested'); // untouched
+    expect(await recordStatus(recId)).toBe('void'); // still terminal
+  });
+});

@@ -23,11 +23,7 @@ export async function reconConfirmMatch(
   if (!parsed.success) throw new ToolError('INVALID_INPUT', parsed.error.message);
   const input = parsed.data;
 
-  const result = await applyMatchDecision(ctx, {
-    matchId: input.match_id,
-    decision: 'confirmed',
-    ...(input.note !== undefined ? { note: input.note } : {}),
-  });
+  const result = await applyMatchDecision(ctx, { matchId: input.match_id, decision: 'confirmed' });
 
   const data: ReconMatchDecisionOutput = {
     match_id: result.matchId,
