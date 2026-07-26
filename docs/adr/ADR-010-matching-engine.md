@@ -20,7 +20,11 @@ matching; P8 requires human confirmation.
    status (`open→partially_matched→matched→overpaid`) is a pure function of confirmed
    legs — enforced in the repository under SERIALIZABLE transactions, pinned by property
    tests. Triggers rejected: they split business logic across two runtimes and make the
-   invariant untestable as a unit.
+   invariant untestable as a unit. Record-status derivation uses the **canonical default
+   tolerance band**, independent of the suggest-time `tolerances` param (which only widens
+   candidate *discovery*); status is thus reproducible from the confirmed legs plus this
+   fixed policy, never from a transient per-call query param (P1/P2). `void` is a manual,
+   terminal state, never derived — a leg whose record is `void` is not actionable.
 3. **Deterministic scoring** with recorded `rationale` (rule hits + weights: amount within
    tolerance, date window, expected address, counterparty history). Split/partial
    candidates via bounded subset search (≤ 6 events per record). Confidence is a

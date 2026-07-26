@@ -19,12 +19,12 @@ async function connect(makeContext: () => ToolContext): Promise<Client> {
 const noDbContext = (): ToolContext => ({ db: {} as never, tenantId: 'test-tenant' });
 
 describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
-  it('lists all 15 tools with correct annotations and object input schemas', async () => {
+  it('lists all 17 tools with correct annotations and object input schemas', async () => {
     const client = await connect(() => {
       throw new Error('handler must not run during listTools');
     });
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(15);
+    expect(tools).toHaveLength(17);
 
     const balances = tools.find((t) => t.name === 'analytics_balances');
     expect(balances?.annotations?.readOnlyHint).toBe(true);
@@ -46,6 +46,14 @@ describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
     expect(suggest?.annotations?.readOnlyHint).toBe(false);
     expect(suggest?.annotations?.destructiveHint).toBe(false);
     expect(suggest?.inputSchema.type).toBe('object');
+
+    // recon_confirm_match / recon_reject_match transition one leg (HITL): writes, never destructive.
+    for (const name of ['recon_confirm_match', 'recon_reject_match']) {
+      const decision = tools.find((t) => t.name === name);
+      expect(decision?.annotations?.readOnlyHint).toBe(false);
+      expect(decision?.annotations?.destructiveHint).toBe(false);
+      expect(decision?.inputSchema.type).toBe('object');
+    }
 
     // Every description carries the mandatory untrusted-data sentence (contract §7).
     expect(tools.every((t) => t.description?.includes('untrusted'))).toBe(true);

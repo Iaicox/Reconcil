@@ -13,8 +13,16 @@ export type DerivedRecordStatus = 'open' | 'partially_matched' | 'matched' | 'ov
 /**
  * Derive status from the record's full `amount` and the summed fiat value of its
  * confirmed legs (`appliedFiat`), both decimal strings in the record's currency.
- * "matched" holds when the applied total lands within the same tolerance band the
- * engine matched on, so a within-tolerance settlement is not read as a partial.
+ * "matched" holds when the applied total lands within the tolerance band, so a
+ * within-tolerance settlement is not read as a partial.
+ *
+ * Band policy (ADR-010): confirm calls this with the **canonical default** tolerance
+ * (`tolerances = {}` → `DEFAULT_AMOUNT_PCT`). The suggest-time `tolerances` param widens
+ * *candidate discovery* only and is deliberately NOT carried into status — record status
+ * is a persisted accounting fact that must stay deterministic and reproducible from the
+ * leg + this fixed policy (P1/P2), not depend on a transient query param. A configurable
+ * per-tenant band, if ever needed, would be an explicit policy setting, not that param.
+ * The `tolerances` argument is kept for hermetic testability of the band boundaries.
  */
 export function deriveRecordStatus(
   amount: string,

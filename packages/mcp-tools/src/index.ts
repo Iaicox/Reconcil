@@ -10,7 +10,7 @@ import {
   directoryListEntitiesInput, directoryUpsertEntityInput,
   exportClosePackInput, exportPdfSummaryInput,
   ledgerStatusInput, ledgerTraceToolCallInput, ledgerTrackWalletInput,
-  reconImportInvoicesInput, reconSuggestMatchesInput,
+  reconConfirmMatchInput, reconImportInvoicesInput, reconRejectMatchInput, reconSuggestMatchesInput,
 } from '@reconcil/core';
 import { z } from 'zod';
 
@@ -29,7 +29,9 @@ import { exportPdfSummary, TOOL_NAME as EXPORT_PDF_SUMMARY_TOOL } from './tools/
 import { ledgerStatus, TOOL_NAME as LEDGER_STATUS_TOOL } from './tools/ledger-status.js';
 import { ledgerTraceToolCall, TOOL_NAME as LEDGER_TRACE_TOOL } from './tools/ledger-trace-tool-call.js';
 import { ledgerTrackWallet, TOOL_NAME as LEDGER_TRACK_TOOL } from './tools/ledger-track-wallet.js';
+import { reconConfirmMatch, TOOL_NAME as RECON_CONFIRM_TOOL } from './tools/recon-confirm-match.js';
 import { reconImportInvoices, TOOL_NAME as RECON_IMPORT_TOOL } from './tools/recon-import-invoices.js';
+import { reconRejectMatch, TOOL_NAME as RECON_REJECT_TOOL } from './tools/recon-reject-match.js';
 import { reconSuggestMatches, TOOL_NAME as RECON_SUGGEST_TOOL } from './tools/recon-suggest-matches.js';
 
 export interface ToolAnnotations {
@@ -164,6 +166,22 @@ export const reconSuggestMatchesTool: ToolDescriptor = {
   handler: reconSuggestMatches,
 };
 
+/** recon_confirm_match (ADR-010, HITL): a write (suggested → confirmed), never destructive. */
+export const reconConfirmMatchTool: ToolDescriptor = {
+  name: RECON_CONFIRM_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(reconConfirmMatchInput) as Record<string, unknown>,
+  handler: reconConfirmMatch,
+};
+
+/** recon_reject_match (ADR-010, HITL): a write (suggested → rejected), never destructive. */
+export const reconRejectMatchTool: ToolDescriptor = {
+  name: RECON_REJECT_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(reconRejectMatchInput) as Record<string, unknown>,
+  handler: reconRejectMatch,
+};
+
 /** The registry the server/cli/evals iterate to declare tools. */
 export const tools: ToolDescriptor[] = [
   analyticsBalancesTool,
@@ -181,6 +199,8 @@ export const tools: ToolDescriptor[] = [
   exportPdfSummaryTool,
   reconImportInvoicesTool,
   reconSuggestMatchesTool,
+  reconConfirmMatchTool,
+  reconRejectMatchTool,
 ];
 
 export { analyticsBalances } from './tools/analytics-balances.js';
@@ -198,8 +218,11 @@ export { ledgerTraceToolCall } from './tools/ledger-trace-tool-call.js';
 export { ledgerTrackWallet } from './tools/ledger-track-wallet.js';
 export { reconImportInvoices } from './tools/recon-import-invoices.js';
 export { reconSuggestMatches } from './tools/recon-suggest-matches.js';
+export { reconConfirmMatch } from './tools/recon-confirm-match.js';
+export { reconRejectMatch } from './tools/recon-reject-match.js';
 export { importExternalRecords, type ImportResult, type ImportedRecord } from './recon/repo.js';
 export { suggestMatches, type SuggestMatchesParams, type SuggestMatchesResult, type SuggestionRow } from './recon/match-repo.js';
+export { applyMatchDecision, type MatchDecisionParams, type MatchDecisionResult } from './recon/decision-repo.js';
 export { resolveEntities, refKey, type ResolvedEntity, type EntityRef } from './directory/resolve.js';
 export { listEntities, upsertEntity, type UpsertResult } from './directory/repo.js';
 export { buildEnvelope, type ToolEnvelope, type Citations, type EnvelopeParts } from './envelope.js';

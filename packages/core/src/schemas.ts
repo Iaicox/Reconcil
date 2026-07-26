@@ -720,3 +720,42 @@ export const reconSuggestMatchesOutput = z
   })
   .strict();
 export type ReconSuggestMatchesOutput = z.infer<typeof reconSuggestMatchesOutput>;
+
+// ---- recon_confirm_match / recon_reject_match (§6.4, write, HITL) -----------
+
+/**
+ * Both HITL decision tools share one input: the `matches` row id plus an optional
+ * free-text note (audited via the tool_call, not stored on the row). Exported under
+ * both tool names so the registry references a schema per tool.
+ */
+const matchDecisionInput = z.object({ match_id: z.string(), note: z.string().optional() }).strict();
+export const reconConfirmMatchInput = matchDecisionInput;
+export const reconRejectMatchInput = matchDecisionInput;
+export type ReconMatchDecisionInput = z.infer<typeof matchDecisionInput>;
+
+/**
+ * Valuation of the actioned leg. `fiat_value` is always present; `price_ref`/`fx_ref`
+ * are pinned only when a non-stablecoin snapshot backs the value (C4 "priced means
+ * pinned") — omitted for the stablecoin face-value path.
+ */
+export const matchValuationSchema = z
+  .object({
+    fiat_value: decimalString,
+    price_ref: priceRefSchema.optional(),
+    fx_ref: fxRefSchema.optional(),
+  })
+  .strict();
+export type MatchValuationView = z.infer<typeof matchValuationSchema>;
+
+/** Output of a confirm/reject: the new leg status and the freshly derived record status. */
+const matchDecisionOutput = z
+  .object({
+    match_id: z.string(),
+    status: z.enum(['confirmed', 'rejected']),
+    record_status: z.enum(['open', 'partially_matched', 'matched', 'overpaid']),
+    valuation: matchValuationSchema,
+  })
+  .strict();
+export const reconConfirmMatchOutput = matchDecisionOutput;
+export const reconRejectMatchOutput = matchDecisionOutput;
+export type ReconMatchDecisionOutput = z.infer<typeof matchDecisionOutput>;
