@@ -37,15 +37,17 @@ export interface MatchRecord {
 /** A settlement event already valued in the record's currency by the caller. */
 export interface CandidateEvent {
   eventId: number;
-  /** Token base units (uint256) applied if this event is picked. */
+  /** Token base units (uint256) applied if this event is picked. Must be > 0. */
   amountRaw: bigint;
   tokenDecimals: number;
   /** The event amount valued in the record's currency, decimal string (face value for stablecoins). */
   valuedAmount: string;
   /** ISO 8601 UTC datetime. */
   blockTime: string;
-  /** Lowercased sender address. */
-  fromAddr: string;
+  /** Lowercased counterparty address — the payer (`from`) for receivables, the payee
+   *  (`to`) for payables. The caller picks the end by direction; the engine only
+   *  compares this against `expectedAddress` / `knownCounterpartyAddresses`. */
+  counterpartyAddr: string;
 }
 
 /** One rule's contribution to a suggestion's confidence (contract §6.4 rationale entry). */

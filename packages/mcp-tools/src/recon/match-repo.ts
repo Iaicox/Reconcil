@@ -19,7 +19,7 @@ import type { TokenMeta } from '@reconcil/ledger';
 import {
   suggestForRecord, type CandidateEvent, type MatchRecord, type RuleHit, type Tolerances,
 } from '@reconcil/recon';
-import { and, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
+import { and, eq, gt, gte, inArray, lte, or, sql } from 'drizzle-orm';
 
 import type { ToolContext } from '../context.js';
 
@@ -118,7 +118,8 @@ export async function suggestMatches(
           period !== undefined ? gte(externalRecords.issuedOn, period.from) : undefined,
           period !== undefined ? lte(externalRecords.issuedOn, period.to) : undefined,
         ),
-      );
+      )
+      .orderBy(externalRecords.id); // stable suggestion order across runs
 
     if (recRows.length === 0) return { rows: [], unmatchedRecords: 0, unmatchedSettlements: 0 };
     const recById = new Map(recRows.map((r) => [r.id, r]));
@@ -170,12 +171,15 @@ export async function suggestMatches(
           and(
             or(inArray(chainEvents.fromAddr, addresses), inArray(chainEvents.toAddr, addresses)),
             inArray(chainEvents.eventKind, SETTLEMENT_KINDS),
+            gt(chainEvents.amountRaw, 0n), // 0-value spam transfers can't settle anything
             eq(tokens.isStablecoin, true),
             eq(tokens.verified, true),
             timeFrom !== undefined ? gte(chainEvents.blockTime, timeFrom) : undefined,
             timeTo !== undefined ? lte(chainEvents.blockTime, timeTo) : undefined,
           ),
-        );
+        )
+        // Deterministic input order so the engine's tie-breaking is reproducible.
+        .orderBy(chainEvents.blockTime, chainEvents.id);
     }
 
     // 4. Known counterparty addresses (address book) → the history rule signal.
@@ -206,6 +210,7 @@ export async function suggestMatches(
     const eligibleEventIds = new Set<number>();
     const usedEventIds = new Set<number>();
     const matchedRecordIds = new Set<string>();
+    const openByRecord = new Map<string, string>(); // computed once, reused for the wire view
     const pending: { recordId: string; leg: ReturnType<typeof suggestForRecord>[number] }[] = [];
 
     for (const r of recRows) {
@@ -221,10 +226,13 @@ export async function suggestMatches(
           tokenDecimals: e.decimals,
           valuedAmount: formatUnits(e.amountRaw, e.decimals),
           blockTime: e.blockTime.toISOString(),
-          fromAddr: e.fromAddr,
+          // The counterparty end depends on direction: the payer (from) settles a
+          // receivable, the payee (to) receives a payable. Lowercased for safe ===.
+          counterpartyAddr: (inbound ? e.fromAddr : e.toAddr).toLowerCase(),
         });
       }
       const openAmount = subtractDecimal(r.amount, confirmedByRecord.get(r.id) ?? '0');
+      openByRecord.set(r.id, openAmount);
       const mrec: MatchRecord = {
         id: r.id,
         amount: r.amount,
@@ -232,8 +240,10 @@ export async function suggestMatches(
         currency: r.currency,
         issuedOn: r.issuedOn,
         dueOn: r.dueOn,
-        expectedAddress: r.expectedAddress,
-        knownCounterpartyAddresses: r.counterpartyEntityId !== null ? (knownByEntity.get(r.counterpartyEntityId) ?? []) : [],
+        // Lowercase insurance: expected_address is DB-CHECK-lowercased and ingestion
+        // normalizes addresses, but the engine compares with raw === — keep it robust.
+        expectedAddress: r.expectedAddress === null ? null : r.expectedAddress.toLowerCase(),
+        knownCounterpartyAddresses: (r.counterpartyEntityId !== null ? (knownByEntity.get(r.counterpartyEntityId) ?? []) : []).map((a) => a.toLowerCase()),
       };
       const legs = suggestForRecord(mrec, candidates, tolerances ?? {});
       if (legs.length > 0) matchedRecordIds.add(r.id);
@@ -270,6 +280,7 @@ export async function suggestMatches(
         .returning({ id: matches.id });
     }
 
+    // A single multi-row INSERT returns rows in VALUES order, so insertedIds[i] ↔ pending[i].
     const rows: SuggestionRow[] = pending.map((p, i) => {
       const r = recById.get(p.recordId)!;
       const e = eventById.get(p.leg.eventId)!;
@@ -285,7 +296,7 @@ export async function suggestMatches(
       };
       return {
         matchId: insertedIds[i]!.id,
-        record: { id: r.id, externalRef: r.externalRef, amount: r.amount, currency: r.currency, openAmount: subtractDecimal(r.amount, confirmedByRecord.get(r.id) ?? '0') },
+        record: { id: r.id, externalRef: r.externalRef, amount: r.amount, currency: r.currency, openAmount: openByRecord.get(r.id)! },
         event: {
           chainId: e.chainId,
           txHash: e.txHash,
@@ -305,6 +316,9 @@ export async function suggestMatches(
     return {
       rows,
       unmatchedRecords: recRows.length - matchedRecordIds.size,
+      // An event suggested against several records counts as "used" once, so this can
+      // under-report leftover settlements. Acceptable for suggestions; the B5 status tool
+      // is the authoritative unmatched-settlement view.
       unmatchedSettlements: eligibleEventIds.size - usedEventIds.size,
     };
   });

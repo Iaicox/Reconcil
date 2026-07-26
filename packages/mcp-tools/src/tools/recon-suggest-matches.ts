@@ -35,6 +35,8 @@ export async function reconSuggestMatches(
   // Resolve client scope to the tenant's own before any write (ADR-006); only when
   // provided — absent client_id scopes to all of the tenant's records, not the
   // unattributed ones. A bad/foreign id is INVALID_INPUT (resolveClientId throws).
+  // `?? undefined` coerces resolveClientId's `string | null` to the params' `string?`
+  // (it never returns null on a provided id — this is a type bridge, not a runtime path).
   const clientId = input.client_id !== undefined
     ? ((await resolveClientId(ctx, input.client_id)) ?? undefined)
     : undefined;
@@ -94,6 +96,11 @@ export async function reconSuggestMatches(
     { tool: 'analytics_list_events', args: input.period !== undefined ? { period: input.period } : {} },
   );
 
+  // FOLLOW-UP (write-tool atomicity, C2): suggestMatches commits its own transaction, then
+  // this audit write runs separately — a failure here (or in the output.parse above) after
+  // the commit leaves matches rows with no tool_call. Shared with the other write tools
+  // (recon_import_invoices, directory_upsert_entity, ...); the fix is to thread one
+  // transaction through persistToolCall, built once across all of them, not only here.
   const toolCallId = await persistToolCall(ctx, {
     toolName: TOOL_NAME, args: { ...input }, coverage: [], result: data,
   });

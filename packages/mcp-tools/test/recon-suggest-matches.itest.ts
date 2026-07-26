@@ -14,9 +14,10 @@ const TENANT = '00000000-0000-0000-0000-000000000001';
 const TENANT2 = '00000000-0000-0000-0000-000000000002';
 const CLIENT = '00000000-0000-0000-0000-0000000000c1';
 
-const WALLET = `0x${'1'.repeat(40)}`; // tenant's receiving wallet
-const PAYER = `0x${'2'.repeat(40)}`; // counterparty (invoice expected_address)
+const WALLET = `0x${'1'.repeat(40)}`; // tenant's receiving/paying wallet
+const PAYER = `0x${'2'.repeat(40)}`; // counterparty on a receivable (invoice expected_address)
 const STRANGER = `0x${'3'.repeat(40)}`; // unrelated sender
+const VENDOR = `0x${'4'.repeat(40)}`; // counterparty on a payable (payee)
 const TOKEN_ADDR = `0x${'c'.repeat(40)}`; // EUR-pegged stablecoin
 
 beforeAll(async () => {
@@ -69,13 +70,18 @@ async function seedEvent(
   );
 }
 
-/** An open EUR receivable invoice. Returns its record id. */
-async function seedInvoice(externalRef: string, amount: string, expectedAddress: string | null): Promise<string> {
+/** An open EUR external record. Returns its record id. */
+async function seedInvoice(
+  externalRef: string,
+  amount: string,
+  expectedAddress: string | null,
+  direction: 'receivable' | 'payable' = 'receivable',
+): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO external_records
        (tenant_id, client_id, kind, direction, source, external_ref, amount, currency, issued_on, due_on, expected_address, status)
-     VALUES ($1, $2, 'invoice', 'receivable', 'csv', $3, $4, 'EUR', '2026-06-01', '2026-06-15', $5, 'open') RETURNING id`,
-    [TENANT, CLIENT, externalRef, amount, expectedAddress],
+     VALUES ($1, $2, 'invoice', $6, 'csv', $3, $4, 'EUR', '2026-06-01', '2026-06-15', $5, 'open') RETURNING id`,
+    [TENANT, CLIENT, externalRef, amount, expectedAddress, direction],
   );
   return rows[0]!.id;
 }
@@ -145,6 +151,38 @@ describe('recon_suggest_matches — engine run, persistence, audit', () => {
 
     const total = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM matches`);
     expect(total.rows[0]!.n).toBe('1'); // only the first tenant's leg
+  });
+
+  it('matches a payable on the payee (to) end, not the tenant wallet', async () => {
+    const tokenId = await seedToken();
+    // Outbound: the tenant pays the vendor. The counterparty is the `to` end.
+    await seedEvent(tokenId, WALLET, VENDOR, '1000000000', '2026-06-14T10:00:00Z');
+    await seedInvoice('BILL-1', '1000.00', VENDOR, 'payable');
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toHaveLength(1);
+    const s = env.data.suggestions[0]!;
+    expect(s.record.external_ref).toBe('BILL-1');
+    // Address rule fired against the payee end → high confidence.
+    expect(s.rationale.map((r) => r.rule)).toContain('address');
+    expect(s.confidence).toBeGreaterThan(0.8);
+    // The wire `from` is still the real on-chain sender (the tenant wallet).
+    expect(s.event.from.address).toBe(WALLET);
+  });
+
+  it('a zero-value transfer from the expected sender does not poison the run', async () => {
+    const tokenId = await seedToken();
+    await seedEvent(tokenId, PAYER, WALLET, '1000000000', '2026-06-14T10:00:00Z'); // the real settlement
+    await seedEvent(tokenId, PAYER, WALLET, '0', '2026-06-14T09:00:00Z', 1); // 0-value spam from the payer
+    await seedInvoice('INV-100', '1000.00', PAYER);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toHaveLength(1); // the valid one; the 0-value event is dropped
+    expect(env.data.suggestions[0]!.amount_applied).toBe('1000');
+    const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM matches`);
+    expect(rows[0]!.n).toBe('1');
   });
 
   it('reports unmatched records and unmatched settlements', async () => {

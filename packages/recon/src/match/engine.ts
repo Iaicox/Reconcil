@@ -24,8 +24,8 @@ export const MAX_SUBSET_EVENTS = 6;
 
 function isCandidate(record: MatchRecord, event: CandidateEvent, band: Band): boolean {
   if (withinBand(toMinor(event.valuedAmount), band)) return true; // amount alone qualifies
-  if (record.expectedAddress !== null && event.fromAddr === record.expectedAddress) return true;
-  return record.knownCounterpartyAddresses.includes(event.fromAddr);
+  if (record.expectedAddress !== null && event.counterpartyAddr === record.expectedAddress) return true;
+  return record.knownCounterpartyAddresses.includes(event.counterpartyAddr);
 }
 
 /** Best summing subset (size ≥ 2) whose valued total lands within the band; null if none. */
@@ -43,7 +43,9 @@ function findBestSubset(
     .sort((a, b) => {
       const av = toMinor(a.valuedAmount);
       const bv = toMinor(b.valuedAmount);
-      return av < bv ? 1 : av > bv ? -1 : 0; // largest valued first — reach the sum with fewer legs
+      // Largest valued first — reach the sum with fewer legs; eventId breaks ties so the
+      // pool (and thus the chosen subset) is deterministic regardless of input row order.
+      return av < bv ? 1 : av > bv ? -1 : a.eventId - b.eventId;
     })
     .slice(0, MAX_SUBSET_EVENTS);
 
@@ -84,9 +86,12 @@ export function suggestForRecord(
   const windowDays = tolerances.dateWindowDays ?? DEFAULT_DATE_WINDOW_DAYS;
   const band = computeBand(record.openAmount, tolerances);
 
-  const windowed = refDay === null
-    ? candidates
-    : candidates.filter((e) => Math.abs(dayNumber(e.blockTime) - refDay) <= windowDays);
+  // Drop non-positive amounts (a 0-value spam/approval transfer would otherwise pass the
+  // address gate and produce a leg that violates the DB's amount_applied_raw > 0 check,
+  // aborting the whole batch) and events outside the date window.
+  const windowed = candidates.filter((e) =>
+    e.amountRaw > 0n
+    && (refDay === null || Math.abs(dayNumber(e.blockTime) - refDay) <= windowDays));
 
   const legs: SuggestedLeg[] = [];
   let anyFullMatch = false;

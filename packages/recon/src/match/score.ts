@@ -118,12 +118,12 @@ export function scoreCandidate(input: ScoreInput): Scored {
   fire('amount', aScore, `valued ${totalValued} vs open ${record.openAmount} ${record.currency}`);
 
   const expected = record.expectedAddress;
-  const addressHit = expected !== null && events.some((e) => e.fromAddr === expected);
-  fire('address', addressHit ? 1 : 0, addressHit ? `sender matches expected ${String(expected)}` : '');
+  const addressHit = expected !== null && events.some((e) => e.counterpartyAddr === expected);
+  fire('address', addressHit ? 1 : 0, addressHit ? `counterparty matches expected ${String(expected)}` : '');
 
   const known = new Set(record.knownCounterpartyAddresses);
-  const historyHit = events.some((e) => known.has(e.fromAddr));
-  fire('history', historyHit ? 1 : 0, historyHit ? 'sender seen for this counterparty before' : '');
+  const historyHit = events.some((e) => known.has(e.counterpartyAddr));
+  fire('history', historyHit ? 1 : 0, historyHit ? 'counterparty seen for this record before' : '');
 
   // Worst (largest) day delta across the subset drives the date score.
   if (refDay !== null) {
