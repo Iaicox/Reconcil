@@ -759,3 +759,52 @@ const matchDecisionOutput = z
 export const reconConfirmMatchOutput = matchDecisionOutput;
 export const reconRejectMatchOutput = matchDecisionOutput;
 export type ReconMatchDecisionOutput = z.infer<typeof matchDecisionOutput>;
+
+// ---- recon_status (§6.4, read) ----------------------------------------------
+
+/** Filters for the reconciliation snapshot: an optional period and client scope. */
+export const reconStatusInput = z
+  .object({
+    period: periodSchema.optional(),
+    client_id: z.string().optional(),
+  })
+  .strict();
+export type ReconStatusInput = z.infer<typeof reconStatusInput>;
+
+/** Record tallies per lifecycle state; every state is always present (0 when empty). */
+const recordStatusCountsSchema = z
+  .object({
+    open: z.number().int().nonnegative(),
+    partially_matched: z.number().int().nonnegative(),
+    matched: z.number().int().nonnegative(),
+    overpaid: z.number().int().nonnegative(),
+    void: z.number().int().nonnegative(),
+  })
+  .strict();
+export type RecordStatusCounts = z.infer<typeof recordStatusCountsSchema>;
+
+/**
+ * The authoritative reconciliation snapshot (§6.4). `unmatched_settlements` reuses the
+ * shared `event_ref_summary` shape (count + sample EventRefs + an executable
+ * `analytics_list_events` drilldown), so the settlement figure is self-citing (C3).
+ * `open_amounts` are outstanding (amount − confirmed) per currency over open/partial
+ * records; `overpayments` carry the excess (confirmed − amount) per overpaid record.
+ */
+export const reconStatusOutput = z
+  .object({
+    records: recordStatusCountsSchema,
+    open_amounts: z.array(z.object({ currency: z.string(), value: decimalString }).strict()),
+    unmatched_settlements: eventRefSummarySchema,
+    overpayments: z.array(
+      z
+        .object({
+          record_id: z.string(),
+          external_ref: z.string(),
+          excess: decimalString,
+          currency: z.string(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ReconStatusOutput = z.infer<typeof reconStatusOutput>;

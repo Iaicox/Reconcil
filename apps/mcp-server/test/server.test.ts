@@ -19,12 +19,12 @@ async function connect(makeContext: () => ToolContext): Promise<Client> {
 const noDbContext = (): ToolContext => ({ db: {} as never, tenantId: 'test-tenant' });
 
 describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
-  it('lists all 17 tools with correct annotations and object input schemas', async () => {
+  it('lists all 18 tools with correct annotations and object input schemas', async () => {
     const client = await connect(() => {
       throw new Error('handler must not run during listTools');
     });
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(17);
+    expect(tools).toHaveLength(18);
 
     const balances = tools.find((t) => t.name === 'analytics_balances');
     expect(balances?.annotations?.readOnlyHint).toBe(true);
@@ -54,6 +54,12 @@ describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
       expect(decision?.annotations?.destructiveHint).toBe(false);
       expect(decision?.inputSchema.type).toBe('object');
     }
+
+    // recon_status is a read: the authoritative reconciliation snapshot.
+    const status = tools.find((t) => t.name === 'recon_status');
+    expect(status?.annotations?.readOnlyHint).toBe(true);
+    expect(status?.annotations?.destructiveHint).toBe(false);
+    expect(status?.inputSchema.type).toBe('object');
 
     // Every description carries the mandatory untrusted-data sentence (contract §7).
     expect(tools.every((t) => t.description?.includes('untrusted'))).toBe(true);

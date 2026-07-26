@@ -38,6 +38,8 @@ const BASE: Record<string, string> = {
     'Confirm one suggested match leg by id, transitioning it to "confirmed" and pinning its valuation; re-checks that the settlement is not over-applied and returns the parent record\'s freshly derived status (open/partially_matched/matched/overpaid). Only confirmed legs feed exports. Fails NOT_SUGGESTED if the leg was already actioned, MATCH_CONFLICT if confirming would over-apply the event.',
   recon_reject_match:
     'Reject one suggested match leg by id, transitioning it to "rejected"; a rejected leg no longer counts toward the record\'s matched total, the event\'s applied amount, or any export. Returns the parent record\'s freshly derived status. Fails NOT_SUGGESTED if the leg was already actioned.',
+  recon_status:
+    'The authoritative reconciliation snapshot: record counts by status, outstanding open amounts per currency, the on-chain settlements not yet reconciled (with a drilldown to enumerate them), and any overpayments. Read-only; optionally scoped by period and client.',
 };
 
 /** Declaration description for a tool, always suffixed with the untrusted-data note (§7). */
