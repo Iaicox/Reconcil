@@ -36,8 +36,13 @@ export function makeSeedCase(db: Db): CaseSeeder {
     const tenantId = tenant!.id;
 
     if (evalCase.face === 'B') {
-      // seedReconFixture validates the role (throws on an unknown fixture name).
-      await seedReconFixture(db, tenantId, evalCase.setup?.fixture as ReconFixtureRole);
+      // Fail loud if a Face B case names no fixture — relying on seedReconFixture's default
+      // would seed recon-smb silently. seedReconFixture rejects an unknown (non-undefined) name.
+      const fixture = evalCase.setup?.fixture;
+      if (fixture === undefined) {
+        throw new Error(`Face B case ${evalCase.id} must name a recon fixture in setup.fixture`);
+      }
+      await seedReconFixture(db, tenantId, fixture as ReconFixtureRole);
     } else {
       const role = evalCase.setup?.fixture;
       if (role !== undefined) {

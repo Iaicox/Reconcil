@@ -131,8 +131,13 @@ async function main(): Promise<void> {
     console.error(`\nreports → ${outDir}`);
     if (!gate.passed) process.exitCode = 1;
   } finally {
-    await dispose();
-    rmSync(exportDir, { recursive: true, force: true });
+    // Both must run even if dispose() rejects; dispose (container/pool) stays first as the
+    // costlier resource, and the temp export dir is reclaimed regardless.
+    try {
+      await dispose();
+    } finally {
+      rmSync(exportDir, { recursive: true, force: true });
+    }
   }
 }
 

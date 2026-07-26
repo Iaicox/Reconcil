@@ -29,8 +29,9 @@ const PAYER = `0x${'2'.repeat(40)}`;
 const VENDOR = `0x${'9'.repeat(40)}`;
 const EURC = `0x${'c'.repeat(40)}`;
 
-/** EUR whole units → EURC base units (6 decimals). */
-const minor = (whole: number): bigint => BigInt(Math.round(whole * 1_000_000));
+/** EUR whole units → EURC base units (6 decimals); exact bigint, never float (ADR-004).
+ *  Throws on a non-integer amount — a deliberate tripwire (the fixture is whole-euro only). */
+const minor = (whole: number): bigint => BigInt(whole) * 1_000_000n;
 
 export interface SeededReconFixture {
   clientId: string;
