@@ -10,7 +10,7 @@ import {
   directoryListEntitiesInput, directoryUpsertEntityInput,
   exportClosePackInput, exportPdfSummaryInput,
   ledgerStatusInput, ledgerTraceToolCallInput, ledgerTrackWalletInput,
-  reconConfirmMatchInput, reconImportInvoicesInput, reconRejectMatchInput, reconSuggestMatchesInput,
+  reconConfirmMatchInput, reconImportInvoicesInput, reconRejectMatchInput, reconStatusInput, reconSuggestMatchesInput,
 } from '@reconcil/core';
 import { z } from 'zod';
 
@@ -32,6 +32,7 @@ import { ledgerTrackWallet, TOOL_NAME as LEDGER_TRACK_TOOL } from './tools/ledge
 import { reconConfirmMatch, TOOL_NAME as RECON_CONFIRM_TOOL } from './tools/recon-confirm-match.js';
 import { reconImportInvoices, TOOL_NAME as RECON_IMPORT_TOOL } from './tools/recon-import-invoices.js';
 import { reconRejectMatch, TOOL_NAME as RECON_REJECT_TOOL } from './tools/recon-reject-match.js';
+import { reconStatus as reconStatusHandler, TOOL_NAME as RECON_STATUS_TOOL } from './tools/recon-status.js';
 import { reconSuggestMatches, TOOL_NAME as RECON_SUGGEST_TOOL } from './tools/recon-suggest-matches.js';
 
 export interface ToolAnnotations {
@@ -182,6 +183,14 @@ export const reconRejectMatchTool: ToolDescriptor = {
   handler: reconRejectMatch,
 };
 
+/** recon_status (§6.4): a read — the authoritative reconciliation snapshot. */
+export const reconStatusTool: ToolDescriptor = {
+  name: RECON_STATUS_TOOL,
+  annotations: READ_ONLY,
+  inputSchema: z.toJSONSchema(reconStatusInput) as Record<string, unknown>,
+  handler: reconStatusHandler,
+};
+
 /** The registry the server/cli/evals iterate to declare tools. */
 export const tools: ToolDescriptor[] = [
   analyticsBalancesTool,
@@ -201,6 +210,7 @@ export const tools: ToolDescriptor[] = [
   reconSuggestMatchesTool,
   reconConfirmMatchTool,
   reconRejectMatchTool,
+  reconStatusTool,
 ];
 
 export { analyticsBalances } from './tools/analytics-balances.js';
@@ -220,7 +230,9 @@ export { reconImportInvoices } from './tools/recon-import-invoices.js';
 export { reconSuggestMatches } from './tools/recon-suggest-matches.js';
 export { reconConfirmMatch } from './tools/recon-confirm-match.js';
 export { reconRejectMatch } from './tools/recon-reject-match.js';
+export { reconStatus } from './tools/recon-status.js';
 export { importExternalRecords, type ImportResult, type ImportedRecord } from './recon/repo.js';
+export { computeReconStatus, type ReconStatusParams, type ReconStatusResult } from './recon/status-repo.js';
 export { suggestMatches, type SuggestMatchesParams, type SuggestMatchesResult, type SuggestionRow } from './recon/match-repo.js';
 export { applyMatchDecision, type MatchDecisionParams, type MatchDecisionResult } from './recon/decision-repo.js';
 export { resolveEntities, refKey, type ResolvedEntity, type EntityRef } from './directory/resolve.js';

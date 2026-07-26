@@ -11,6 +11,7 @@ export { computeStablecoinMovements } from './stablecoins.js';
 export { listEvents } from './list-events.js';
 export { getLedgerStatus } from './status.js';
 export { encodeCursor, decodeCursor, type EventCursor } from './cursor.js';
+export { externalCondition, periodRange, timeBetween, transferKinds } from './scope-sql.js';
 
 export type {
   AsOfResolved,
