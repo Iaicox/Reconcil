@@ -40,6 +40,8 @@ const BASE: Record<string, string> = {
     'Reject one suggested match leg by id, transitioning it to "rejected"; a rejected leg no longer counts toward the record\'s matched total, the event\'s applied amount, or any export. Returns the parent record\'s freshly derived status. Fails NOT_SUGGESTED if the leg was already actioned.',
   recon_status:
     'The authoritative reconciliation snapshot: record counts by status, outstanding open amounts per currency, the on-chain settlements not yet reconciled (with a drilldown to enumerate them), and any overpayments. Read-only; optionally scoped by period and client.',
+  export_journal_drafts:
+    'Generate a QuickBooks/Xero manual-journal CSV DRAFT from the period\'s CONFIRMED matches only (suggested matches never reach an export), valued at each confirmed leg\'s pinned fiat; splits VAT per the record rate, balances every currency, maps line categories via account_mapping (reporting any unmapped ones), and writes the file plus an audit manifest. Clearly labeled DRAFT — review required (P8).',
 };
 
 /** Declaration description for a tool, always suffixed with the untrusted-data note (§7). */

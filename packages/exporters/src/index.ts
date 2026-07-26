@@ -10,6 +10,7 @@
  */
 export { renderClosePack } from './close-pack.js';
 export { renderPdfSummary } from './pdf-summary.js';
+export { renderJournalDrafts } from './journal-drafts.js';
 export { buildJournalDraft, balanceJournal, type JournalLine, type JournalResult } from './journal.js';
 export { toCsv, type CsvValue } from './csv.js';
 export { sha256 } from './sha256.js';
@@ -34,4 +35,10 @@ export type {
   RenderedExport,
   RoundingResidue,
   Manifest,
+  JournalTarget,
+  JournalCategory,
+  JournalEntryInput,
+  JournalDraftsInput,
+  JournalManifest,
+  JournalDraftsResult,
 } from './types.js';

@@ -8,7 +8,7 @@ import {
   analyticsBalancesInput, analyticsCounterpartiesInput, analyticsFlowsInput, analyticsGasInput,
   analyticsListEventsInput, analyticsStablecoinInput,
   directoryListEntitiesInput, directoryUpsertEntityInput,
-  exportClosePackInput, exportPdfSummaryInput,
+  exportClosePackInput, exportJournalDraftsInput, exportPdfSummaryInput,
   ledgerStatusInput, ledgerTraceToolCallInput, ledgerTrackWalletInput,
   reconConfirmMatchInput, reconImportInvoicesInput, reconRejectMatchInput, reconStatusInput, reconSuggestMatchesInput,
 } from '@reconcil/core';
@@ -25,6 +25,7 @@ import { analyticsStablecoinMovements, TOOL_NAME as STABLECOIN_TOOL } from './to
 import { directoryListEntities, TOOL_NAME as DIRECTORY_LIST_TOOL } from './tools/directory-list-entities.js';
 import { directoryUpsertEntity, TOOL_NAME as DIRECTORY_UPSERT_TOOL } from './tools/directory-upsert-entity.js';
 import { exportClosePack, TOOL_NAME as EXPORT_CLOSE_PACK_TOOL } from './tools/export-close-pack.js';
+import { exportJournalDrafts, TOOL_NAME as EXPORT_JOURNAL_DRAFTS_TOOL } from './tools/export-journal-drafts.js';
 import { exportPdfSummary, TOOL_NAME as EXPORT_PDF_SUMMARY_TOOL } from './tools/export-pdf-summary.js';
 import { ledgerStatus, TOOL_NAME as LEDGER_STATUS_TOOL } from './tools/ledger-status.js';
 import { ledgerTraceToolCall, TOOL_NAME as LEDGER_TRACE_TOOL } from './tools/ledger-trace-tool-call.js';
@@ -191,6 +192,14 @@ export const reconStatusTool: ToolDescriptor = {
   handler: reconStatusHandler,
 };
 
+/** export_journal_drafts (§6.5): a write — recon-backed QBO/Xero journal draft, never destructive. */
+export const exportJournalDraftsTool: ToolDescriptor = {
+  name: EXPORT_JOURNAL_DRAFTS_TOOL,
+  annotations: WRITE,
+  inputSchema: z.toJSONSchema(exportJournalDraftsInput) as Record<string, unknown>,
+  handler: exportJournalDrafts,
+};
+
 /** The registry the server/cli/evals iterate to declare tools. */
 export const tools: ToolDescriptor[] = [
   analyticsBalancesTool,
@@ -211,6 +220,7 @@ export const tools: ToolDescriptor[] = [
   reconConfirmMatchTool,
   reconRejectMatchTool,
   reconStatusTool,
+  exportJournalDraftsTool,
 ];
 
 export { analyticsBalances } from './tools/analytics-balances.js';
@@ -231,6 +241,8 @@ export { reconSuggestMatches } from './tools/recon-suggest-matches.js';
 export { reconConfirmMatch } from './tools/recon-confirm-match.js';
 export { reconRejectMatch } from './tools/recon-reject-match.js';
 export { reconStatus } from './tools/recon-status.js';
+export { exportJournalDrafts } from './tools/export-journal-drafts.js';
+export { computeJournalData, type JournalData, type JournalDataInput } from './tools/journal-drafts-data.js';
 export { importExternalRecords, type ImportResult, type ImportedRecord } from './recon/repo.js';
 export { computeReconStatus, type ReconStatusParams, type ReconStatusResult } from './recon/status-repo.js';
 export { suggestMatches, type SuggestMatchesParams, type SuggestMatchesResult, type SuggestionRow } from './recon/match-repo.js';
