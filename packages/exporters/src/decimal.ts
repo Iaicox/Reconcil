@@ -20,6 +20,16 @@ export function sumDecimals(values: string[]): DecimalString {
   return values.reduce((acc, v) => acc.plus(v), new D(0)).toFixed() as DecimalString;
 }
 
+/**
+ * Net (VAT-exclusive) amount from a VAT-inclusive gross and a percent rate, rounded
+ * half-up to 2dp: `gross × 100 / (100 + rate)`. The rate is a rate, not money, so it
+ * rides as a number (ADR-004); the caller derives VAT as `gross − net` so the split
+ * sums back to the gross exactly.
+ */
+export function netOfVat(gross: string, ratePercent: number): DecimalString {
+  return new D(gross).times(100).div(new D(100).plus(ratePercent)).toFixed(2) as DecimalString;
+}
+
 /** Exact `a − b`, unrounded. */
 export function subtract(a: string, b: string): DecimalString {
   return new D(a).minus(b).toFixed() as DecimalString;

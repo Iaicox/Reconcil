@@ -30,8 +30,12 @@ export interface ExportRunOptions {
   outDir?: string;
 }
 
-function baseDir(outDir?: string): string {
-  // out_dir is operator-facing (self-host); the <export_id> subdir isolates runs.
+/**
+ * Resolve the export root: an operator-supplied `out_dir`, else `RECONCIL_EXPORT_DIR`,
+ * else `<cwd>/exports`. Callers isolate a run under an `<export_id>` subdir. Shared by
+ * every export tool so the on-disk layout is defined once.
+ */
+export function baseDir(outDir?: string): string {
   return resolve(outDir ?? process.env.RECONCIL_EXPORT_DIR ?? join(process.cwd(), 'exports'));
 }
 

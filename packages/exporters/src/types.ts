@@ -152,3 +152,73 @@ export interface RenderedExport {
   manifest: Manifest;
   roundingResidues: RoundingResidue[];
 }
+
+// ----------------------------------------------- recon-backed journal drafts ---
+// `export_journal_drafts` (§6.5): confirmed matches → a QBO/Xero manual-journal CSV
+// draft. Valued from the confirmed legs' pinned fiat (face value, P5) — no fresh
+// pricing pass, so `price_refs`/`fx_refs` are empty. Every artifact is a DRAFT (P8).
+
+export type JournalTarget = 'qbo' | 'xero';
+
+/** The mappable double-entry line roles. `account_mapping[category] → account code`. */
+export type JournalCategory =
+  | 'crypto_asset'
+  | 'accounts_receivable'
+  | 'accounts_payable'
+  | 'vat_output'
+  | 'vat_input'
+  | 'rounding';
+
+/**
+ * One confirmed settlement to journalize. `grossFiat` is the confirmed leg's stored
+ * `fiat_value` (full precision); the render layer rounds it to 2dp (the only rounding
+ * site) and splits net/VAT from `vatRate`. `externalRef`/`counterparty` are hostile
+ * import strings — the render layer sanitizes them before they reach a cell (P7/C6).
+ */
+export interface JournalEntryInput {
+  externalRef: string;
+  counterparty: string;
+  direction: 'receivable' | 'payable';
+  grossFiat: string;
+  vatRate: number | null; // percent, e.g. 21; null/0 ⇒ no VAT split
+  currency: string;
+  date: string; // settlement date (block_time), ISO
+}
+
+export interface JournalDraftsInput {
+  target: JournalTarget;
+  period: ExportPeriod;
+  scope: ExportScope;
+  entries: JournalEntryInput[];
+  accountMapping?: Record<string, string>; // category → account code
+  provenance: Provenance;
+}
+
+/** The journal export's audit manifest (persisted to `exports.manifest`, not a file). */
+export interface JournalManifest {
+  schema_version: 1;
+  export_id: string;
+  tool_call_id: string;
+  kind: 'journal_qbo' | 'journal_xero';
+  target: JournalTarget;
+  period: ExportPeriod;
+  scope: { addresses: string[]; client_id?: string };
+  generated_at: string;
+  draft: true;
+  coverage: CoverageRef[];
+  price_refs: PriceRef[]; // empty: stablecoin face value (P5)
+  fx_refs: FxRef[]; // empty
+  rounding_residues: RoundingResidue[];
+  account_mapping: Record<string, string>;
+  unmapped_categories: string[];
+  lines: number;
+  file: { name: string; sha256: string };
+}
+
+export interface JournalDraftsResult {
+  file: RenderedFile;
+  lines: number; // journal lines emitted (excludes the DRAFT banner + header)
+  unmappedCategories: string[];
+  roundingResidues: RoundingResidue[];
+  manifest: JournalManifest;
+}

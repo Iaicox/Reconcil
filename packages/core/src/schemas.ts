@@ -582,6 +582,37 @@ export const exportPdfSummaryOutput = z
   .strict();
 export type ExportPdfSummaryOutput = z.infer<typeof exportPdfSummaryOutput>;
 
+/**
+ * `export_journal_drafts` (contract §6.5) — a QBO/Xero manual-journal CSV DRAFT built
+ * from CONFIRMED matches only (P8). No `valuation`: the journal values from each
+ * confirmed leg's pinned fiat (face value, P5). `account_mapping` maps our line
+ * categories (crypto_asset / accounts_receivable / accounts_payable / vat_output /
+ * vat_input / rounding) to the caller's chart-of-accounts codes; unmapped-but-present
+ * categories come back in `unmapped_categories`. `balanced` is a guarantee (a rounding
+ * line balances each currency, with a `ROUNDING_RESIDUE` warning when one is added).
+ */
+export const exportJournalDraftsInput = z
+  .object({
+    period: periodSchema,
+    target: z.enum(['qbo', 'xero']),
+    client_id: z.string().optional(),
+    account_mapping: z.record(z.string(), z.string()).optional(),
+    out_dir: z.string().optional(),
+  })
+  .strict();
+export type ExportJournalDraftsInput = z.infer<typeof exportJournalDraftsInput>;
+
+export const exportJournalDraftsOutput = z
+  .object({
+    export_id: z.string(),
+    file: exportFileSchema,
+    lines: z.number().int().nonnegative(),
+    unmapped_categories: z.array(z.string()),
+    balanced: z.literal(true),
+  })
+  .strict();
+export type ExportJournalDraftsOutput = z.infer<typeof exportJournalDraftsOutput>;
+
 // ---- recon_* (§6.4, Face B) -------------------------------------------------
 
 /** Direction of an external record (mirrors the `external_records.direction` CHECK). */
