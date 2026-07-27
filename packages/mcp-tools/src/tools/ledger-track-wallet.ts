@@ -22,10 +22,10 @@ import { ingestionCheckpoints, wallets } from '@reconcil/db';
 import { and, eq } from 'drizzle-orm';
 
 import type { ToolContext } from '../context.js';
-import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
+import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
 import { resolveClientId } from '../scope.js';
-import { persistToolCall } from '../tool-calls.js';
+import { runWriteTool } from '../write-tx.js';
 
 export const TOOL_NAME = 'ledger_track_wallet';
 
@@ -53,58 +53,64 @@ export async function ledgerTrackWallet(
   // Reject a client_id that isn't the tenant's own before any write (ADR-006).
   const clientId = await resolveClientId(ctx, input.client_id);
 
-  // Idempotent wallet upsert; a re-track returns the existing id (never a duplicate).
-  await ctx.db
-    .insert(wallets)
-    .values({
-      tenantId: ctx.tenantId,
-      address,
-      ...(input.label !== undefined ? { label: input.label } : {}),
-      ...(clientId !== null ? { clientId } : {}),
-    })
-    .onConflictDoNothing({ target: [wallets.tenantId, wallets.address] });
-  const [w] = await ctx.db
-    .select({ id: wallets.id })
-    .from(wallets)
-    .where(and(eq(wallets.tenantId, ctx.tenantId), eq(wallets.address, address)))
-    .limit(1);
-  if (!w) throw new ToolError('INTERNAL', 'wallet upsert did not persist');
-
-  // Seed checkpoints and report only the streams THIS call actually created.
-  // Checkpoints are global; a stream already live/backfilling is a no-op insert the
-  // scanner never enqueues, so `.returning()` keeps `enqueued` truthful. Anchored
-  // streams enter `anchoring` with the requested date; the worker resolves it to a
-  // block and writes the opening_balance baseline (ADR-008).
   const seed = anchored
     ? { status: 'anchoring' as const, anchorFrom: input.anchored_from }
     : { status: 'queued' as const };
   const jobIdFor = (chainId: number, stream: 'native' | 'erc20'): string =>
     anchored ? anchorJobId(chainId, address, stream) : backfillJobId(chainId, address, stream);
 
-  const enqueued: LedgerTrackWalletOutput['enqueued'] = [];
-  for (const chainId of targetChains) {
-    for (const stream of STREAMS) {
-      const inserted = await ctx.db
-        .insert(ingestionCheckpoints)
-        .values({ chainId, address, stream, ...seed })
-        .onConflictDoNothing()
-        .returning({ stream: ingestionCheckpoints.stream });
-      if (inserted.length > 0) {
-        enqueued.push({ chain_id: chainId, stream, job_id: jobIdFor(chainId, stream) });
+  // The wallet upsert, the checkpoint seeding, and the tool_call audit row all commit in one
+  // transaction (C2) — this tool previously issued them as separate autocommit statements, so
+  // it also gains intra-tool atomicity: a partial track can no longer be left behind.
+  return runWriteTool<LedgerTrackWalletOutput>(ctx, {
+    toolName: TOOL_NAME,
+    args: input as Record<string, unknown>,
+    body: async (txCtx) => {
+      // Idempotent wallet upsert; a re-track returns the existing id (never a duplicate).
+      await txCtx.db
+        .insert(wallets)
+        .values({
+          tenantId: ctx.tenantId,
+          address,
+          ...(input.label !== undefined ? { label: input.label } : {}),
+          ...(clientId !== null ? { clientId } : {}),
+        })
+        .onConflictDoNothing({ target: [wallets.tenantId, wallets.address] });
+      const [w] = await txCtx.db
+        .select({ id: wallets.id })
+        .from(wallets)
+        .where(and(eq(wallets.tenantId, ctx.tenantId), eq(wallets.address, address)))
+        .limit(1);
+      if (!w) throw new ToolError('INTERNAL', 'wallet upsert did not persist');
+
+      // Seed checkpoints and report only the streams THIS call actually created.
+      // Checkpoints are global; a stream already live/backfilling is a no-op insert the
+      // scanner never enqueues, so `.returning()` keeps `enqueued` truthful. Anchored
+      // streams enter `anchoring` with the requested date; the worker resolves it to a
+      // block and writes the opening_balance baseline (ADR-008).
+      const enqueued: LedgerTrackWalletOutput['enqueued'] = [];
+      for (const chainId of targetChains) {
+        for (const stream of STREAMS) {
+          const inserted = await txCtx.db
+            .insert(ingestionCheckpoints)
+            .values({ chainId, address, stream, ...seed })
+            .onConflictDoNothing()
+            .returning({ stream: ingestionCheckpoints.stream });
+          if (inserted.length > 0) {
+            enqueued.push({ chain_id: chainId, stream, job_id: jobIdFor(chainId, stream) });
+          }
+        }
       }
-    }
-  }
 
-  const data: LedgerTrackWalletOutput = { wallet_id: w.id, enqueued };
+      const data: LedgerTrackWalletOutput = { wallet_id: w.id, enqueued };
 
-  try {
-    ledgerTrackWalletOutput.parse(data);
-  } catch (err) {
-    throw new ToolError('INTERNAL', `ledger_track_wallet produced an output that violates its contract: ${String(err)}`);
-  }
-  const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: [], result: data,
+      try {
+        ledgerTrackWalletOutput.parse(data);
+      } catch (err) {
+        throw new ToolError('INTERNAL', `ledger_track_wallet produced an output that violates its contract: ${String(err)}`);
+      }
+
+      return { data, envelope: { coverage: [] } };
+    },
   });
-
-  return buildEnvelope(data, { toolCallId, coverage: [] });
 }

@@ -13,9 +13,9 @@ import {
 
 import type { ToolContext } from '../context.js';
 import { upsertEntity } from '../directory/repo.js';
-import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
+import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
-import { persistToolCall } from '../tool-calls.js';
+import { runWriteTool } from '../write-tx.js';
 
 export const TOOL_NAME = 'directory_upsert_entity';
 
@@ -27,23 +27,22 @@ export async function directoryUpsertEntity(
   if (!parsed.success) throw new ToolError('INVALID_INPUT', parsed.error.message);
   const input = parsed.data;
 
-  const { entityId, created, warnings } = await upsertEntity(ctx, input);
-  const data: DirectoryUpsertEntityOutput = { entity_id: entityId, created };
+  // The entity/address mutation and the tool_call audit row commit in one transaction (C2):
+  // a failure — including the output-contract check below — rolls the upsert back.
+  return runWriteTool<DirectoryUpsertEntityOutput>(ctx, {
+    toolName: TOOL_NAME,
+    args: input as Record<string, unknown>,
+    body: async (txCtx) => {
+      const { entityId, created, warnings } = await upsertEntity(txCtx, input);
+      const data: DirectoryUpsertEntityOutput = { entity_id: entityId, created };
 
-  try {
-    directoryUpsertEntityOutput.parse(data);
-  } catch (err) {
-    throw new ToolError('INTERNAL', `directory_upsert_entity produced an output that violates its contract: ${String(err)}`);
-  }
-  // FOLLOW-UP (write-tool atomicity, C2): the mutation (upsertEntity's own transaction)
-  // and this audit write are two separate transactions, so a persistToolCall failure in
-  // the brief window after the mutation commits leaves an un-audited write. The clean fix
-  // threads a single transaction through the shared persistToolCall (whose ToolContext.db
-  // is typed Db, not a PgTransaction) — a typing-invasive change to shared plumbing worth
-  // building once when the recon_* write tools land and all need atomic write+audit.
-  const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: [], result: data,
+      try {
+        directoryUpsertEntityOutput.parse(data);
+      } catch (err) {
+        throw new ToolError('INTERNAL', `directory_upsert_entity produced an output that violates its contract: ${String(err)}`);
+      }
+
+      return { data, envelope: { coverage: [], warnings } };
+    },
   });
-
-  return buildEnvelope(data, { toolCallId, coverage: [], warnings });
 }

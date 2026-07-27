@@ -16,10 +16,10 @@ import { exportsTable } from '@reconcil/db';
 import { renderJournalDrafts } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
-import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
+import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
-import { persistToolCall } from '../tool-calls.js';
 import { ulid } from '../ulid.js';
+import { runWriteTool } from '../write-tx.js';
 import { baseDir } from './export-run.js';
 import { computeJournalData } from './journal-drafts-data.js';
 
@@ -82,23 +82,6 @@ export async function exportJournalDrafts(
     throw new ToolError('INTERNAL', `${TOOL_NAME} produced an output that violates its contract: ${String(err)}`);
   }
 
-  // FOLLOW-UP (write-tool atomicity, C2): the exports insert and the tool_call persist are
-  // two separate transactions — the same shared limitation as export_close_pack and the
-  // recon_* write tools; worth threading one transaction when that slice lands.
-  await ctx.db.insert(exportsTable).values({
-    id: exportId,
-    tenantId: ctx.tenantId,
-    clientId: data.scope.clientId ?? null,
-    kind: input.target === 'qbo' ? 'journal_qbo' : 'journal_xero',
-    periodStart: input.period.from,
-    periodEnd: input.period.to,
-    params: input as Record<string, unknown>,
-    status: 'done',
-    filePath: dir,
-    manifest: rendered.manifest,
-    completedAt: new Date(),
-  });
-
   const residueWarnings: Warning[] = rendered.roundingResidues
     .filter((r) => Number(r.residue) !== 0)
     .map((r) => ({
@@ -108,13 +91,30 @@ export async function exportJournalDrafts(
     }));
   const warnings = [...data.coverageWarnings, ...residueWarnings];
 
-  await persistToolCall(ctx, {
-    id: toolCallId,
+  // The `exports` registration and the tool_call audit row commit in one transaction (C2),
+  // under the up-front id the manifest cites. The file is already on disk (best-effort); on
+  // rollback its manifest cites a tool_call_id absent from `tool_calls` (expected — nothing
+  // reconciles disk manifests against the audit table).
+  return runWriteTool<ExportJournalDraftsOutput>(ctx, {
     toolName: TOOL_NAME,
     args: input as Record<string, unknown>,
-    coverage: data.coverageRefs,
-    result: outputData,
-  });
+    toolCallId,
+    body: async (txCtx) => {
+      await txCtx.db.insert(exportsTable).values({
+        id: exportId,
+        tenantId: ctx.tenantId,
+        clientId: data.scope.clientId ?? null,
+        kind: input.target === 'qbo' ? 'journal_qbo' : 'journal_xero',
+        periodStart: input.period.from,
+        periodEnd: input.period.to,
+        params: input as Record<string, unknown>,
+        status: 'done',
+        filePath: dir,
+        manifest: rendered.manifest,
+        completedAt: new Date(),
+      });
 
-  return buildEnvelope(validated, { toolCallId, coverage: data.coverageRefs, warnings });
+      return { data: validated, envelope: { coverage: data.coverageRefs, warnings } };
+    },
+  });
 }

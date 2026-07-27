@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import type { CoverageRef } from '@reconcil/core';
 import { toolCalls } from '@reconcil/db';
 
-import type { ToolContext } from './context.js';
+import type { DbContext } from './context.js';
 import { ulid } from './ulid.js';
 
 /** Deterministic stringify (sorted keys, undefined dropped) for a stable digest. */
@@ -31,7 +31,7 @@ export interface PersistParams {
   id?: string;
 }
 
-export async function persistToolCall(ctx: ToolContext, params: PersistParams): Promise<string> {
+export async function persistToolCall(ctx: DbContext, params: PersistParams): Promise<string> {
   const id = params.id ?? ulid();
   const resultDigest = createHash('sha256').update(canonicalStringify(params.result)).digest('hex');
   await ctx.db.insert(toolCalls).values({

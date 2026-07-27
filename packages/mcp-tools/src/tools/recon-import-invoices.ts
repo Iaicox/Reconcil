@@ -14,12 +14,12 @@ import {
 import { parseInvoiceCsv, type ParseOptions } from '@reconcil/recon';
 
 import type { ToolContext } from '../context.js';
-import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
+import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
 import { readImportFile } from '../recon/import-fs.js';
 import { importExternalRecords } from '../recon/repo.js';
 import { resolveClientId } from '../scope.js';
-import { persistToolCall } from '../tool-calls.js';
+import { runWriteTool } from '../write-tx.js';
 
 export const TOOL_NAME = 'recon_import_invoices';
 
@@ -65,49 +65,49 @@ export async function reconImportInvoices(
   const clientId = await resolveClientId(ctx, input.client_id);
 
   const { drafts, errors } = parseInvoiceCsv(content, parseOpts);
-  const { inserted, skippedDuplicates } = await importExternalRecords(ctx, drafts, clientId);
 
-  const warnings: Warning[] = [];
-  let heavy = false;
-  const records: ReconImportedRecordView[] = inserted.map((r) => {
-    const view: ReconImportedRecordView = { id: r.id, external_ref: r.externalRef, amount: r.amount, currency: r.currency };
-    if (r.issuedOn !== null) view.issued_on = r.issuedOn;
-    if (r.counterpartyName !== null) {
-      const s = sanitize(r.counterpartyName, { maxLength: NAME_MAX });
-      if (s.heavy) heavy = true;
-      view.untrusted = { counterparty_name: s.display };
-    }
-    return view;
-  });
-  if (heavy) warnings.push({ code: 'SANITIZED_HEAVY', message: 'one or more counterparty names were heavily sanitized' });
-
-  const data: ReconImportInvoicesOutput = {
-    inserted: inserted.length,
-    skipped_duplicates: skippedDuplicates,
-    errors,
-    records,
-  };
-
-  try {
-    reconImportInvoicesOutput.parse(data);
-  } catch (err) {
-    throw new ToolError('INTERNAL', `recon_import_invoices produced an output that violates its contract: ${String(err)}`);
-  }
-
-  // Persist the call for audit (C2). The bulky CSV `content` is redacted — the raw
-  // rows live in each external_records.payload, so args only records the call shape.
-  // FOLLOW-UP (write-tool atomicity, C2): the insert (importExternalRecords) and this
-  // audit write are separate transactions, so a persistToolCall failure in the window
-  // after the insert commits leaves an un-audited import. This is the shared write-tool
-  // pattern — directory_upsert_entity, ledger_track_wallet, and export_run all carry it;
-  // the clean fix threads one transaction through persistToolCall (ToolContext.db is
-  // typed Db, not a PgTransaction — typing-invasive) and is worth building once across
-  // all write tools rather than only here.
+  // The bulky CSV `content` is redacted from the audit args — the raw rows live in each
+  // external_records.payload, so args only records the call shape.
   const persistedArgs: Record<string, unknown> = { ...input };
   if (input.content !== undefined) persistedArgs.content = `<${String(input.content.length)} chars omitted>`;
-  const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: persistedArgs, coverage: [], result: data,
-  });
 
-  return buildEnvelope(data, { toolCallId, coverage: [], warnings });
+  // The insert and the tool_call audit row commit in one transaction (C2): a failure here
+  // — including the output-contract check below — rolls the import back rather than leaving
+  // it un-audited.
+  return runWriteTool<ReconImportInvoicesOutput>(ctx, {
+    toolName: TOOL_NAME,
+    args: persistedArgs,
+    body: async (txCtx) => {
+      const { inserted, skippedDuplicates } = await importExternalRecords(txCtx, drafts, clientId);
+
+      const warnings: Warning[] = [];
+      let heavy = false;
+      const records: ReconImportedRecordView[] = inserted.map((r) => {
+        const view: ReconImportedRecordView = { id: r.id, external_ref: r.externalRef, amount: r.amount, currency: r.currency };
+        if (r.issuedOn !== null) view.issued_on = r.issuedOn;
+        if (r.counterpartyName !== null) {
+          const s = sanitize(r.counterpartyName, { maxLength: NAME_MAX });
+          if (s.heavy) heavy = true;
+          view.untrusted = { counterparty_name: s.display };
+        }
+        return view;
+      });
+      if (heavy) warnings.push({ code: 'SANITIZED_HEAVY', message: 'one or more counterparty names were heavily sanitized' });
+
+      const data: ReconImportInvoicesOutput = {
+        inserted: inserted.length,
+        skipped_duplicates: skippedDuplicates,
+        errors,
+        records,
+      };
+
+      try {
+        reconImportInvoicesOutput.parse(data);
+      } catch (err) {
+        throw new ToolError('INTERNAL', `recon_import_invoices produced an output that violates its contract: ${String(err)}`);
+      }
+
+      return { data, envelope: { coverage: [], warnings } };
+    },
+  });
 }
