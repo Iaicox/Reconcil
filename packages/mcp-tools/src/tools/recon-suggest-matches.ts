@@ -14,13 +14,13 @@ import {
 import type { Tolerances } from '@reconcil/recon';
 
 import type { ToolContext } from '../context.js';
-import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
+import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
 import { suggestMatches, type SuggestMatchesParams } from '../recon/match-repo.js';
 import { selectRefs } from '../refs.js';
 import { resolveClientId } from '../scope.js';
 import { toTokenView } from '../token-view.js';
-import { persistToolCall } from '../tool-calls.js';
+import { runWriteTool } from '../write-tx.js';
 
 export const TOOL_NAME = 'recon_suggest_matches';
 
@@ -51,59 +51,59 @@ export async function reconSuggestMatches(
   if (clientId !== undefined) params.clientId = clientId;
   if (input.record_ids !== undefined) params.recordIds = input.record_ids;
 
-  const { rows, unmatchedRecords, unmatchedSettlements } = await suggestMatches(ctx, params);
+  // The suggestion delete+insert and the tool_call audit row commit in one transaction (C2):
+  // a failure — including the output-contract check below — rolls the suggestions back rather
+  // than leaving matches rows with no audit record.
+  return runWriteTool<ReconSuggestMatchesOutput>(ctx, {
+    toolName: TOOL_NAME,
+    args: { ...input },
+    body: async (txCtx) => {
+      const { rows, unmatchedRecords, unmatchedSettlements } = await suggestMatches(txCtx, params);
 
-  const suggestions: MatchSuggestionView[] = rows.map((s) => ({
-    match_id: s.matchId,
-    record: {
-      id: s.record.id,
-      external_ref: s.record.externalRef,
-      amount: s.record.amount,
-      currency: s.record.currency,
-      open_amount: s.record.openAmount,
+      const suggestions: MatchSuggestionView[] = rows.map((s) => ({
+        match_id: s.matchId,
+        record: {
+          id: s.record.id,
+          external_ref: s.record.externalRef,
+          amount: s.record.amount,
+          currency: s.record.currency,
+          open_amount: s.record.openAmount,
+        },
+        event: {
+          chain_id: s.event.chainId,
+          tx_hash: s.event.txHash,
+          log_index: s.event.logIndex,
+          token: toTokenView(s.event.token),
+          amount: s.event.amount,
+          block_time: s.event.blockTime,
+          from: { address: s.event.fromAddr },
+        },
+        amount_applied: s.amountApplied,
+        fiat_value: s.fiatValue,
+        confidence: s.confidence,
+        rationale: s.rationale,
+      }));
+
+      const data: ReconSuggestMatchesOutput = {
+        suggestions,
+        unmatched_records: unmatchedRecords,
+        unmatched_settlements: unmatchedSettlements,
+      };
+
+      try {
+        reconSuggestMatchesOutput.parse(data);
+      } catch (err) {
+        throw new ToolError('INTERNAL', `recon_suggest_matches produced an output that violates its contract: ${String(err)}`);
+      }
+
+      // Each suggestion cites its backing settlement event (C1/C3): inline when ≤ cap,
+      // else a summary whose drilldown re-enumerates the events via analytics_list_events.
+      const refs = selectRefs(
+        [{ refs: rows.map((s) => ({ chainId: s.event.chainId, txHash: s.event.txHash, logIndex: s.event.logIndex })), totalCount: rows.length }],
+        { tool: 'analytics_list_events', args: input.period !== undefined ? { period: input.period } : {} },
+      );
+
+      return { data, envelope: { coverage: [], ...refs } };
     },
-    event: {
-      chain_id: s.event.chainId,
-      tx_hash: s.event.txHash,
-      log_index: s.event.logIndex,
-      token: toTokenView(s.event.token),
-      amount: s.event.amount,
-      block_time: s.event.blockTime,
-      from: { address: s.event.fromAddr },
-    },
-    amount_applied: s.amountApplied,
-    fiat_value: s.fiatValue,
-    confidence: s.confidence,
-    rationale: s.rationale,
-  }));
-
-  const data: ReconSuggestMatchesOutput = {
-    suggestions,
-    unmatched_records: unmatchedRecords,
-    unmatched_settlements: unmatchedSettlements,
-  };
-
-  try {
-    reconSuggestMatchesOutput.parse(data);
-  } catch (err) {
-    throw new ToolError('INTERNAL', `recon_suggest_matches produced an output that violates its contract: ${String(err)}`);
-  }
-
-  // Each suggestion cites its backing settlement event (C1/C3): inline when ≤ cap,
-  // else a summary whose drilldown re-enumerates the events via analytics_list_events.
-  const refs = selectRefs(
-    [{ refs: rows.map((s) => ({ chainId: s.event.chainId, txHash: s.event.txHash, logIndex: s.event.logIndex })), totalCount: rows.length }],
-    { tool: 'analytics_list_events', args: input.period !== undefined ? { period: input.period } : {} },
-  );
-
-  // FOLLOW-UP (write-tool atomicity, C2): suggestMatches commits its own transaction, then
-  // this audit write runs separately — a failure here (or in the output.parse above) after
-  // the commit leaves matches rows with no tool_call. Shared with the other write tools
-  // (recon_import_invoices, directory_upsert_entity, ...); the fix is to thread one
-  // transaction through persistToolCall, built once across all of them, not only here.
-  const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: { ...input }, coverage: [], result: data,
   });
-
-  return buildEnvelope(data, { toolCallId, coverage: [], ...refs });
 }

@@ -14,9 +14,9 @@ import { exportsTable } from '@reconcil/db';
 import type { RenderedExport } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
-import { buildEnvelope, type ToolEnvelope } from '../envelope.js';
+import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
-import { persistToolCall } from '../tool-calls.js';
+import { runWriteTool } from '../write-tx.js';
 import type { CloseData } from './close-pack-data.js';
 
 export interface ExportRunOptions {
@@ -68,26 +68,6 @@ export async function runExport<T>(
     throw new ToolError('INTERNAL', `${opts.toolName} produced an output that violates its contract: ${String(err)}`);
   }
 
-  // FOLLOW-UP (write-tool atomicity, C2): the exports insert and the tool_call persist
-  // are two separate transactions, so a persistToolCall failure in the brief window
-  // after the insert commits leaves a `done` row without its audit record. Same
-  // limitation as directory_upsert_entity; the clean fix threads a single transaction
-  // through the shared persistToolCall (ToolContext.db typed Db, not a PgTransaction —
-  // typing-invasive) and is worth building once when the recon_* write tools land.
-  await ctx.db.insert(exportsTable).values({
-    id: provenance.exportId,
-    tenantId: ctx.tenantId,
-    clientId: data.scope.clientId ?? null,
-    kind: opts.kind,
-    periodStart: data.period.start,
-    periodEnd: data.period.end,
-    params: opts.rawArgs,
-    status: 'done',
-    filePath: dir,
-    manifest: rendered.manifest,
-    completedAt: new Date(),
-  });
-
   const residueWarnings: Warning[] = rendered.roundingResidues
     .filter((r) => Number(r.residue) !== 0)
     .map((r) => ({
@@ -97,20 +77,38 @@ export async function runExport<T>(
     }));
   const warnings = [...data.warnings, ...residueWarnings];
 
-  await persistToolCall(ctx, {
-    id: provenance.toolCallId,
+  // The `exports` registration and the tool_call audit row commit in one transaction (C2),
+  // under the id the manifest already cites. The files are already on disk (best-effort); an
+  // orphaned file dir from a rolled-back tx is harmless — the atomicity target is the two rows.
+  return runWriteTool<T>(ctx, {
     toolName: opts.toolName,
     args: opts.rawArgs,
-    coverage: data.coverageRefs,
-    result: outputData,
-  });
-
-  return buildEnvelope(validated, {
     toolCallId: provenance.toolCallId,
-    coverage: data.coverageRefs,
-    ...data.refsParts,
-    priceRefs: data.priceRefs,
-    fxRefs: data.fxRefs,
-    warnings,
+    body: async (txCtx) => {
+      await txCtx.db.insert(exportsTable).values({
+        id: provenance.exportId,
+        tenantId: ctx.tenantId,
+        clientId: data.scope.clientId ?? null,
+        kind: opts.kind,
+        periodStart: data.period.start,
+        periodEnd: data.period.end,
+        params: opts.rawArgs,
+        status: 'done',
+        filePath: dir,
+        manifest: rendered.manifest,
+        completedAt: new Date(),
+      });
+
+      return {
+        data: validated,
+        envelope: {
+          coverage: data.coverageRefs,
+          ...data.refsParts,
+          priceRefs: data.priceRefs,
+          fxRefs: data.fxRefs,
+          warnings,
+        },
+      };
+    },
   });
 }

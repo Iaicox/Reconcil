@@ -21,7 +21,7 @@ import {
 } from '@reconcil/recon';
 import { and, eq, gt, gte, inArray, lte, or, sql } from 'drizzle-orm';
 
-import type { ToolContext } from '../context.js';
+import type { DbContext } from '../context.js';
 
 const DEFAULT_DATE_WINDOW_DAYS = 14;
 const MS_PER_DAY = 86_400_000;
@@ -88,12 +88,15 @@ function subtractDecimal(a: string, b: string): string {
 }
 
 export async function suggestMatches(
-  ctx: ToolContext,
+  ctx: DbContext,
   params: SuggestMatchesParams,
 ): Promise<SuggestMatchesResult> {
   const { period, clientId, recordIds, tolerances } = params;
   const windowDays = tolerances?.dateWindowDays ?? DEFAULT_DATE_WINDOW_DAYS;
 
+  // The caller (runWriteTool) already holds an open transaction, so this nests as a
+  // savepoint — the suggestion delete+insert stays atomic, and the whole thing rolls back
+  // with the outer tx if the tool_call persist fails (C2).
   return ctx.db.transaction(async (tx) => {
     // 1. Open records in scope (tenant-scoped; optional client / record-id / period filters).
     const recRows = await tx

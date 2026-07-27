@@ -11,7 +11,7 @@
 import type { ExternalRecordDraft } from '@reconcil/recon';
 import { externalRecords } from '@reconcil/db';
 
-import type { ToolContext } from '../context.js';
+import type { DbContext } from '../context.js';
 
 /** A persisted row echoed back to the tool (counterpartyName still raw). */
 export interface ImportedRecord {
@@ -33,7 +33,7 @@ export interface ImportResult {
 const dedupeKey = (d: ExternalRecordDraft): string => JSON.stringify([d.kind, d.source, d.externalRef]);
 
 export async function importExternalRecords(
-  ctx: ToolContext,
+  ctx: DbContext,
   drafts: ExternalRecordDraft[],
   clientId: string | null,
 ): Promise<ImportResult> {

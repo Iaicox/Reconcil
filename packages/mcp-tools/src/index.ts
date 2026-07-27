@@ -246,7 +246,7 @@ export { computeJournalData, type JournalData, type JournalDataInput } from './t
 export { importExternalRecords, type ImportResult, type ImportedRecord } from './recon/repo.js';
 export { computeReconStatus, type ReconStatusParams, type ReconStatusResult } from './recon/status-repo.js';
 export { suggestMatches, type SuggestMatchesParams, type SuggestMatchesResult, type SuggestionRow } from './recon/match-repo.js';
-export { applyMatchDecision, type MatchDecisionParams, type MatchDecisionResult } from './recon/decision-repo.js';
+export { decideMatchInTx, type MatchDecisionParams, type MatchDecisionResult } from './recon/decision-repo.js';
 export { resolveEntities, refKey, type ResolvedEntity, type EntityRef } from './directory/resolve.js';
 export { listEntities, upsertEntity, type UpsertResult } from './directory/repo.js';
 export { buildEnvelope, type ToolEnvelope, type Citations, type EnvelopeParts } from './envelope.js';
@@ -258,4 +258,5 @@ export { selectRefs, dedupeRefs, REF_CAP } from './refs.js';
 export { ulid } from './ulid.js';
 export { describeTool, UNTRUSTED_NOTE } from './descriptions.js';
 export { ToolError, type ErrorCode } from './errors.js';
-export type { ToolContext } from './context.js';
+export type { ToolContext, TxContext, DbContext } from './context.js';
+export { runWriteTool, withRetry, type WriteToolSpec, type WriteToolResult } from './write-tx.js';

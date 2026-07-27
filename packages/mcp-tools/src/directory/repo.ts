@@ -16,7 +16,7 @@ import {
 import { entities, entityAddresses } from '@reconcil/db';
 import { and, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 
-import type { ToolContext } from '../context.js';
+import type { DbContext, ToolContext } from '../context.js';
 import { ToolError } from '../errors.js';
 
 const NAME_MAX = 64;
@@ -94,7 +94,7 @@ export interface UpsertResult {
 }
 
 export async function upsertEntity(
-  ctx: ToolContext,
+  ctx: DbContext,
   input: DirectoryUpsertEntityInput,
 ): Promise<UpsertResult> {
   const warnings: Warning[] = [];
@@ -111,6 +111,8 @@ export async function upsertEntity(
 
   const clientId = input.client_id ?? null;
 
+  // Nested inside runWriteTool's transaction as a savepoint: the entity+addresses write
+  // stays atomic and rolls back with the outer tx if the tool_call persist fails (C2).
   const result = await ctx.db.transaction(async (tx) => {
     let id: string;
     let created: boolean;
