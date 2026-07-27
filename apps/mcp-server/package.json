@@ -13,7 +13,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "dev": "tsx src/stdio.ts",
     "dev:http": "tsx src/http.ts",
-    "keygen": "tsx src/keygen.ts"
+    "keygen": "tsx src/keygen.ts",
+    "smoke:compose": "tsx src/compose-smoke.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^10.2.0",

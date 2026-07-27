@@ -79,6 +79,10 @@ async function main(): Promise<void> {
   const logger = createLogger({ name: 'mcp-server:http' });
   const cfg = loadConfig();
   const pool = new Pool({ connectionString: cfg.DATABASE_URL });
+  // An idle pooled client that errors (a Postgres restart/shutdown → FATAL 57P01)
+  // emits 'error' on the Pool; with no listener Node throws it as unhandled and
+  // crashes the process (dumping the raw cause, ADR-011). Route it to the logger.
+  pool.on('error', (err) => { logger.error('postgres pool error', { err: serializeError(err) }); });
   const db = createDb(pool);
   const app = await buildHttpApp({ db, logger });
 

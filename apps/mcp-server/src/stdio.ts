@@ -20,6 +20,10 @@ const logger = createStderrLogger('mcp-server:stdio');
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const pool = new Pool({ connectionString: cfg.DATABASE_URL });
+  // An idle pooled client that errors (a Postgres restart/shutdown → FATAL 57P01) emits
+  // 'error' on the Pool; with no listener Node throws it unhandled and crashes the process.
+  // Logs go to stderr here (stdout is the JSON-RPC stream) — route it through the logger.
+  pool.on('error', (err) => { logger.error('postgres pool error', { err: serializeError(err) }); });
 
   for (const sig of ['SIGINT', 'SIGTERM'] as const) {
     process.once(sig, () => { void pool.end().catch(() => {}).finally(() => { process.exit(0); }); });

@@ -143,3 +143,26 @@ jobs:
         with:
           name: eval-scorecard
           path: eval-reports/
+
+  # Pre-release E2E smoke (04-testing.md §1, bottom pyramid layer): brings up the REAL
+  # compose stack (docker-compose.yml + Dockerfile image), connects a stdio MCP client, and
+  # asserts three tool calls' envelopes — proof the P10 self-host story boots. Manual only
+  # (workflow_dispatch): never per-PR, so it adds zero recurring CI cost. No API key. Docker
+  # is present on ubuntu-latest; the smoke tears the stack down (`compose down -v`) itself.
+  e2e-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # waitForSchema self-caps at 120s, but `up --build` / the tool calls / `down -v` don't;
+    # a hung docker/stdio would otherwise ride the 360-min default. Happy path is ~5-10 min.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # compose needs a non-empty POSTGRES_PASSWORD; .env.example ships one (change-me).
+      - run: cp .env.example .env
+      - run: pnpm smoke:compose

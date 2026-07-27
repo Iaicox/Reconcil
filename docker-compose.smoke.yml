@@ -1,0 +1,15 @@
+# E2E compose-smoke override (apps/mcp-server/src/compose-smoke.ts, 04-testing.md §1).
+#
+# The smoke talks to the stack from INSIDE the compose network — `docker compose exec`
+# for the schema poll, `docker compose run` for the stdio MCP client — so it needs no
+# published host ports. Resetting them makes the smoke robust regardless of what holds
+# 5432 / 8484 on the host (a local Postgres, a real self-host stack, or the Windows
+# WinNAT excluded-port range). The base docker-compose.yml is otherwise used verbatim,
+# layered under this file: `docker compose -f docker-compose.yml -f docker-compose.smoke.yml`.
+#
+# `!reset` (Compose spec, requires v2.24+) clears the base list instead of appending to it.
+services:
+  postgres:
+    ports: !reset []
+  mcp-server:
+    ports: !reset []
