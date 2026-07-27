@@ -152,6 +152,9 @@ jobs:
   e2e-smoke:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # waitForSchema self-caps at 120s, but `up --build` / the tool calls / `down -v` don't;
+    # a hung docker/stdio would otherwise ride the 360-min default. Happy path is ~5-10 min.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

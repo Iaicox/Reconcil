@@ -4,7 +4,7 @@ import { assertEnvelope } from '../src/smoke-assert.js';
 
 /**
  * Pure, Docker-free unit for the envelope assertion the compose smoke leans on
- * (scripts/compose-smoke.ts). The E2E script can only be exercised against a live
+ * (compose-smoke.ts). The E2E script can only be exercised against a live
  * `docker compose` stack; this pins the *shape* checks hermetically so the smoke's
  * pass/fail logic itself is covered and can red-green in the normal `test` job.
  */
