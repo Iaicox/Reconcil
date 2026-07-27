@@ -338,9 +338,15 @@ export async function suggestMatches(
         } else {
           const v = valued?.get(e.id);
           if (v === undefined) {
-            // A settlement that could have matched but has no usable price → honest open (ADR-007).
+            // A settlement that could have matched but has no usable price → honest open (ADR-007),
+            // surfaced as a warning either way — never a silent under-match on a money tool. The
+            // record currency may itself be unvaluable: external_records.currency has no DB CHECK
+            // (only the importer's zod enum guards it), so guard the whole tool, not just the happy
+            // path. Don't echo the raw currency there — it's an imported string (hostile-input).
             if (SUPPORTED_FIAT.has(r.currency)) {
               warn('PRICE_MISSING', `${String(e.id)}|${r.currency}`, `no ${r.currency} price for token ${String(e.tokenId)} on ${day}`);
+            } else {
+              warn('PRICE_MISSING', `ccy|${r.id}`, `record ${r.id} has a currency that cannot be valued (only USD and EUR are supported); its non-stablecoin settlements were left unmatched`);
             }
             continue;
           }

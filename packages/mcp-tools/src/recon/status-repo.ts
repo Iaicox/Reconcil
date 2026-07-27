@@ -120,9 +120,10 @@ export async function computeReconStatus(
           externalCondition(addresses, 'both'),
           transferKinds(), // erc20/native transfers only (gas etc. excluded)
           gt(chainEvents.amountRaw, 0n), // 0-value spam transfers settle nothing
-          // Verified tokens only, NOT stablecoin-only — shares the matcher's widened candidate
-          // gate (match-repo.ts) so "unmatched settlements" and "what suggest can match" stay
-          // one definition (no drift); volatile settlements now count until confirmed.
+          // Verified tokens only, NOT stablecoin-only — shares the matcher's widened SQL candidate
+          // gate (match-repo.ts). What's shared is the candidate SELECT (verified transfer), not
+          // resolvability: an unpriceable volatile settlement is counted here yet suggest can never
+          // close it — correctly, it is genuinely unmatched. Volatile settlements count until confirmed.
           eq(tokens.verified, true),
           window !== undefined ? timeBetween(window.from, window.to) : undefined,
           sql`not exists (select 1 from ${matches} where ${matches.chainEventId} = ${chainEvents.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed')`,

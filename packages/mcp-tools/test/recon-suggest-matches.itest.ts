@@ -349,4 +349,24 @@ describe('recon_suggest_matches — market valuation (non-stablecoin)', () => {
     expect(rows[0]!.fx_rate_id).toBeNull();
     expect(env.citations.price_refs).toBeUndefined();
   });
+
+  it('warns (never silently drops) when a record currency cannot be valued', async () => {
+    const tokenId = await seedNonStableToken();
+    await seedEvent(tokenId, PAYER, WALLET, WETH('0.5'), '2026-06-14T10:00:00Z');
+    // external_records.currency has no DB CHECK, so a future non-validating writer could produce
+    // a non-USD/EUR record; a non-stablecoin candidate can't be valued into it and must surface
+    // a warning rather than drop silently (honest-open, ADR-007).
+    await pool.query(
+      `INSERT INTO external_records
+         (tenant_id, client_id, kind, direction, source, external_ref, amount, currency, issued_on, due_on, expected_address, status)
+       VALUES ($1, $2, 'invoice', 'receivable', 'csv', 'INV-GBP', '1000.00', 'GBP', '2026-06-01', '2026-06-15', $3, 'open')`,
+      [TENANT, CLIENT, PAYER],
+    );
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toHaveLength(0);
+    expect(env.data.unmatched_records).toBe(1);
+    expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
+  });
 });
