@@ -5,7 +5,7 @@
  * under peg policy. A target-currency snapshot beats a USD one that would need
  * FX. No winner ⇒ the caller emits PRICE_MISSING (never interpolates, C4).
  */
-import { priceSnapshots, type Db } from '@reconcil/db';
+import { priceSnapshots, type Db, type Tx } from '@reconcil/db';
 import { and, inArray } from 'drizzle-orm';
 
 import type { Currency, SnapshotRow, ValuationPolicy, ValueNeed } from './types.js';
@@ -45,7 +45,7 @@ const key = priceKey;
 
 /** Resolve the winning snapshot per (token, date); absent keys are PRICE_MISSING. */
 export async function resolvePrices(
-  db: Db,
+  db: Db | Tx,
   needs: ValueNeed[],
   opts: { currency: Currency; policy: ValuationPolicy },
 ): Promise<Map<string, SnapshotRow>> {

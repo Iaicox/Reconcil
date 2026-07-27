@@ -58,7 +58,7 @@ export async function reconSuggestMatches(
     toolName: TOOL_NAME,
     args: { ...input },
     body: async (txCtx) => {
-      const { rows, unmatchedRecords, unmatchedSettlements } = await suggestMatches(txCtx, params);
+      const { rows, unmatchedRecords, unmatchedSettlements, priceRefs, fxRefs, warnings } = await suggestMatches(txCtx, params);
 
       const suggestions: MatchSuggestionView[] = rows.map((s) => ({
         match_id: s.matchId,
@@ -103,7 +103,8 @@ export async function reconSuggestMatches(
         { tool: 'analytics_list_events', args: input.period !== undefined ? { period: input.period } : {} },
       );
 
-      return { data, envelope: { coverage: [], ...refs } };
+      // Volatile-token legs carry pinned price/FX snapshots + any PRICE_MISSING warnings (C4/C5).
+      return { data, envelope: { coverage: [], ...refs, priceRefs, fxRefs, warnings } };
     },
   });
 }

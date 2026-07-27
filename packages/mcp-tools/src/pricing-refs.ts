@@ -6,7 +6,19 @@
  * stablecoin so a citation-mapping change lands in one place (C4/C5).
  */
 import type { FxRef, PriceRef, Warning } from '@reconcil/core';
-import type { Valuation, ValuationResult } from '@reconcil/pricing';
+import type {
+  FxRef as PricingFxRef, PriceRef as PricingPriceRef, Valuation, ValuationResult,
+} from '@reconcil/pricing';
+
+/** Map pricing's camelCase `PriceRef` to the wire snake_case shape (contract §2, C4). */
+export function toWirePriceRef(p: PricingPriceRef): PriceRef {
+  return { snapshot_id: p.snapshotId, token: p.token, date: p.date, currency: p.currency, source: p.source, price: p.price };
+}
+
+/** Map pricing's camelCase `FxRef` to the wire snake_case shape (contract §2, C4). */
+export function toWireFxRef(f: PricingFxRef): FxRef {
+  return { fx_rate_id: f.fxRateId, date: f.date, base: f.base, quote: f.quote, rate: f.rate, source: f.source };
+}
 
 /**
  * A pricing `Valuation` with no `undefined` policy key — the Zod-inferred input
@@ -20,8 +32,8 @@ export function toWireValuation(v: { currency: 'USD' | 'EUR'; policy?: 'market' 
 /** Map a valuation result's refs + warnings to the wire envelope shapes (C4/C5). */
 export function collectPricingRefs(valued: ValuationResult): { priceRefs: PriceRef[]; fxRefs: FxRef[]; warnings: Warning[] } {
   return {
-    priceRefs: valued.priceRefs.map((p) => ({ snapshot_id: p.snapshotId, token: p.token, date: p.date, currency: p.currency, source: p.source, price: p.price })),
-    fxRefs: valued.fxRefs.map((f) => ({ fx_rate_id: f.fxRateId, date: f.date, base: f.base, quote: f.quote, rate: f.rate, source: f.source })),
+    priceRefs: valued.priceRefs.map(toWirePriceRef),
+    fxRefs: valued.fxRefs.map(toWireFxRef),
     warnings: valued.warnings.map((w) => ({ code: w.code, message: w.message, ...(w.context ? { context: w.context } : {}) })),
   };
 }

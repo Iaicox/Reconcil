@@ -33,8 +33,13 @@ matching; P8 requires human confirmation.
    `recon_reject_match`) transition it; only `confirmed` legs feed exports. The agent
    presents rationale and collects decisions — it never matches (P1) and never confirms
    on its own.
-5. **Valuation pinned per leg** (`price_snapshot_id`, `fx_rate_id`) at confirmation time
-   (ADR-007) — the exported EUR/USD equivalent is exactly the confirmed one.
+5. **Valuation pinned per leg** (`price_snapshot_id`, `fx_rate_id`, ADR-007). A candidate is
+   valued into the record currency at **suggest** time — a same-currency stablecoin at face
+   value (peg, no snapshot), any other token (volatile or cross-peg) via the pricing read-core
+   at the settlement's block-time date, pinning the winning snapshot/FX on the leg; an
+   unpriceable settlement can't match and stays open (never interpolated). Confirmation carries
+   that pin through unchanged (the block-time snapshot is immutable), so the exported EUR/USD
+   equivalent is exactly the confirmed one.
 
 ## Alternatives considered
 

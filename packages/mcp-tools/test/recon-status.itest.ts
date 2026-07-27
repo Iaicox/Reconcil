@@ -195,27 +195,30 @@ describe('recon_status — unmatched settlements (authoritative view)', () => {
     // INCLUDED: verified stablecoin settlement into the tenant wallet, no confirmed leg.
     const unmatched = await seedEvent(eur, '1000000000', { logIndex: 1 });
 
+    // INCLUDED: verified NON-stablecoin settlement, no confirmed leg. The matcher now values &
+    // matches volatile tokens, so the authoritative view shares its widened gate (no drift).
+    await seedEvent(nonstable, '5000000000', { logIndex: 4 });
+
     // EXCLUDED: has a confirmed leg.
     const applied = await seedEvent(eur, '2000000000', { logIndex: 2 });
     const rec = await seedInvoice('INV-APPLIED', '2000.00', { status: 'matched' });
     await seedConfirmedLeg(rec, applied, '2000000000', '2000.00');
 
-    // EXCLUDED: unverified token, non-stablecoin token, zero-value spam, foreign wallet.
+    // EXCLUDED: unverified (spam) token, zero-value spam, foreign wallet.
     await seedEvent(unverified, '5000000000', { logIndex: 3 });
-    await seedEvent(nonstable, '5000000000', { logIndex: 4 });
     await seedEvent(eur, '0', { logIndex: 5 });
     await seedEvent(eur, '5000000000', { logIndex: 6, from: PAYER, to: OUTSIDER });
 
     const env = await reconStatus(ctx(), {});
 
-    expect(env.data.unmatched_settlements.count).toBe(1);
-    expect(env.data.unmatched_settlements.sample).toHaveLength(1);
-    expect(env.data.unmatched_settlements.sample[0]).toMatchObject({ chain_id: 1, log_index: 1 });
+    expect(env.data.unmatched_settlements.count).toBe(2);
+    expect(env.data.unmatched_settlements.sample).toHaveLength(2);
+    expect(env.data.unmatched_settlements.sample.map((s) => s.log_index).sort((a, b) => a - b)).toEqual([1, 4]);
     expect(env.data.unmatched_settlements.drilldown.tool).toBe('analytics_list_events');
 
-    // Sanity: the one included event is the unmatched one.
+    // Sanity: the verified-stablecoin unmatched event is among the counted settlements.
     const { rows } = await pool.query<{ tx_hash: string }>(`SELECT tx_hash FROM chain_events WHERE id = $1`, [unmatched]);
-    expect(env.data.unmatched_settlements.sample[0]!.tx_hash).toBe(rows[0]!.tx_hash);
+    expect(env.data.unmatched_settlements.sample.map((s) => s.tx_hash)).toContain(rows[0]!.tx_hash);
   });
 
   it('excludes internal wallet↔wallet transfers, includes outbound payable settlements', async () => {

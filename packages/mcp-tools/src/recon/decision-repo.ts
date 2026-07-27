@@ -8,12 +8,14 @@
  * rejected leg contributes nothing) and leaves the record status to fall out of the
  * remaining confirmed legs.
  *
- * Valuation is stablecoin face value in this first cut (no `price_snapshot_id`/`fx_rate_id`
- * to re-pin); volatile-token snapshot pinning is the pricing follow-up, at which point the
- * `valuation.priceRef`/`fxRef` fields carry the pinned refs (C4).
+ * Valuation carries through whatever suggest pinned on the leg (C4): a stablecoin face-value
+ * leg has no `price_snapshot_id`/`fx_rate_id` (reproducible at peg, P5), so its refs stay
+ * absent; a volatile-token leg re-hydrates its pinned `priceRef`/`fxRef` from
+ * `price_snapshots`/`fx_rates` for the decision envelope. The record-status math always uses
+ * the stored `fiat_value` (the canonical band, ADR-010) — never a fresh price.
  */
 import type { FxRef, PriceRef } from '@reconcil/core';
-import { chainEvents, externalRecords, matches } from '@reconcil/db';
+import { chainEvents, externalRecords, fxRates, matches, priceSnapshots, tokens } from '@reconcil/db';
 import { deriveRecordStatus, type DerivedRecordStatus } from '@reconcil/recon';
 import { and, eq, sql } from 'drizzle-orm';
 
@@ -59,6 +61,8 @@ export async function decideMatchInTx(
       chainEventId: matches.chainEventId,
       amountAppliedRaw: matches.amountAppliedRaw,
       fiatValue: matches.fiatValue,
+      priceSnapshotId: matches.priceSnapshotId,
+      fxRateId: matches.fxRateId,
     })
     .from(matches)
     .where(and(eq(matches.tenantId, ctx.tenantId), eq(matches.id, matchId)))
@@ -150,5 +154,46 @@ export async function decideMatchInTx(
     .set({ status: recordStatus })
     .where(and(eq(externalRecords.tenantId, ctx.tenantId), eq(externalRecords.id, rec.id)));
 
-  return { matchId, status: decision, recordStatus, valuation: { fiatValue: leg.fiatValue } };
+  // 7. Re-hydrate the pinned valuation refs (if any) for the decision envelope (C4). A
+  //    stablecoin face-value leg has no pins → the refs stay absent.
+  let priceRef: PriceRef | undefined;
+  let fxRef: FxRef | undefined;
+  if (leg.priceSnapshotId !== null) {
+    const [snap] = await tx
+      .select({
+        id: priceSnapshots.id, tokenId: priceSnapshots.tokenId, priceDate: priceSnapshots.priceDate,
+        currency: priceSnapshots.currency, price: priceSnapshots.price, source: priceSnapshots.source,
+        symbol: tokens.symbolDisplay,
+      })
+      .from(priceSnapshots)
+      .innerJoin(tokens, eq(tokens.id, priceSnapshots.tokenId))
+      .where(eq(priceSnapshots.id, leg.priceSnapshotId))
+      .limit(1);
+    if (snap !== undefined) {
+      priceRef = {
+        snapshot_id: snap.id, token: snap.symbol ?? String(snap.tokenId), date: snap.priceDate,
+        currency: snap.currency, source: snap.source, price: snap.price,
+      };
+    }
+  }
+  if (leg.fxRateId !== null) {
+    const [fx] = await tx
+      .select({
+        id: fxRates.id, rateDate: fxRates.rateDate, base: fxRates.baseCurrency,
+        quote: fxRates.quoteCurrency, rate: fxRates.rate, source: fxRates.source,
+      })
+      .from(fxRates)
+      .where(eq(fxRates.id, leg.fxRateId))
+      .limit(1);
+    if (fx !== undefined) {
+      fxRef = { fx_rate_id: fx.id, date: fx.rateDate, base: fx.base, quote: fx.quote, rate: fx.rate, source: fx.source };
+    }
+  }
+
+  return {
+    matchId,
+    status: decision,
+    recordStatus,
+    valuation: { fiatValue: leg.fiatValue, ...(priceRef ? { priceRef } : {}), ...(fxRef ? { fxRef } : {}) },
+  };
 }

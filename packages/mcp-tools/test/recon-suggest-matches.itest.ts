@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ToolContext } from '../src/context.js';
+import { reconConfirmMatch } from '../src/tools/recon-confirm-match.js';
 import { reconSuggestMatches } from '../src/tools/recon-suggest-matches.js';
 
 let container: StartedPostgreSqlContainer;
@@ -67,6 +68,40 @@ async function seedEvent(
        (chain_id, tx_hash, log_index, event_kind, token_id, amount_raw, from_addr, to_addr, block_number, block_time, tx_from, provider, raw)
      VALUES (1, $1, $2, 'erc20_transfer', $3, $4, $5, $6, 100, $7, $5, 'test', '{}'::jsonb)`,
     [`0x${logIndex.toString().padStart(64, 'a')}`, logIndex, tokenId, amountRaw, from, to, blockTime],
+  );
+}
+
+const WETH_ADDR = `0x${'d'.repeat(40)}`; // a verified non-stablecoin (volatile) token
+
+/** A verified NON-stablecoin ERC-20 (WETH-like, 18 decimals). Returns its token id. */
+async function seedNonStableToken(): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO tokens (chain_id, address, standard, symbol_display, decimals, is_stablecoin, peg_currency, verified)
+     VALUES (1, $1, 'erc20', 'WETH', 18, false, null, true) RETURNING id`,
+    [WETH_ADDR],
+  );
+  return Number(rows[0]!.id);
+}
+
+/** A daily price snapshot for a token (defillama source by default). */
+async function seedSnapshot(
+  tokenId: number,
+  price: string,
+  date: string,
+  currency = 'EUR',
+  source = 'defillama',
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO price_snapshots (token_id, price_date, currency, price, source) VALUES ($1,$2,$3,$4,$5)`,
+    [tokenId, date, currency, price, source],
+  );
+}
+
+/** An ECB EUR→USD reference rate (rate = USD per 1 EUR). */
+async function seedFx(date: string, rate: string): Promise<void> {
+  await pool.query(
+    `INSERT INTO fx_rates (rate_date, base_currency, quote_currency, rate, source) VALUES ($1,'EUR','USD',$2,'ecb')`,
+    [date, rate],
   );
 }
 
@@ -197,5 +232,141 @@ describe('recon_suggest_matches — engine run, persistence, audit', () => {
     expect(env.data.suggestions.map((s) => s.record.external_ref)).toEqual(['INV-100']);
     expect(env.data.unmatched_records).toBe(1); // INV-200
     expect(env.data.unmatched_settlements).toBe(1); // the 777.00 transfer from a stranger
+  });
+});
+
+const WETH = (n: string): string => {
+  // n whole WETH → 18-decimal base units, exact (n has ≤ 18 fractional digits).
+  const [w, f = ''] = n.split('.');
+  return `${w}${f.padEnd(18, '0')}`.replace(/^0+(?=\d)/, '');
+};
+
+describe('recon_suggest_matches — market valuation (non-stablecoin)', () => {
+  it('values a volatile-token settlement via a pinned price snapshot and matches it', async () => {
+    const tokenId = await seedNonStableToken();
+    // 0.5 WETH @ 2000.00 EUR/WETH on the settlement date = 1000.00 EUR → settles INV-ETH.
+    await seedSnapshot(tokenId, '2000.00', '2026-06-14', 'EUR');
+    await seedEvent(tokenId, PAYER, WALLET, WETH('0.5'), '2026-06-14T10:00:00Z');
+    await seedInvoice('INV-ETH', '1000.00', PAYER);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toHaveLength(1);
+    const s = env.data.suggestions[0]!;
+    expect(s.record.external_ref).toBe('INV-ETH');
+    expect(s.fiat_value).toBe('1000'); // 0.5 × 2000, exact decimal
+    expect(s.confidence).toBeGreaterThan(0.8);
+
+    // The leg pins the snapshot it was valued at (C4 "priced means pinned").
+    const { rows } = await pool.query<{ price_snapshot_id: string | null; fx_rate_id: string | null; fiat_value: string }>(
+      `SELECT price_snapshot_id, fx_rate_id, fiat_value FROM matches`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.price_snapshot_id).not.toBeNull();
+    expect(rows[0]!.fx_rate_id).toBeNull(); // same-currency valuation, no FX
+    expect(rows[0]!.fiat_value).toBe('1000');
+
+    // The pinned snapshot is cited in the envelope.
+    expect(env.citations.price_refs).toBeDefined();
+    expect(env.citations.price_refs).toHaveLength(1);
+    expect(env.citations.price_refs![0]!.currency).toBe('EUR');
+    expect(env.citations.price_refs![0]!.price).toBe('2000.00');
+  });
+
+  it('leaves a record open (never interpolates) when no snapshot prices the token', async () => {
+    const tokenId = await seedNonStableToken();
+    // No snapshot on the settlement date → the candidate is PRICE_MISSING and cannot match.
+    await seedEvent(tokenId, PAYER, WALLET, WETH('0.5'), '2026-06-14T10:00:00Z');
+    await seedInvoice('INV-ETH', '1000.00', PAYER);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toHaveLength(0);
+    expect(env.data.unmatched_records).toBe(1);
+    const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM matches`);
+    expect(rows[0]!.n).toBe('0'); // no leg persisted
+    expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
+  });
+
+  it('values across currencies with a pinned FX rate (USD snapshot → EUR invoice)', async () => {
+    const tokenId = await seedNonStableToken();
+    // 0.5 WETH @ 2200.00 USD = 1100 USD; EUR→USD 1.10 ⇒ 1000.00 EUR → settles INV-ETH.
+    await seedSnapshot(tokenId, '2200.00', '2026-06-14', 'USD');
+    await seedFx('2026-06-14', '1.10');
+    await seedEvent(tokenId, PAYER, WALLET, WETH('0.5'), '2026-06-14T10:00:00Z');
+    await seedInvoice('INV-ETH', '1000.00', PAYER);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toHaveLength(1);
+    expect(env.data.suggestions[0]!.fiat_value).toBe('1000');
+
+    const { rows } = await pool.query<{ price_snapshot_id: string | null; fx_rate_id: string | null }>(
+      `SELECT price_snapshot_id, fx_rate_id FROM matches`,
+    );
+    expect(rows[0]!.price_snapshot_id).not.toBeNull();
+    expect(rows[0]!.fx_rate_id).not.toBeNull(); // FX was applied → pinned
+
+    expect(env.citations.price_refs).toHaveLength(1);
+    expect(env.citations.fx_refs).toBeDefined();
+    expect(env.citations.fx_refs).toHaveLength(1);
+    expect(env.citations.fx_refs![0]!.rate).toBe('1.10');
+  });
+
+  it('carries the pinned refs through to recon_confirm_match (C4)', async () => {
+    const tokenId = await seedNonStableToken();
+    await seedSnapshot(tokenId, '2000.00', '2026-06-14', 'EUR');
+    await seedEvent(tokenId, PAYER, WALLET, WETH('0.5'), '2026-06-14T10:00:00Z');
+    await seedInvoice('INV-ETH', '1000.00', PAYER);
+
+    const suggested = await reconSuggestMatches(ctx(), {});
+    const matchId = suggested.data.suggestions[0]!.match_id;
+
+    const confirmed = await reconConfirmMatch(ctx(), { match_id: matchId });
+
+    expect(confirmed.data.status).toBe('confirmed');
+    expect(confirmed.data.record_status).toBe('matched');
+    expect(confirmed.data.valuation.fiat_value).toBe('1000');
+    // The confirm output re-hydrates the pinned snapshot (was empty on the face-value path).
+    expect(confirmed.data.valuation.price_ref).toBeDefined();
+    expect(confirmed.data.valuation.price_ref!.currency).toBe('EUR');
+    expect(confirmed.citations.price_refs).toHaveLength(1);
+  });
+
+  it('keeps the stablecoin face-value fast path (no snapshot needed, no refs pinned)', async () => {
+    const tokenId = await seedToken(); // EUR-pegged stablecoin
+    await seedEvent(tokenId, PAYER, WALLET, '1000000000', '2026-06-14T10:00:00Z'); // 1000.00 EURC
+    await seedInvoice('INV-100', '1000.00', PAYER);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toHaveLength(1);
+    expect(env.data.suggestions[0]!.fiat_value).toBe('1000');
+    const { rows } = await pool.query<{ price_snapshot_id: string | null; fx_rate_id: string | null }>(
+      `SELECT price_snapshot_id, fx_rate_id FROM matches`,
+    );
+    expect(rows[0]!.price_snapshot_id).toBeNull(); // face value at peg needs no snapshot (P5)
+    expect(rows[0]!.fx_rate_id).toBeNull();
+    expect(env.citations.price_refs).toBeUndefined();
+  });
+
+  it('warns (never silently drops) when a record currency cannot be valued', async () => {
+    const tokenId = await seedNonStableToken();
+    await seedEvent(tokenId, PAYER, WALLET, WETH('0.5'), '2026-06-14T10:00:00Z');
+    // external_records.currency has no DB CHECK, so a future non-validating writer could produce
+    // a non-USD/EUR record; a non-stablecoin candidate can't be valued into it and must surface
+    // a warning rather than drop silently (honest-open, ADR-007).
+    await pool.query(
+      `INSERT INTO external_records
+         (tenant_id, client_id, kind, direction, source, external_ref, amount, currency, issued_on, due_on, expected_address, status)
+       VALUES ($1, $2, 'invoice', 'receivable', 'csv', 'INV-GBP', '1000.00', 'GBP', '2026-06-01', '2026-06-15', $3, 'open')`,
+      [TENANT, CLIENT, PAYER],
+    );
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toHaveLength(0);
+    expect(env.data.unmatched_records).toBe(1);
+    expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
   });
 });
