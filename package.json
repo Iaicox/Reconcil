@@ -15,7 +15,8 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
-    "check:supply-chain": "node scripts/check-no-signing-libs.cjs"
+    "check:supply-chain": "node scripts/check-no-signing-libs.cjs",
+    "smoke:compose": "pnpm --filter @reconcil/mcp-server smoke:compose"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",

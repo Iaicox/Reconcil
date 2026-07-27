@@ -27,6 +27,11 @@ const logger = createLogger({ name: 'worker' });
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const pool = new Pool({ connectionString: cfg.DATABASE_URL });
+  // Same hazard as the Redis connection below: an idle pooled client that errors
+  // (a Postgres restart/shutdown → FATAL 57P01) emits 'error' on the Pool, and with
+  // no listener Node throws it as unhandled, crashing past the shutdown handlers and
+  // printing the raw cause (ADR-011). Route it through serializeError instead.
+  pool.on('error', (err) => { logger.error('postgres pool error', { err: serializeError(err) }); });
   await runMigrations(pool);
   const db = createDb(pool);
   logger.info('migrations applied');

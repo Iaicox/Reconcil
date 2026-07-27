@@ -187,6 +187,7 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 | `integration` | PR + main | Postgres service container, fixture ingest, ledger assertions |
 | `evals-smoke` | PR (repo secrets only, skipped on forks) | 5-case subset, 1 run — catches contract drift cheaply |
 | `evals-full` | nightly + manual | 30 cases × 3 runs, publishes scorecard artifact |
+| `e2e-smoke` | manual (`workflow_dispatch`) / pre-release | real compose stack up, stdio MCP client, 3 tool calls, assert envelopes — proves P10 self-host boots (`pnpm smoke:compose`, `apps/mcp-server/src/compose-smoke.ts`). Off the per-PR path (cost) |
 
 Secrets policy: `ANTHROPIC_API_KEY` only in `evals-*`; provider keys never needed in CI
 (fixtures only). An `evals-preflight` job resolves secret presence into an output the eval
