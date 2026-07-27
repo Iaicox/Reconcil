@@ -4,7 +4,7 @@
  * `shifted` so the caller can emit FX_DATE_SHIFTED — the used date is visible in
  * citations, never silently substituted. ECB publishes EUR-based rates.
  */
-import { fxRates, type Db } from '@reconcil/db';
+import { fxRates, type Db, type Tx } from '@reconcil/db';
 import { and, eq, lte } from 'drizzle-orm';
 
 import type { FxResolved, FxRow } from './types.js';
@@ -19,7 +19,7 @@ export function pickLatestRate(rows: FxRow[], date: string): FxResolved | undefi
 }
 
 export async function resolveFxRates(
-  db: Db,
+  db: Db | Tx,
   dates: string[],
   opts: { base: string; quote: string },
 ): Promise<Map<string, FxResolved>> {

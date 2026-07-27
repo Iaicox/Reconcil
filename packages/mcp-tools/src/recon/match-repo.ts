@@ -1,9 +1,17 @@
 /**
  * Matching persistence (recon_suggest_matches, §6.4/ADR-010). The pure engine
  * (@reconcil/recon) scores; this layer owns the I/O: it loads the tenant's open
- * records and the candidate settlement events, values each candidate at stablecoin
- * face value in the record's currency (first cut — volatile-token valuation via the
- * pricing slice is a follow-up), runs the engine, and persists the suggested legs.
+ * records and the candidate settlement events, values each candidate in the record's
+ * currency, runs the engine, and persists the suggested legs.
+ *
+ * Valuation is hybrid (C4 "priced means pinned"): a same-currency **stablecoin** keeps
+ * face value at peg (reproducible as amount × 1, no snapshot needed, P5); any other token
+ * — a volatile token, or a stablecoin whose peg differs from the record currency — is
+ * valued through the pricing read-core (`resolvePrices` + ECB `resolveFxRates` + `valueOne`)
+ * at the event's block-time UTC date, pinning the winning `price_snapshot_id` (+ `fx_rate_id`
+ * on a cross-currency conversion). A candidate with no usable snapshot/FX is dropped and the
+ * record stays honestly open — never interpolated (ADR-007), and the gap surfaces as a
+ * PRICE_MISSING warning on the envelope.
  *
  * Idempotent re-run: prior `status='suggested'` legs for the in-scope records are
  * deleted before the fresh suggestions are inserted, all in one transaction;
@@ -11,17 +19,23 @@
  * event amount, record-status derivation) are enforced at confirmation (B4), not
  * here — a suggestion is only a proposal.
  */
-import { formatUnits, parseUnits } from '@reconcil/core';
+import { formatUnits, parseUnits, type FxRef, type PriceRef, type Warning } from '@reconcil/core';
 import {
-  chainEvents, entityAddresses, externalRecords, matches, tokens, wallets,
+  chainEvents, entityAddresses, externalRecords, matches, tokens, wallets, type Tx,
 } from '@reconcil/db';
 import type { TokenMeta } from '@reconcil/ledger';
+import {
+  priceKey, resolveFxRates, resolvePrices, valueOne,
+  type Currency, type FxResolved,
+  type FxRef as PricingFxRef, type PriceRef as PricingPriceRef, type ValueNeed,
+} from '@reconcil/pricing';
 import {
   suggestForRecord, type CandidateEvent, type MatchRecord, type RuleHit, type Tolerances,
 } from '@reconcil/recon';
 import { and, eq, gt, gte, inArray, lte, or, sql } from 'drizzle-orm';
 
 import type { DbContext } from '../context.js';
+import { toWireFxRef, toWirePriceRef } from '../pricing-refs.js';
 
 const DEFAULT_DATE_WINDOW_DAYS = 14;
 const MS_PER_DAY = 86_400_000;
@@ -56,6 +70,11 @@ export interface SuggestMatchesResult {
   rows: SuggestionRow[];
   unmatchedRecords: number;
   unmatchedSettlements: number;
+  /** Pinned snapshots/FX backing the priced legs (C4); dedup'd. Empty on the face-value path. */
+  priceRefs: PriceRef[];
+  fxRefs: FxRef[];
+  /** PRICE_MISSING / FX_DATE_SHIFTED surfaced while valuing candidates (C5). */
+  warnings: Warning[];
 }
 
 interface EventRow {
@@ -85,6 +104,72 @@ const fracDigits = (s: string): number => {
 function subtractDecimal(a: string, b: string): string {
   const scale = Math.max(fracDigits(a), fracDigits(b));
   return formatUnits(parseUnits(a, scale) - parseUnits(b, scale), scale);
+}
+
+/** Fiat currencies the pricing read-core can value into (ADR-007). */
+const SUPPORTED_FIAT = new Set<string>(['USD', 'EUR']);
+
+/** A candidate valued in a record's currency, with the pinned refs that back the figure. */
+interface ValuedCandidate {
+  valuedAmount: string;
+  priceRef: PricingPriceRef;
+  fxRef?: PricingFxRef;
+  fxShifted: boolean;
+}
+
+/**
+ * Value every candidate event into `target` via pinned market snapshots (+ ECB FX), keyed
+ * by event id. Same-currency stablecoins are excluded here — the caller uses their face value
+ * (P5). A token with no usable snapshot (or no FX for a required conversion) is simply absent
+ * from the map: the caller drops that candidate and raises PRICE_MISSING (ADR-007, never
+ * interpolate). Batched: one `resolvePrices` + at most one `resolveFxRates` for the whole set.
+ */
+async function valueEventsInto(
+  tx: Tx,
+  events: EventRow[],
+  target: Currency,
+): Promise<Map<number, ValuedCandidate>> {
+  const out = new Map<number, ValuedCandidate>();
+  const needs: (ValueNeed & { eventId: number })[] = events
+    .filter((e) => !(e.isStablecoin && e.pegCurrency === target))
+    .map((e) => ({
+      eventId: e.id,
+      tokenId: e.tokenId,
+      date: e.blockTime.toISOString().slice(0, 10), // UTC day of the settlement
+      amount: formatUnits(e.amountRaw, e.decimals),
+      isStablecoin: e.isStablecoin,
+      pegCurrency: e.pegCurrency,
+      symbol: e.symbolDisplay,
+    }));
+  if (needs.length === 0) return out;
+
+  const prices = await resolvePrices(tx, needs, { currency: target, policy: 'market' });
+  const fxDates = new Set<string>();
+  for (const n of needs) {
+    const snap = prices.get(priceKey(n.tokenId, n.date));
+    if (snap && snap.currency !== target) fxDates.add(n.date);
+  }
+  const fx = fxDates.size > 0
+    ? await resolveFxRates(tx, [...fxDates], { base: 'EUR', quote: 'USD' })
+    : new Map<string, FxResolved>();
+
+  for (const n of needs) {
+    const snap = prices.get(priceKey(n.tokenId, n.date));
+    if (!snap) continue;
+    let fxResolved: FxResolved | undefined;
+    if (snap.currency !== target) {
+      fxResolved = fx.get(n.date);
+      if (!fxResolved) continue; // required conversion has no rate → PRICE_MISSING at the caller
+    }
+    const r = valueOne(n, snap, target, fxResolved);
+    out.set(n.eventId, {
+      valuedAmount: r.value,
+      priceRef: r.priceRef,
+      ...(r.fxRef ? { fxRef: r.fxRef } : {}),
+      fxShifted: r.warning?.code === 'FX_DATE_SHIFTED',
+    });
+  }
+  return out;
 }
 
 export async function suggestMatches(
@@ -124,7 +209,7 @@ export async function suggestMatches(
       )
       .orderBy(externalRecords.id); // stable suggestion order across runs
 
-    if (recRows.length === 0) return { rows: [], unmatchedRecords: 0, unmatchedSettlements: 0 };
+    if (recRows.length === 0) return { rows: [], unmatchedRecords: 0, unmatchedSettlements: 0, priceRefs: [], fxRefs: [], warnings: [] };
     const recById = new Map(recRows.map((r) => [r.id, r]));
     const recIds = recRows.map((r) => r.id);
 
@@ -175,7 +260,8 @@ export async function suggestMatches(
             or(inArray(chainEvents.fromAddr, addresses), inArray(chainEvents.toAddr, addresses)),
             inArray(chainEvents.eventKind, SETTLEMENT_KINDS),
             gt(chainEvents.amountRaw, 0n), // 0-value spam transfers can't settle anything
-            eq(tokens.isStablecoin, true),
+            // Verified tokens only (spam excluded); NOT stablecoin-only — volatile tokens are
+            // now priced via the pricing read-core, unpriceable ones drop out downstream.
             eq(tokens.verified, true),
             timeFrom !== undefined ? gte(chainEvents.blockTime, timeFrom) : undefined,
             timeTo !== undefined ? lte(chainEvents.blockTime, timeTo) : undefined,
@@ -208,29 +294,71 @@ export async function suggestMatches(
       .groupBy(matches.externalRecordId);
     const confirmedByRecord = new Map(confSums.map((r) => [r.recordId, r.sum]));
 
-    // 6. Run the engine per record over its currency-and-direction-matched candidates.
+    // 6. Value candidate events into each record currency (batched once per currency).
+    //    Same-currency stablecoins skip pricing (face value at peg); everything else is
+    //    priced with pinned refs, and an unpriceable token simply won't appear in the map.
+    const valuedByCurrency = new Map<string, Map<number, ValuedCandidate>>();
+    for (const cur of new Set(recRows.map((r) => r.currency))) {
+      if (SUPPORTED_FIAT.has(cur)) valuedByCurrency.set(cur, await valueEventsInto(tx, eventRows, cur as Currency));
+    }
+
+    // 7. Run the engine per record over its currency-and-direction-matched candidates.
     const eventById = new Map(eventRows.map((e) => [e.id, e]));
     const eligibleEventIds = new Set<number>();
     const usedEventIds = new Set<number>();
     const matchedRecordIds = new Set<string>();
     const openByRecord = new Map<string, string>(); // computed once, reused for the wire view
+    const legRefs = new Map<string, { priceRef?: PricingPriceRef; fxRef?: PricingFxRef }>(); // `${recordId}|${eventId}`
     const pending: { recordId: string; leg: ReturnType<typeof suggestForRecord>[number] }[] = [];
+
+    // PRICE_MISSING / FX_DATE_SHIFTED gathered while valuing candidates (C5); dedup'd.
+    const warnings: Warning[] = [];
+    const warned = new Set<string>();
+    const warn = (code: 'PRICE_MISSING' | 'FX_DATE_SHIFTED', key: string, message: string): void => {
+      const k = `${code}|${key}`;
+      if (warned.has(k)) return;
+      warned.add(k);
+      warnings.push({ code, message });
+    };
 
     for (const r of recRows) {
       const inbound = r.direction === 'receivable';
+      const valued = valuedByCurrency.get(r.currency);
       const candidates: CandidateEvent[] = [];
       for (const e of eventRows) {
-        if (e.pegCurrency !== r.currency) continue; // value only same-currency stablecoins (first cut)
+        // Direction gate: the payer (from) settles a receivable; the payee (to) a payable.
         if (inbound ? !addrSet.has(e.toAddr) : !addrSet.has(e.fromAddr)) continue;
+
+        let valuedAmount: string;
+        let priceRef: PricingPriceRef | undefined;
+        let fxRef: PricingFxRef | undefined;
+        const day = e.blockTime.toISOString().slice(0, 10);
+        if (e.isStablecoin && e.pegCurrency === r.currency) {
+          valuedAmount = formatUnits(e.amountRaw, e.decimals); // face value at peg (P5), no refs
+        } else {
+          const v = valued?.get(e.id);
+          if (v === undefined) {
+            // A settlement that could have matched but has no usable price → honest open (ADR-007).
+            if (SUPPORTED_FIAT.has(r.currency)) {
+              warn('PRICE_MISSING', `${String(e.id)}|${r.currency}`, `no ${r.currency} price for token ${String(e.tokenId)} on ${day}`);
+            }
+            continue;
+          }
+          valuedAmount = v.valuedAmount;
+          priceRef = v.priceRef;
+          fxRef = v.fxRef;
+          if (v.fxShifted) warn('FX_DATE_SHIFTED', `${String(e.id)}|${r.currency}`, `ECB rate shifted for token ${String(e.tokenId)} valuation on ${day}`);
+        }
+
         eligibleEventIds.add(e.id);
+        legRefs.set(`${r.id}|${String(e.id)}`, { ...(priceRef ? { priceRef } : {}), ...(fxRef ? { fxRef } : {}) });
         candidates.push({
           eventId: e.id,
           amountRaw: e.amountRaw,
           tokenDecimals: e.decimals,
-          valuedAmount: formatUnits(e.amountRaw, e.decimals),
+          valuedAmount,
           blockTime: e.blockTime.toISOString(),
-          // The counterparty end depends on direction: the payer (from) settles a
-          // receivable, the payee (to) receives a payable. Lowercased for safe ===.
+          // Lowercased for safe === against the expected/known addresses.
           counterpartyAddr: (inbound ? e.fromAddr : e.toAddr).toLowerCase(),
         });
       }
@@ -256,7 +384,7 @@ export async function suggestMatches(
       }
     }
 
-    // 7. Replace un-actioned suggestions for the in-scope records, then insert the fresh legs.
+    // 8. Replace un-actioned suggestions for the in-scope records, then insert the fresh legs.
     await tx.delete(matches).where(
       and(eq(matches.tenantId, ctx.tenantId), eq(matches.status, 'suggested'), inArray(matches.externalRecordId, recIds)),
     );
@@ -267,6 +395,7 @@ export async function suggestMatches(
         .insert(matches)
         .values(pending.map((p) => {
           const r = recById.get(p.recordId)!;
+          const ref = legRefs.get(`${p.recordId}|${String(p.leg.eventId)}`);
           return {
             tenantId: ctx.tenantId,
             externalRecordId: p.recordId,
@@ -274,6 +403,9 @@ export async function suggestMatches(
             amountAppliedRaw: p.leg.amountAppliedRaw,
             fiatValue: p.leg.fiatValue,
             fiatCurrency: r.currency,
+            // Pin the snapshot/FX the value came from (C4); null on the stablecoin face-value path.
+            priceSnapshotId: ref?.priceRef?.snapshotId ?? null,
+            fxRateId: ref?.fxRef?.fxRateId ?? null,
             status: 'suggested' as const,
             matchedBy: 'auto' as const,
             confidence: p.leg.confidence.toString(),
@@ -316,6 +448,15 @@ export async function suggestMatches(
       };
     });
 
+    // Dedup the pinned refs actually backing a persisted leg into the envelope citation pool.
+    const priceRefPool = new Map<number, PricingPriceRef>();
+    const fxRefPool = new Map<number, PricingFxRef>();
+    for (const p of pending) {
+      const ref = legRefs.get(`${p.recordId}|${String(p.leg.eventId)}`);
+      if (ref?.priceRef) priceRefPool.set(ref.priceRef.snapshotId, ref.priceRef);
+      if (ref?.fxRef) fxRefPool.set(ref.fxRef.fxRateId, ref.fxRef);
+    }
+
     return {
       rows,
       unmatchedRecords: recRows.length - matchedRecordIds.size,
@@ -323,6 +464,9 @@ export async function suggestMatches(
       // under-report leftover settlements. Acceptable for suggestions; the B5 status tool
       // is the authoritative unmatched-settlement view.
       unmatchedSettlements: eligibleEventIds.size - usedEventIds.size,
+      priceRefs: [...priceRefPool.values()].map(toWirePriceRef),
+      fxRefs: [...fxRefPool.values()].map(toWireFxRef),
+      warnings,
     };
   });
 }

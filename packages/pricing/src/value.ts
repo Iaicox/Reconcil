@@ -5,7 +5,7 @@
  * (C4). Missing price ⇒ no value + PRICE_MISSING, never interpolation (ADR-007).
  */
 import type { DecimalString } from '@reconcil/core';
-import type { Db } from '@reconcil/db';
+import type { Db, Tx } from '@reconcil/db';
 
 import { divide, multiply } from './decimal.js';
 import { resolveFxRates } from './fx.js';
@@ -71,7 +71,7 @@ export function valueOne(
  * raises PRICE_MISSING — never interpolated. mcp-tools composes this over ledger rows.
  */
 export async function valueQuantities(
-  db: Db,
+  db: Db | Tx,
   needs: ValueNeed[],
   valuation: Valuation,
 ): Promise<ValuationResult> {

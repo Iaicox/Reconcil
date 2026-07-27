@@ -49,9 +49,11 @@ export async function reconConfirmMatch(
         throw new ToolError('INTERNAL', `recon_confirm_match produced an output that violates its contract: ${String(err)}`);
       }
 
-      // Single leg, stablecoin face-value valuation ⇒ empty coverage, no refs. When volatile
-      // pricing lands, thread valuation.price_ref/fx_ref into the envelope's price/fx refs (C4).
-      return { data, envelope: { coverage: [] } };
+      // A volatile-token leg cites the snapshot/FX that backs the confirmed value (C4); a
+      // stablecoin face-value leg has none, so the envelope pools stay empty.
+      const priceRefs = result.valuation.priceRef !== undefined ? [result.valuation.priceRef] : [];
+      const fxRefs = result.valuation.fxRef !== undefined ? [result.valuation.fxRef] : [];
+      return { data, envelope: { coverage: [], priceRefs, fxRefs } };
     },
   });
 }

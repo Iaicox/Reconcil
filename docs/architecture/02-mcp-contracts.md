@@ -428,6 +428,15 @@ collect the human decision. Split/partial detection uses bounded subset search
 (≤ 6 candidate events per record) — documented complexity cap, no heuristics hidden in
 prompts.
 
+Each candidate is valued into the record's currency (C4, "priced means pinned"): a
+same-currency **stablecoin** at face value (its peg, reproducible as amount × 1, no snapshot
+needed); **any other token** — a volatile token, or a stablecoin whose peg differs from the
+record currency — through the pricing read-core at the settlement's block-time UTC date,
+pinning the winning `price_snapshot_id` (+ `fx_rate_id` on a cross-currency conversion) on the
+leg and citing them in the envelope's `price_refs`/`fx_refs`. A candidate with no usable
+snapshot (or no FX for a required conversion) **cannot match** — the record stays open and a
+`PRICE_MISSING` warning is surfaced, never an interpolated figure (ADR-007).
+
 **`recon_confirm_match`** / **`recon_reject_match`** (write, HITL)
 ```ts
 input:  { match_id: string; note?: string }
@@ -437,9 +446,13 @@ output: { match_id: string; status: 'confirmed' | 'rejected';
 ```
 
 Only `suggested → confirmed|rejected` transitions are legal (`NOT_SUGGESTED` otherwise).
-Confirmation re-pins valuation to current snapshots if the suggestion was stale, inside a
-SERIALIZABLE transaction that re-checks matching invariants (`MATCH_CONFLICT` on
-violation).
+Confirmation runs inside a SERIALIZABLE transaction that re-checks matching invariants
+(`MATCH_CONFLICT` on over-application) and re-derives the record status from the stored
+`fiat_value` under the canonical default band (ADR-010). The `valuation` **carries through
+what suggest pinned** on the leg — the stored `fiat_value`, and for a volatile-token leg its
+`price_ref`/`fx_ref` re-hydrated from the pinned snapshot/FX; a same-currency stablecoin leg
+is face value with no refs. It is never re-priced at confirm (the block-time snapshot is
+immutable; provenance stays the one chosen at suggest).
 
 **`recon_status`**
 ```ts
