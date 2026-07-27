@@ -133,7 +133,7 @@ passthrough, guardrails (×3), injections (×2).
 **Runner** (`apps/cli`, `pnpm --filter @reconcil/cli evals -- --suite core --runs 3`):
 a fresh agent session per case on the **Anthropic SDK Tool Runner**
 (`client.beta.messages.toolRunner` + `betaTool`; the brief says "Agent SDK" — this is the
-concrete choice, see brief §Stack), with the 11 MCP tools bound in-process over a
+concrete choice, see brief §Stack), with the 19 MCP tools bound in-process over a
 fixture-seeded database (ADR-012 — no server in the loop). Each tool's citation envelope is
 captured to build the Transcript; results land in a report artifact (JSON + Markdown
 scorecard). The runner is the only live-LLM component; every grader downstream is
