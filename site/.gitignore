@@ -1,0 +1,8 @@
+# Standalone site project (npm). Root .gitignore already ignores node_modules/ globally;
+# these are the Next.js build artifacts specific to this app.
+/node_modules
+/.next
+/out
+/.turbo
+*.tsbuildinfo
+next-env.d.ts
