@@ -79,6 +79,9 @@ implementation-ready state. Start here.
 
 ## Status
 
-Design complete; implementation not started. Next actions: scaffold the monorepo
-(week 1), capture the first provider fixtures, stand up `db` migrations from
-`schema.sql`. Kill list and gate criteria: `brief.md`.
+Design and the full engineering roadmap are complete: deterministic ingestion, pricing,
+ledger (weeks 1–3), Face A exporters (close pack, PDF), and Face B reconciliation (import
+→ suggest → confirm/reject → status → journal drafts) are implemented, exposed as a
+19-tool MCP surface, behind a green CI gate (build, lint, depcruise, unit + integration,
+hermetic evals). What remains is the **business** validation gate — problem interviews,
+pricing, LOIs. Kill list and gate criteria: `brief.md`.

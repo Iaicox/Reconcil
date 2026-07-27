@@ -17,10 +17,10 @@ Claude API constrains tool names to `^[a-zA-Z0-9_-]+$`, and dots break other cli
 The namespace is a prefix convention, mirrored in the docs and code layout.
 
 All tools are declared with MCP annotations: `readOnlyHint: true` everywhere except the
-five write tools (`ledger_track_wallet`, `directory_upsert_entity`,
-`recon_import_invoices`, `recon_confirm_match`, `recon_reject_match`) and the three
-export tools (produce files). `destructiveHint: false` on all — nothing in the system
-deletes or mutates ledger data (P8: read-only by construction).
+six write tools (`ledger_track_wallet`, `directory_upsert_entity`, `recon_import_invoices`,
+`recon_suggest_matches`, `recon_confirm_match`, `recon_reject_match`) and the three export
+tools (produce files). `destructiveHint: false` on all — nothing in the system deletes or
+mutates ledger data (P8: read-only by construction).
 
 ## 2. Response envelope
 

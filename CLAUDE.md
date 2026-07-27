@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Design phase is complete; the monorepo scaffold is in place: pnpm workspaces +
-Turborepo, TypeScript strict with project references, 3 apps / 9 packages (see
-`docs/architecture/00-overview.md` §4), dependency-cruiser boundary rules,
-docker-compose, GitHub Actions CI. Business logic is not implemented yet — packages
-are documented stubs. Feature work follows the roadmap in `docs/brief.md` (weeks 1–3:
-core, db, ingestion, pricing, ledger, worker). The stack is decided — see the ADRs
-before proposing alternatives.
+The engineering roadmap is complete. On the monorepo scaffold (pnpm workspaces +
+Turborepo, TypeScript strict with project references, 3 apps / 9 packages — see
+`docs/architecture/00-overview.md` §4 — dependency-cruiser boundary rules, docker-compose,
+GitHub Actions CI) the full product is implemented: deterministic ingestion, pricing, and
+ledger (weeks 1–3), Face A exporters (close pack, PDF), and Face B reconciliation (import
+→ suggest → confirm/reject → status → journal drafts). The MCP surface is **19 tools** in
+`@reconcil/mcp-tools`. What remains is the business validation gate (interviews, pricing,
+LOIs — `docs/brief.md`), not code. The stack is decided — see the ADRs before proposing
+alternatives.
 
 ## Source of truth
 
@@ -29,7 +31,7 @@ pnpm install      # Node >= 22.12, pnpm 11 (packageManager is pinned)
 pnpm build        # turbo run build — tsc -b with project references
 pnpm typecheck    # turbo run typecheck (build-ordered tsc -b)
 pnpm lint         # eslint per package (flat config at repo root)
-pnpm test         # vitest per package (--passWithNoTests on stubs)
+pnpm test         # vitest per package (--passWithNoTests for test-less packages)
 pnpm depcruise    # boundary rules + signing-lib ban — needs `pnpm build` first
 ```
 

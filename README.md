@@ -4,7 +4,9 @@ A self-hostable, MCP-native on-chain ledger for crypto accounting: deterministic
 ingestion and computation over EVM wallet activity, exposed to LLM agents through
 auditable MCP tools.
 
-**Status:** design complete, implementation in progress (scaffolding).
+**Status:** design and the engineering roadmap are complete — deterministic ingestion,
+pricing, ledger, Face A exporters, and Face B reconciliation are implemented, with a
+19-tool MCP surface. Next is the business validation gate (see `docs/brief.md`).
 
 ## Documentation
 
