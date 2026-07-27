@@ -1,5 +1,5 @@
 import { CONTACT_MAILTO, GITHUB_URL, SITE_NAME } from '../_lib/site';
-import { Container, GitHubIcon } from './ui';
+import { Container, GitHubIcon, LogoMark } from './ui';
 
 export function Footer() {
   return (
@@ -7,18 +7,7 @@ export function Footer() {
       <Container className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
         <div className="text-center sm:text-left">
           <div className="flex items-center justify-center gap-2 sm:justify-start">
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-emerald-600 text-white">
-              <svg viewBox="0 0 32 32" className="h-4 w-4" aria-hidden="true">
-                <path
-                  d="M8 16.8l4.6 4.6L24 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
+            <LogoMark className="h-7 w-7 rounded-md" iconClassName="h-4 w-4" />
             <span className="font-semibold">{SITE_NAME}</span>
           </div>
           <p className="mt-3 max-w-md text-sm text-zinc-500 dark:text-zinc-500">
@@ -43,7 +32,7 @@ export function Footer() {
           >
             Contact
           </a>
-          <span className="text-zinc-400 dark:text-zinc-600">Apache-2.0</span>
+          <span className="text-zinc-500 dark:text-zinc-400">Apache-2.0</span>
         </div>
       </Container>
     </footer>

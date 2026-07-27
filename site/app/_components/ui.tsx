@@ -39,6 +39,31 @@ export function ButtonLink({
   );
 }
 
+// The Reconcil wordmark glyph (emerald square + checkmark). Also rendered standalone as the
+// file-based favicon at app/icon.svg — keep that path in sync if the mark ever changes.
+export function LogoMark({
+  className = 'h-8 w-8 rounded-lg',
+  iconClassName = 'h-5 w-5',
+}: {
+  className?: string;
+  iconClassName?: string;
+}) {
+  return (
+    <span className={`grid place-items-center bg-emerald-600 text-white ${className}`}>
+      <svg viewBox="0 0 32 32" className={iconClassName} aria-hidden="true">
+        <path
+          d="M8 16.8l4.6 4.6L24 10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
 export function GitHubIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
