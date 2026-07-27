@@ -80,6 +80,8 @@ export async function runExport<T>(
   // The `exports` registration and the tool_call audit row commit in one transaction (C2),
   // under the id the manifest already cites. The files are already on disk (best-effort); an
   // orphaned file dir from a rolled-back tx is harmless — the atomicity target is the two rows.
+  // (On rollback the on-disk manifest cites a tool_call_id absent from `tool_calls`; expected,
+  // since nothing reconciles disk manifests against the audit table.)
   return runWriteTool<T>(ctx, {
     toolName: opts.toolName,
     args: opts.rawArgs,

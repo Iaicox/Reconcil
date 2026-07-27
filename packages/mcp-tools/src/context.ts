@@ -23,6 +23,11 @@ export interface TxContext {
  * Either handle. Shared write plumbing (`persistToolCall` and the write repositories) is
  * typed against this supertype so it runs identically at top level (`Db`) or inside the
  * atomicity helper's transaction (`Tx`) — widening a parameter to it breaks no existing caller.
+ *
+ * Caveat for a future drizzle bump: calling a method on the `Db | Tx` union (notably
+ * `.transaction()`, which suggestMatches/upsertEntity invoke to nest a savepoint) only
+ * type-resolves while both handles keep structurally identical signatures. If a drizzle
+ * upgrade diverges them, narrow at the call site (e.g. accept `Tx` there) rather than widening.
  */
 export interface DbContext {
   db: Db | Tx;

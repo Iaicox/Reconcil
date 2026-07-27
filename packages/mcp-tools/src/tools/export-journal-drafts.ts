@@ -92,7 +92,9 @@ export async function exportJournalDrafts(
   const warnings = [...data.coverageWarnings, ...residueWarnings];
 
   // The `exports` registration and the tool_call audit row commit in one transaction (C2),
-  // under the up-front id the manifest cites. The file is already on disk (best-effort).
+  // under the up-front id the manifest cites. The file is already on disk (best-effort); on
+  // rollback its manifest cites a tool_call_id absent from `tool_calls` (expected — nothing
+  // reconciles disk manifests against the audit table).
   return runWriteTool<ExportJournalDraftsOutput>(ctx, {
     toolName: TOOL_NAME,
     args: input as Record<string, unknown>,
