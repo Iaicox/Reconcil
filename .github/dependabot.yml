@@ -14,8 +14,8 @@ updates:
       interval: monthly
     commit-message:
       prefix: chore(actions)
-    labels:
-      - dependencies
+    # No `labels:` block on purpose: Dependabot already labels its PRs `dependencies`, and a
+    # custom label is only applied if it already exists in the repo (this one doesn't).
     # One PR per action would be noise for a 6-action repo; batch the routine bumps and let
     # majors (which can carry runtime/breaking changes, as v4 -> v7 did here) arrive alone.
     groups:
