@@ -1,0 +1,27 @@
+# Keeps GitHub Actions versions from silently drifting into deprecation. The Node-20 runtime
+# deprecation that prompted this file only ever surfaced as a per-run annotation nobody reads;
+# a monthly PR is the version that gets noticed.
+#
+# Scoped to `github-actions` on purpose: the npm/pnpm ecosystems are covered by the lockfile,
+# `pnpm check:supply-chain` (ADR-011 signing/key-material ban) and CodeQL, and opening
+# dependency PRs against the workspace is a separate decision.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # "/" covers .github/workflows/**, not just the repo root.
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore(actions)
+    # No `labels:` block on purpose: Dependabot already labels its PRs `dependencies`, and a
+    # custom label is only applied if it already exists in the repo (this one doesn't).
+    # One PR per action would be noise for a 6-action repo; batch the routine bumps and let
+    # majors (which can carry runtime/breaking changes, as v4 -> v7 did here) arrive alone.
+    groups:
+      actions-minor:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
