@@ -1,10 +1,68 @@
 @import "tailwindcss";
 
-/* Tailwind v4 is configured CSS-first. `dark:` variants default to prefers-color-scheme,
-   which is exactly the theme behaviour we want (system light/dark, no toggle). */
-@theme {
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, Helvetica, Arial, sans-serif;
+/* Semantic tokens from the design pack (Reconcil Landing.dc.html, round 1): a single green
+   system — near-black with a green cast, one green for brand and action, amber reserved for
+   the review state. Light/dark follows prefers-color-scheme only, no toggle, so the tokens
+   flip here and components never carry `dark:` variants. */
+:root {
+  --paper: #f1f4f0;
+  --surface: #ffffff;
+  --rule: #dbe2d9;
+  --ink: #101512;
+  --ink-2: #4c5852;
+  --ink-3: #62706a;
+  --brand: #1f7a4d;
+  --brand-hover: #1a6a42;
+  --tile: #1f7a4d;
+  --tile-ink: #ffffff;
+  --state: #8a5a0f;
+  --state-bg: #fbf1df;
+  --dr: #afb9ae;
+  --hl: #fafcf9;
+  --strip: #fafcf9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0a0d0b;
+    --surface: #121613;
+    --rule: #232a26;
+    --ink: #f0f3ef;
+    --ink-2: #9da8a1;
+    --ink-3: #7d8a83;
+    --brand: #2f8455;
+    --brand-hover: #276f47;
+    --tile: #79dca8;
+    --tile-ink: #0a0d0b;
+    --state: #e0a94a;
+    --state-bg: rgb(224 169 74 / 0.12);
+    --dr: #39423c;
+    --hl: #171c19;
+    --strip: #0f1310;
+  }
+}
+
+/* `inline` so utilities reference the var() and pick up the media-query flip at runtime. */
+@theme inline {
+  --font-sans: var(--font-instrument), Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", Menlo, Consolas,
+    monospace;
+
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-rule: var(--rule);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-tile: var(--tile);
+  --color-tile-ink: var(--tile-ink);
+  --color-state: var(--state);
+  --color-state-bg: var(--state-bg);
+  --color-dr: var(--dr);
+  --color-hl: var(--hl);
+  --color-strip: var(--strip);
 }
 
 :root {
@@ -15,8 +73,4 @@ html {
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-}
-
-body {
-  font-family: var(--font-sans);
 }
