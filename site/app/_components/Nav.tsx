@@ -1,5 +1,7 @@
-import { ARCHITECTURE_URL, CONTACT_MAILTO, GITHUB_URL, SITE_NAME } from '../_lib/site';
-import { ButtonLink, Container, LogoMark } from './ui';
+import { ARCHITECTURE_URL, GITHUB_URL, SITE_NAME } from '../_lib/site';
+import { CopyEmail } from './CopyEmail';
+import { Container, LogoMark } from './ui';
+import { ThemeToggle } from './ThemeToggle';
 
 const links = [
   { href: ARCHITECTURE_URL, label: 'Architecture' },
@@ -10,8 +12,10 @@ const linkClass =
   'font-mono text-xs uppercase tracking-[0.07em] text-ink-2 transition-colors hover:text-ink ' +
   'focus-visible:outline-2 focus-visible:outline-offset-[3px] focus-visible:outline-ink';
 
-// Sticky top bar on the page rule. Desktop: two repo links + the interview CTA. Mobile: a
-// 44px hamburger opening a no-JS <details> panel with the same three destinations.
+// Sticky top bar on the page rule. Desktop: two repo links + the theme toggle (the booking
+// CTA is temporarily withdrawn — contact is the copyable address). Mobile: the toggle stays
+// visible next to a 44px hamburger that opens a no-JS <details> panel with the links and
+// the address.
 export function Nav() {
   return (
     <header className="sticky top-0 z-30 border-b border-rule bg-paper">
@@ -38,40 +42,39 @@ export function Nav() {
               {l.label}
             </a>
           ))}
-          <ButtonLink href={CONTACT_MAILTO} className="h-10 px-[18px] text-[13px] tracking-[0.02em]">
-            Book 20 minutes
-          </ButtonLink>
+          <ThemeToggle />
         </nav>
 
-        <details className="md:hidden">
-          <summary
-            aria-label="Menu"
-            className="-mr-2.5 flex h-11 w-11 cursor-pointer list-none items-center justify-center [&::-webkit-details-marker]:hidden"
-          >
-            <span className="flex w-[18px] flex-col gap-1">
-              <span className="h-[1.5px] bg-ink-2" />
-              <span className="h-[1.5px] bg-ink-2" />
-            </span>
-          </summary>
-          <div className="absolute inset-x-0 top-full border-b border-rule bg-paper">
-            <div className="flex flex-col px-5 pt-2 pb-5">
-              {links.map((l) => (
-                <a
-                  key={l.href}
-                  href={l.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`${linkClass} py-3`}
-                >
-                  {l.label}
-                </a>
-              ))}
-              <ButtonLink href={CONTACT_MAILTO} className="mt-3 h-[50px] w-full text-sm">
-                Book 20 minutes
-              </ButtonLink>
+        <div className="flex items-center gap-1 md:hidden">
+          <ThemeToggle />
+          <details>
+            <summary
+              aria-label="Menu"
+              className="-mr-2.5 flex h-11 w-11 cursor-pointer list-none items-center justify-center [&::-webkit-details-marker]:hidden"
+            >
+              <span className="flex w-[18px] flex-col gap-1">
+                <span className="h-[1.5px] bg-ink-2" />
+                <span className="h-[1.5px] bg-ink-2" />
+              </span>
+            </summary>
+            <div className="absolute inset-x-0 top-full border-b border-rule bg-paper">
+              <div className="flex flex-col px-5 pt-2 pb-5">
+                {links.map((l) => (
+                  <a
+                    key={l.href}
+                    href={l.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`${linkClass} py-3`}
+                  >
+                    {l.label}
+                  </a>
+                ))}
+                <CopyEmail className="mt-3 text-[13px]" />
+              </div>
             </div>
-          </div>
-        </details>
+          </details>
+        </div>
       </Container>
     </header>
   );

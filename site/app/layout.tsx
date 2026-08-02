@@ -40,10 +40,20 @@ export const metadata: Metadata = {
   },
 };
 
+// Runs parser-blocking before anything paints: re-applies a theme the visitor chose with
+// the nav toggle (data-theme on <html> + localStorage). Without a stored choice the page
+// keeps following prefers-color-scheme — see globals.css.
+const themeInit =
+  `try{var t=localStorage.getItem("theme");` +
+  `if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${instrument.variable} ${plexMono.variable}`}>
-      <body className="bg-paper font-sans text-ink antialiased">{children}</body>
+      <body className="bg-paper font-sans text-ink antialiased">
+        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+        {children}
+      </body>
     </html>
   );
 }

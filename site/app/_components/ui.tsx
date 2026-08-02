@@ -13,9 +13,10 @@ type ButtonLinkProps = {
   className?: string;
 };
 
-// The one action treatment: a sharp-cornered brand-green rectangle, mono label. All CTAs are
-// plain links (mailto / GitHub) — no client JS. Height/padding come from the call site
-// (nav 40px, hero 46px, mobile 50px in the comps).
+// The one action treatment: a sharp-cornered brand-green rectangle, mono label. CTAs are
+// plain links (mailto / GitHub); the only client JS on the page is the theme toggle and the
+// copy-email affordance. Height/padding come from the call site (hero 46px, mobile 50px in
+// the comps).
 export function ButtonLink({ href, children, external = false, className = '' }: ButtonLinkProps) {
   const rel = external ? 'noopener noreferrer' : undefined;
   const target = external ? '_blank' : undefined;

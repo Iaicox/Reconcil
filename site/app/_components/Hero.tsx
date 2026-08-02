@@ -1,7 +1,8 @@
 import { Fragment } from 'react';
 
 import { CONTACT_MAILTO } from '../_lib/site';
-import { ButtonLink, Container, DoubleRule, RuledLink } from './ui';
+import { CopyEmail } from './CopyEmail';
+import { ButtonLink, Container, DoubleRule } from './ui';
 
 // Every figure below is verbatim from the repository's demo fixture (docs/design/
 // real-materials.md): the INV-OPEN suggestion as recon_suggest_matches returns it.
@@ -220,19 +221,14 @@ export function Hero() {
                 It runs on your own machine and never holds a key.
               </span>
             </p>
-            <div className="mt-6 flex flex-col gap-1.5 lg:mt-[26px] lg:flex-row lg:items-center lg:gap-5">
+            <div className="mt-6 flex flex-col gap-2.5 lg:mt-[26px] lg:flex-row lg:items-center lg:gap-5">
               <ButtonLink
                 href={CONTACT_MAILTO}
                 className="h-[50px] w-full text-sm lg:h-[46px] lg:w-auto lg:px-[22px]"
               >
-                Book 20 minutes
+                Email me
               </ButtonLink>
-              <RuledLink
-                href={CONTACT_MAILTO}
-                className="self-center text-[13px] lg:self-auto lg:text-[13.5px]"
-              >
-                or email instead
-              </RuledLink>
+              <CopyEmail className="self-center text-[13px] lg:self-auto lg:text-[13.5px]" />
             </div>
             <p className="mt-4 hidden font-mono text-xs leading-[1.65] text-ink-3 lg:mt-[22px] lg:block">
               Early, and validating with a handful of teams. Read-only by design — no keys, no

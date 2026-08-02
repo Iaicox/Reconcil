@@ -1,5 +1,6 @@
 import { CONTACT_MAILTO } from '../_lib/site';
-import { ButtonLink, Container, DoubleRule, RuledLink } from './ui';
+import { CopyEmail } from './CopyEmail';
+import { ButtonLink, Container, DoubleRule } from './ui';
 
 // Validation-honest closing CTA. The point of the page is to recruit interview subjects,
 // so the ask is a conversation, not a signup.
@@ -19,11 +20,9 @@ export function CtaBand() {
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row sm:gap-5">
             <ButtonLink href={CONTACT_MAILTO} className="h-[46px] px-[22px] text-sm">
-              Book 20 minutes
+              Email me
             </ButtonLink>
-            <RuledLink href={CONTACT_MAILTO} className="text-[13.5px]">
-              or email instead
-            </RuledLink>
+            <CopyEmail className="text-[13.5px]" />
           </div>
         </div>
       </Container>

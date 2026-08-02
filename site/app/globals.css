@@ -2,8 +2,12 @@
 
 /* Semantic tokens from the design pack (Reconcil Landing.dc.html, round 1): a single green
    system — near-black with a green cast, one green for brand and action, amber reserved for
-   the review state. Light/dark follows prefers-color-scheme only, no toggle, so the tokens
-   flip here and components never carry `dark:` variants. */
+   the review state. The tokens flip here and components never carry `dark:` variants.
+   Theme resolution: an explicit `data-theme` on <html> (set by ThemeToggle, persisted in
+   localStorage) wins; without it prefers-color-scheme decides. The dark block therefore
+   appears twice — media-driven and attribute-driven — and the two must stay identical.
+   `--show-sun`/`--show-moon` drive which ThemeToggle icon is visible, so the toggle needs
+   no JS state and cannot mismatch on hydration. */
 :root {
   --paper: #f1f4f0;
   --surface: #ffffff;
@@ -20,10 +24,12 @@
   --dr: #afb9ae;
   --hl: #fafcf9;
   --strip: #fafcf9;
+  --show-sun: none;
+  --show-moon: block;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --paper: #0a0d0b;
     --surface: #121613;
     --rule: #232a26;
@@ -39,7 +45,29 @@
     --dr: #39423c;
     --hl: #171c19;
     --strip: #0f1310;
+    --show-sun: block;
+    --show-moon: none;
   }
+}
+
+:root[data-theme='dark'] {
+  --paper: #0a0d0b;
+  --surface: #121613;
+  --rule: #232a26;
+  --ink: #f0f3ef;
+  --ink-2: #9da8a1;
+  --ink-3: #7d8a83;
+  --brand: #2f8455;
+  --brand-hover: #276f47;
+  --tile: #79dca8;
+  --tile-ink: #0a0d0b;
+  --state: #e0a94a;
+  --state-bg: rgb(224 169 74 / 0.12);
+  --dr: #39423c;
+  --hl: #171c19;
+  --strip: #0f1310;
+  --show-sun: block;
+  --show-moon: none;
 }
 
 /* `inline` so utilities reference the var() and pick up the media-query flip at runtime. */
@@ -67,6 +95,14 @@
 
 :root {
   color-scheme: light dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 html {

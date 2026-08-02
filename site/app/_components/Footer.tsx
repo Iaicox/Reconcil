@@ -1,4 +1,5 @@
-import { CONTACT_MAILTO, GITHUB_URL, SITE_NAME } from '../_lib/site';
+import { GITHUB_URL, SITE_NAME } from '../_lib/site';
+import { CopyEmail } from './CopyEmail';
 import { Container, GitHubIcon, LogoMark } from './ui';
 
 export function Footer() {
@@ -26,9 +27,7 @@ export function Footer() {
             <GitHubIcon className="h-4 w-4" />
             GitHub
           </a>
-          <a href={CONTACT_MAILTO} className="text-ink-2 transition-colors hover:text-ink">
-            Contact
-          </a>
+          <CopyEmail className="text-[13px]" />
           <span className="font-mono text-[13px] text-ink-3">Apache-2.0</span>
         </div>
       </Container>
