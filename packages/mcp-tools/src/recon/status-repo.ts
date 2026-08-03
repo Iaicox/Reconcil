@@ -10,7 +10,7 @@
  *                            count recon_suggest_matches defers to (its own can under-report);
  *   - overpayments:          the excess (Σ confirmed fiat − amount) per overpaid record.
  *
- * A settlement is a verified-stablecoin transfer with **exactly one** endpoint a tracked
+ * A settlement is a verified-token transfer with **exactly one** endpoint a tracked
  * (client-scoped) wallet — inbound receivable-settlements and outbound payable-settlements.
  * Internal wallet↔wallet transfers (both endpoints in scope) are NOT settlements and are
  * excluded via `externalCondition` (the shared, no-drift direction definition, scope-sql.ts);
@@ -103,7 +103,7 @@ export async function computeReconStatus(
         recordId: r.recordId, externalRef: r.externalRef, excess: r.excess, currency: r.currency,
       }));
 
-      // 4. Unmatched settlements: verified-stablecoin transfers touching the tenant's
+      // 4. Unmatched settlements: verified-token transfers touching the tenant's
       //    (client-scoped) wallets, in period, with no confirmed leg. Zero wallets → none.
       const walletRows = await tx
         .select({ address: wallets.address, clientId: wallets.clientId })

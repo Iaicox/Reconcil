@@ -12,7 +12,7 @@ const usage = `reconcil CLI
 Commands:
   evals        run the eval suite + demo gate (04-testing.md §5/§6)
                  pnpm --filter @reconcil/cli evals -- --suite core --runs 3
-                 pnpm --filter @reconcil/cli evals -- --smoke        # 5 cases × 1 run
+                 pnpm --filter @reconcil/cli evals -- --smoke        # 6 cases × 1 run
                flags: --model <id> (default claude-opus-4-8), --out <dir>
                needs ANTHROPIC_API_KEY; DATABASE_URL or Docker (testcontainers).
   repl         interactive demo agent over the tenant's tracked wallets
