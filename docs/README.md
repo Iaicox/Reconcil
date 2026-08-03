@@ -1,9 +1,29 @@
-# Design Documentation
+# Documentation
 
-On-chain accounting ledger with an MCP-native interface. Designed 2026-07-14, to
-implementation-ready state. Start here.
+On-chain accounting ledger with an MCP-native interface. Two tracks — pick by what you want
+to do.
 
-## Reading order
+## Track 1 — use it
+
+[**`guide/`**](guide/README.md) takes you from `git clone` to a confirmed match and a
+QuickBooks journal draft. Every command in it was executed against a live stack.
+
+| | |
+|---|---|
+| [Quickstart](guide/01-quickstart.md) | Clone to a running stack answering its first question |
+| [Connect a client](guide/02-connect-a-client.md) | Claude Desktop, Claude Code, streamable HTTP, the bundled REPL |
+| [Face A — analytics](guide/03-face-a-analytics.md) | Track wallets, ask questions, export a close pack, prove any number |
+| [Face B — reconciliation](guide/04-face-b-reconciliation.md) | Invoices → matching → confirmation → journal drafts |
+| [Operations](guide/05-operations.md) | Environment, ingestion, warnings, troubleshooting, backup, security |
+| [Tool cheat sheet](guide/06-tool-cheatsheet.md) | All 19 tools on one page |
+| [Contributing](guide/07-contributing.md) | Build, test, extend, and the red lines |
+
+## Track 2 — understand the decisions
+
+The design pack: scope, architecture, and the reasoning behind every constraint. Designed
+2026-07-14 to implementation-ready state, and kept current with the code.
+
+Reading order:
 
 1. [`brief.md`](brief.md) — canonical product brief: scope, constraints, roadmap, gate.
 2. [`architecture/00-overview.md`](architecture/00-overview.md) — C4 context & containers, bounded contexts, monorepo, deployment.
@@ -85,3 +105,6 @@ ledger (weeks 1–3), Face A exporters (close pack, PDF), and Face B reconciliat
 19-tool MCP surface, behind a green CI gate (build, lint, depcruise, unit + integration,
 hermetic evals). What remains is the **business** validation gate — problem interviews,
 pricing, LOIs. Kill list and gate criteria: `brief.md`.
+
+The product is documented for use as well as for design: [`guide/`](guide/README.md) covers
+installation, client setup, both workflows, and operations.
