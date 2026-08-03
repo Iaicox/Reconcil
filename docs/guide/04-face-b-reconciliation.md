@@ -74,8 +74,8 @@ Nothing matched? Override explicitly — `mapping` maps **CSV column → canonic
   anyway.
 
 Row errors come back as `{ row, code, message }` with codes like `MISSING_FIELD`,
-`INVALID_AMOUNT`, `INVALID_DATE`, `INVALID_VAT`, `INVALID_ADDRESS`, `INVALID_DIRECTION`,
-`WRONG_FIELD_COUNT`; file-level codes are `EMPTY`, `NO_EXTERNAL_REF_COLUMN`,
+`MISSING_CURRENCY`, `INVALID_AMOUNT`, `INVALID_DATE`, `INVALID_VAT`, `INVALID_ADDRESS`,
+`INVALID_DIRECTION`, `WRONG_FIELD_COUNT`; file-level codes are `EMPTY`, `NO_EXTERNAL_REF_COLUMN`,
 `NO_AMOUNT_COLUMN`, `NO_CURRENCY_COLUMN`, `MAPPED_COLUMN_NOT_FOUND`, `TOO_MANY_ROWS`.
 
 ## 2. Import
@@ -181,6 +181,9 @@ Defaults: amount tolerance **1%**, date window **14 days**. Widen them per call:
 { "tolerances": { "amount_pct": 2.5, "date_window_days": 30 } }
 ```
 
+(A third knob exists: `amount_abs`, a decimal string in the record's currency — the band is
+`pct · open + abs`, useful when a fixed fee eats into small settlements.)
+
 That widens *candidate discovery* only. It never changes how a record's status is derived —
 status always uses the canonical band, so a persisted accounting fact cannot depend on a
 transient query parameter (ADR-010).
@@ -280,6 +283,10 @@ This is the authoritative snapshot — the answer to "where do we stand on recei
 carries an **executable** drilldown: run that exact call to enumerate the payments still
 looking for an invoice.
 
+What counts as an unmatched settlement: a **verified-token** transfer (not only stablecoins —
+a volatile-token settlement counts until it is confirmed) with exactly one endpoint among
+your tracked wallets (internal wallet↔wallet moves are excluded) and no confirmed match leg.
+
 Note the period semantics: records are filtered by `issued_on`, settlements by `block_time`.
 
 ## 6. Export journal drafts
@@ -340,11 +347,16 @@ reported rather than guessed:
             "unmapped_categories": ["accounts_receivable", "crypto_asset", "vat_output"] } }
 ```
 
-The file still generates — with the category names in the account column — so you can see the
-shape before you finish mapping. Fix the mapping and re-export before importing anywhere.
+The file still generates — unmapped categories fall back to built-in default account names
+(`Crypto Assets`, `Accounts Receivable`, `VAT Output`, …) in the account column — so you can
+see the shape before you finish mapping. Fix the mapping and re-export before importing
+anywhere.
 
-`balanced: true` is guaranteed per currency; if rounding leaves a residue, a `rounding` line
-absorbs it and a `ROUNDING_RESIDUE` warning is raised.
+`balanced: true` is guaranteed per currency — by construction, not by correction. Every entry
+is internally balanced under face-value valuation, so no rounding line is ever appended (a
+standalone one-sided line is itself an unbalanced journal that QuickBooks and Xero reject);
+if debits and credits ever diverged, the export would fail with an invariant error rather
+than produce a file.
 
 ### It is a draft
 

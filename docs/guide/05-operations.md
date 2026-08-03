@@ -142,7 +142,7 @@ They are the system telling you the limits of its own answer.
 | `PRICE_MISSING` | No price snapshot for a (token, date). The fiat value was omitted. | Let the price job catch up, or accept the token-denominated figure. Never substitute your own rate into an exported pack without noting it. |
 | `FX_DATE_SHIFTED` | A weekend/holiday: the previous ECB rate was used. | Informational — standard accounting practice, but disclose it if material. |
 | `SANITIZED_HEAVY` | More than 30% of an untrusted string was stripped. | A token or counterparty name was mostly hostile characters. Treat that counterparty with suspicion. |
-| `ROUNDING_RESIDUE` | The journal includes a rounding-difference line. | Check the `rounding` account mapping is correct before importing. |
+| `ROUNDING_RESIDUE` | A per-currency rounding residue was non-zero on an export. | You should not see this today: current exporters balance by construction (a journal draft with a non-zero residue fails instead of exporting), and the manifest's `rounding_residues` records `0.00` per currency. Treat an occurrence as a bug — do not import the file. |
 
 ## Error codes
 
@@ -236,9 +236,10 @@ It is talking to a stale image. `docker compose up -d --build`.
 Missing or wrong bearer key, or the key was minted for a different tenant. `/healthz` needs
 no auth — if that answers and `/mcp` does not, it is the key.
 
-**`415 Unsupported Media Type` on `/mcp`**
-Missing `Content-Type: application/json`. Streamable HTTP also needs
-`Accept: application/json, text/event-stream`.
+**`406 Not Acceptable` or `415 Unsupported Media Type` on `/mcp`**
+Streamable HTTP checks `Accept` first: it must list both `application/json` and
+`text/event-stream`, or you get 406 — a request with no headers at all lands here. With a
+correct `Accept`, a missing or wrong `Content-Type: application/json` returns 415.
 
 **`file_path import is not configured (set RECONCIL_IMPORT_DIR)`**
 Working as designed — see [Invoice imports](#invoice-imports-from-disk) above, or pass the

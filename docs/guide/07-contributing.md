@@ -110,13 +110,15 @@ The runner provisions its own Postgres via testcontainers if `DATABASE_URL` is u
 | `check` | PR + main | install, build, lint, depcruise, supply-chain scan |
 | `test` | PR + main | unit + property + contract |
 | `schema-parity` | PR + main | Drizzle migrations vs `docs/architecture/schema.sql`, `pg_dump` diff must be empty |
-| `integration` | PR + main | Postgres service container, fixture ingest, ledger assertions |
+| `integration` | PR + main | testcontainers Postgres per suite, fixture ingest, ledger assertions |
 | `evals-smoke` | PR | 6-case subset, 1 run — cheap contract-drift catch |
 | `evals-full` | nightly + manual | 30 cases × 3 runs, publishes a scorecard artifact |
 | `e2e-smoke` | manual / pre-release | the real compose stack (`pnpm smoke:compose`) |
 
-`ANTHROPIC_API_KEY` is used only by `evals-*`. Provider keys are never needed in CI. A
-missing key makes the eval jobs **skip**, never fail red.
+All of the above are jobs of the single `ci` workflow, which also runs on the nightly
+schedule and on manual dispatch; a small `evals-preflight` helper job resolves whether
+`ANTHROPIC_API_KEY` is present. That key is used only by `evals-*`. Provider keys are never
+needed in CI. A missing key makes the eval jobs **skip**, never fail red.
 
 ## Red lines
 
@@ -173,9 +175,11 @@ code changes. That "chains are configuration" property is a deliberate architect
 
 ## Working with the board
 
-Tasks live in `.kanbn/` (kanbn). Keep the card current while you work: blockers go in the
-card as a comment plus a `blocked` tag, not only in chat. The task id comes from the card's
-H1 heading, not the filename; the column lives only in `index.md`.
+The maintainer tracks tasks on a local kanbn board in `.kanbn/` — it is **gitignored**, so a
+clone does not contain it and external contributors can ignore this section. If you work with
+the maintainer directly: keep the card current, blockers go in the card as a comment plus a
+`blocked` tag, the task id comes from the card's H1 heading, and the column lives only in
+`index.md`. Everyone else: open a GitHub issue or PR.
 
 ## Conventions
 

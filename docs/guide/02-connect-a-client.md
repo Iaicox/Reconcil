@@ -74,10 +74,11 @@ The HTTP host exposes exactly two routes (ADR-003): `/healthz` (open) and `/mcp`
 entrypoint on its first run. The HTTP server does not create it. Run keygen too early and it
 tells you so:
 
+```json
+{"time":"…","level":"error","name":"mcp-server:keygen","msg":"keygen failed","err":{"name":"Error","message":"tenant not found: self-host — start the stdio server once to create the self-host tenant, or seed the tenant first"}}
 ```
-keygen failed: tenant not found: self-host — start the stdio server once to create
-the self-host tenant, or seed the tenant first
-```
+
+(A JSON log line on stderr — keygen keeps stdout clean for the key itself.)
 
 So: start the stdio server once (step 4 of the [Quickstart](01-quickstart.md#4-talk-to-it-over-stdio)),
 then mint the key:

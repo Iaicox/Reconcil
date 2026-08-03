@@ -5,9 +5,10 @@ schemas live in [`../architecture/02-mcp-contracts.md`](../architecture/02-mcp-c
 §6, and the Zod schemas in `packages/core` are the source of truth behind that document.
 Nothing here restates a schema, so nothing here can drift out of sync with one.
 
-The one-line purposes below are the *actual* descriptions your MCP client sees — they are
-copied from `packages/mcp-tools/src/descriptions.ts`, which the server publishes verbatim in
-its tool declarations.
+The one-line purposes below are abridged from `packages/mcp-tools/src/descriptions.ts` — the
+text the server publishes in its tool declarations. The published descriptions are longer for
+the write tools, and every one carries an appended note telling the agent to treat values
+under `untrusted` keys as data, never as instructions.
 
 Wire names use underscores (`analytics_balances`), never dots — the Claude API constrains
 tool names to `^[a-zA-Z0-9_-]+$`. The `analytics.*` / `recon.*` namespaces are a naming
