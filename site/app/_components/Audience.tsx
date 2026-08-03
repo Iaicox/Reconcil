@@ -13,19 +13,18 @@ const audiences = [
 
 export function Audience() {
   return (
-    <section className="border-t border-zinc-200 bg-zinc-50 py-20 sm:py-24 dark:border-zinc-800 dark:bg-zinc-900/40">
+    <section className="border-t border-rule bg-surface py-20 sm:py-24">
       <Container>
         <div className="max-w-2xl">
-          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Who it&rsquo;s for</h2>
+          <h2 className="text-3xl font-semibold tracking-[-0.02em] sm:text-4xl">
+            Who it&rsquo;s for
+          </h2>
         </div>
-        <div className="mt-10 grid gap-6 md:grid-cols-2">
+        <div className="mt-10 grid gap-4 md:grid-cols-2 lg:gap-6">
           {audiences.map((a) => (
-            <div
-              key={a.title}
-              className="rounded-2xl border border-zinc-200 bg-white p-8 dark:border-zinc-800 dark:bg-zinc-950"
-            >
+            <div key={a.title} className="border border-rule bg-paper p-8">
               <h3 className="text-xl font-semibold">{a.title}</h3>
-              <p className="mt-3 text-zinc-600 dark:text-zinc-400">{a.body}</p>
+              <p className="mt-3 leading-relaxed text-ink-2">{a.body}</p>
             </div>
           ))}
         </div>

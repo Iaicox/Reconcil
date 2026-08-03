@@ -1,5 +1,6 @@
 import { CONTACT_MAILTO } from '../_lib/site';
-import { ArrowIcon, ButtonLink, Container } from './ui';
+import { CopyEmail } from './CopyEmail';
+import { ButtonLink, Container, DoubleRule } from './ui';
 
 // Validation-honest closing CTA. The point of the page is to recruit interview subjects,
 // so the ask is a conversation, not a signup.
@@ -7,23 +8,21 @@ export function CtaBand() {
   return (
     <section className="py-20 sm:py-28">
       <Container>
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-600 px-8 py-16 text-center sm:px-16">
-          <h2 className="text-3xl font-bold tracking-tight text-white text-balance sm:text-4xl">
+        <div className="border border-rule bg-surface px-6 py-14 text-center sm:px-16 sm:py-16">
+          <h2 className="text-3xl font-semibold tracking-[-0.02em] text-balance sm:text-4xl">
             Want to shape it?
           </h2>
-          <p className="mx-auto mt-4 max-w-xl text-lg text-emerald-50 text-pretty">
+          <DoubleRule className="mx-auto mt-6 w-24" />
+          <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-ink-2 text-pretty">
             We&rsquo;re talking to a handful of teams that invoice in stablecoins and the
             accountants who serve them. If that&rsquo;s you, a 20-minute conversation would help a
             lot.
           </p>
-          <div className="mt-8 flex justify-center">
-            <ButtonLink
-              href={CONTACT_MAILTO}
-              className="bg-white text-emerald-700 hover:bg-emerald-50"
-            >
-              Get in touch
-              <ArrowIcon className="h-4 w-4" />
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row sm:gap-5">
+            <ButtonLink href={CONTACT_MAILTO} className="h-[46px] px-[22px] text-sm">
+              Email me
             </ButtonLink>
+            <CopyEmail className="text-[13.5px]" />
           </div>
         </div>
       </Container>

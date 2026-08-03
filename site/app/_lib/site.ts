@@ -13,7 +13,8 @@ export const SITE_DESCRIPTION =
 // Project GitHub Pages URL (github.io/Reconcil/). Used for absolute OG/canonical URLs.
 export const SITE_URL = 'https://iaicox.github.io/Reconcil/';
 export const GITHUB_URL = 'https://github.com/Iaicox/Reconcil';
+export const ARCHITECTURE_URL = `${GITHUB_URL}/tree/main/docs/architecture`;
 
-export const CONTACT_EMAIL = 'ilyshk999@gmail.com';
+export const CONTACT_EMAIL = 'mr.portulak@gmail.com';
 export const CONTACT_SUBJECT = 'Reconcil — interview';
 export const CONTACT_MAILTO = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(CONTACT_SUBJECT)}`;

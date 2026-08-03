@@ -28,24 +28,19 @@ export function HowItWorks() {
     <section className="py-20 sm:py-24">
       <Container>
         <div className="max-w-2xl">
-          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">How it works</h2>
-          <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
+          <h2 className="text-3xl font-semibold tracking-[-0.02em] sm:text-4xl">How it works</h2>
+          <p className="mt-4 text-lg leading-relaxed text-ink-2">
             From a wallet address and a stack of invoices to review-ready journal entries — in four
             steps, all deterministic.
           </p>
         </div>
 
-        <ol className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
           {steps.map((step) => (
-            <li
-              key={step.n}
-              className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/50"
-            >
-              <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                {step.n}
-              </span>
+            <li key={step.n} className="border border-rule bg-surface p-6">
+              <span className="font-mono text-sm font-semibold text-ink-3">{step.n}</span>
               <h3 className="mt-2 text-lg font-semibold">{step.title}</h3>
-              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{step.body}</p>
+              <p className="mt-2 text-sm leading-relaxed text-ink-2">{step.body}</p>
             </li>
           ))}
         </ol>

@@ -1,11 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Reconcil">
-  <rect width="32" height="32" rx="7" fill="#059669" />
-  <path
-    d="M8 16.8l4.6 4.6L24 10"
-    fill="none"
-    stroke="#ffffff"
-    stroke-width="3.2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>
+    .tile { fill: #1f7a4d; } .fg { fill: #ffffff; } .fg-s { stroke: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: #79dca8; } .fg { fill: #0a0d0b; } .fg-s { stroke: #0a0d0b; }
+    }
+  </style>
+  <rect class="tile" width="64" height="64" rx="15"/>
+  <path class="fg" d="M21.81 39.48L21.81 14.28L33.08 14.28Q35.81 14.28 37.84 15.21Q39.87 16.14 40.99 17.82Q42.11 19.5 42.11 21.74Q42.11 23.94 40.99 25.6Q39.87 27.27 37.84 28.19Q35.81 29.12 33.08 29.12L26.08 29.12L26.08 25.17L32.94 25.17Q34.86 25.17 35.89 24.27Q36.92 23.38 36.92 21.77Q36.92 20.13 35.91 19.27Q34.9 18.41 32.94 18.41L27.2 18.41L27.2 39.48ZM36.02 39.48L25.9 26.39L31.61 26.39L43.3 39.48Z"/>
+  <g class="fg-s" fill="none" opacity=".62">
+    <path d="M18 53L48 49M18 48L48 44" stroke-width="2" stroke-linecap="round"/>
+  </g>
 </svg>

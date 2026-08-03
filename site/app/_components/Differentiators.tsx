@@ -104,24 +104,26 @@ export function Differentiators() {
     <section className="py-20 sm:py-24">
       <Container>
         <div className="max-w-2xl">
-          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Why it&rsquo;s different</h2>
-          <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
+          <h2 className="text-3xl font-semibold tracking-[-0.02em] sm:text-4xl">
+            Why it&rsquo;s different
+          </h2>
+          <p className="mt-4 text-lg leading-relaxed text-ink-2">
             Not another hosted dashboard that holds your keys and your data. Reconcil is
             infrastructure you own.
           </p>
         </div>
 
-        <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-6">
           {features.map((f) => (
             <div
               key={f.title}
-              className="rounded-2xl border border-zinc-200 p-6 transition-colors hover:border-emerald-300 dark:border-zinc-800 dark:hover:border-emerald-800"
+              className="border border-rule bg-surface p-6 transition-colors hover:border-dr"
             >
-              <div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+              <div className="grid h-11 w-11 place-items-center border border-rule text-ink-2">
                 {f.icon}
               </div>
               <h3 className="mt-4 text-lg font-semibold">{f.title}</h3>
-              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{f.body}</p>
+              <p className="mt-2 text-sm leading-relaxed text-ink-2">{f.body}</p>
             </div>
           ))}
         </div>
