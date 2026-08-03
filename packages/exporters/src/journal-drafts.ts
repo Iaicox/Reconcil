@@ -9,9 +9,9 @@
  * `vat = V − net` (so `net + vat == V` — every entry is internally balanced):
  *   - receivable:  Dr crypto_asset V / Cr accounts_receivable net / Cr vat_output vat
  *   - payable:     Cr crypto_asset V / Dr accounts_payable   net / Dr vat_input  vat
- * Multi-currency exports are one file, balanced independently per currency (a
- * `rounding` line is appended only if a currency's debits and credits ever diverge —
- * they do not under face-value valuation, but the guarantee stands). Every artifact
+ * Multi-currency exports are one file, balanced independently per currency — by
+ * construction, never via a `rounding` correction line; a currency whose debits and
+ * credits diverge fails the render (invariant violation, see below). Every artifact
  * is a DRAFT (P8): a banner row + a `_DRAFT` filename. Hostile import strings
  * (`externalRef`, counterparty) are sanitized before they reach a cell (P7/C6), and
  * `toCsv` neutralizes spreadsheet formula injection (CWE-1236) as the second layer.
