@@ -25,7 +25,9 @@ Both raw and scaled exist, each exactly once:
 - **Code: `bigint` for raw, decimal lib for scaled/fiat**, branded types
   (`RawAmount`, `DecimalString`); ESLint forbids arithmetic on money via `number`.
 - **Fiat: unconstrained NUMERIC**, full precision internally; rounding (half-up, 2dp)
-  only at export boundaries, with a rounding-residue line guaranteeing balanced journals.
+  only at export boundaries; every exported journal balances per currency — the close-pack
+  draft via an appended rounding-residue line, the QBO/Xero drafts by construction (a
+  non-zero residue fails the export).
 - **The decimal library is [decimal.js](https://mikemcl.github.io/decimal.js/)**, chosen
   with the pricing slice where division first appears (fiat = qty × price × fx). It is a
   private clone at `precision: 40, rounding: ROUND_HALF_UP` (`packages/pricing/src/decimal.ts`),

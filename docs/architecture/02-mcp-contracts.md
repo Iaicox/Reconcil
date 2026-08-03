@@ -77,7 +77,7 @@ type WarningCode =
   | 'PRICE_MISSING'         // no snapshot for (token, date); value omitted, not guessed
   | 'FX_DATE_SHIFTED'       // weekend/holiday: previous ECB rate used
   | 'SANITIZED_HEAVY'       // >30% of an untrusted string was stripped
-  | 'ROUNDING_RESIDUE';     // export journal includes a rounding-difference line
+  | 'ROUNDING_RESIDUE';     // non-zero journal rounding residue recorded on an export (defensive — unreachable today)
 ```
 
 ## 3. Citation invariants (the contract, P2)
@@ -490,8 +490,8 @@ input:  { period: Period; target: 'qbo' | 'xero'; client_id?: string;
           account_mapping?: Record<string, string> }             // category -> account code
 output: { export_id: string; file: { name: string; path: string; sha256: string };
           lines: number; unmapped_categories: string[];
-          balanced: true;                                        // guaranteed: rounding line if needed
-          warnings: Warning[] }                                  // ROUNDING_RESIDUE when applicable
+          balanced: true;                                        // by construction: no rounding line; a residue fails the export
+          warnings: Warning[] }                                  // ROUNDING_RESIDUE is defensive only — unreachable today
 ```
 
 Journal files are **drafts**: header rows and file names carry `DRAFT — review required`

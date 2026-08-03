@@ -588,8 +588,9 @@ export type ExportPdfSummaryOutput = z.infer<typeof exportPdfSummaryOutput>;
  * confirmed leg's pinned fiat (face value, P5). `account_mapping` maps our line
  * categories (crypto_asset / accounts_receivable / accounts_payable / vat_output /
  * vat_input / rounding) to the caller's chart-of-accounts codes; unmapped-but-present
- * categories come back in `unmapped_categories`. `balanced` is a guarantee (a rounding
- * line balances each currency, with a `ROUNDING_RESIDUE` warning when one is added).
+ * categories come back in `unmapped_categories`. `balanced` is a guarantee by
+ * construction: every entry is internally balanced, no rounding line is ever appended,
+ * and a non-zero per-currency residue fails the export (invariant violation).
  */
 export const exportJournalDraftsInput = z
   .object({
