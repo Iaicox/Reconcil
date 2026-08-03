@@ -41,11 +41,18 @@ export const metadata: Metadata = {
 };
 
 // Runs parser-blocking before anything paints: re-applies a theme the visitor chose with
-// the nav toggle (data-theme on <html> + localStorage). Without a stored choice the page
-// keeps following prefers-color-scheme — see globals.css.
+// the nav toggle (data-theme on <html> + localStorage). Also owns the theme-color metas —
+// they are created here, NOT via the Next viewport export, because React re-applies
+// viewport-owned metas during hydration and would undo a manual-theme override (ThemeToggle
+// rewrites their content on click). Without JS there is simply no theme-color meta.
+// Without a stored choice the page keeps following prefers-color-scheme — see globals.css.
 const themeInit =
-  `try{var t=localStorage.getItem("theme");` +
-  `if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;
+  `try{var d=document,h=d.head;` +
+  `function m(md,c){var e=d.createElement("meta");e.name="theme-color";e.media=md;e.content=c;h.appendChild(e);return e}` +
+  `var a=m("(prefers-color-scheme: light)","#f1f4f0"),b=m("(prefers-color-scheme: dark)","#0a0d0b");` +
+  `var t=localStorage.getItem("theme");` +
+  `if(t==="light"||t==="dark"){d.documentElement.dataset.theme=t;` +
+  `var c=t==="dark"?"#0a0d0b":"#f1f4f0";a.content=c;b.content=c}}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

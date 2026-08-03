@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { CONTACT_EMAIL } from '../_lib/site';
 
@@ -8,12 +8,14 @@ import { CONTACT_EMAIL } from '../_lib/site';
 // click selects the whole address even where the clipboard API is unavailable.
 export function CopyEmail({ className = '' }: { className?: string }) {
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(CONTACT_EMAIL);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      clearTimeout(resetTimer.current);
+      resetTimer.current = setTimeout(() => setCopied(false), 1500);
     } catch {
       // No clipboard API (or permission denied) — the text itself stays selectable.
     }

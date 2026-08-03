@@ -38,7 +38,7 @@ export function ButtonLink({ href, children, external = false, className = '' }:
 }
 
 // Secondary path: an underlined mono text link ("or email instead").
-export function RuledLink({ href, children, className = '' }: ButtonLinkProps) {
+export function RuledLink({ href, children, className = '' }: Omit<ButtonLinkProps, 'external'>) {
   return (
     <a
       href={href}
