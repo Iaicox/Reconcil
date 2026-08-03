@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@fastify/rate-limit": "^10.2.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@reconcil/core": "workspace:*",
     "@reconcil/db": "workspace:*",
     "@reconcil/mcp-tools": "workspace:*",
@@ -28,7 +28,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^11.0.0",
+    "@testcontainers/postgresql": "^12.0.0",
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
     "eslint": "catalog:",

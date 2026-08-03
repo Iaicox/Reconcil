@@ -19,7 +19,7 @@
     "@reconcil/db": "workspace:*",
     "@reconcil/evals": "workspace:*",
     "@reconcil/mcp-tools": "workspace:*",
-    "@testcontainers/postgresql": "^11.0.0",
+    "@testcontainers/postgresql": "^12.0.0",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0"
   },

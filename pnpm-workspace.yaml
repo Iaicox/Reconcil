@@ -26,5 +26,10 @@ catalog:
 minimumReleaseAgeExclude:
   - '@anthropic-ai/sdk@0.114.0'
 
+# drizzle-kit (latest) still bundles the deprecated @esbuild-kit loader, which pins
+# esbuild ~0.18 (GHSA-67mh-4wv8-2f99); the transform API it uses is stable in 0.25+.
+overrides:
+  '@esbuild-kit/core-utils>esbuild': ^0.25.0
+
 onlyBuiltDependencies:
   - esbuild

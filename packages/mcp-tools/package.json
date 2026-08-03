@@ -29,7 +29,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^11.0.0",
+    "@testcontainers/postgresql": "^12.0.0",
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
     "eslint": "catalog:",
