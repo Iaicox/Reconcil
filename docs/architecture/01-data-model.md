@@ -43,9 +43,10 @@ Consequences (ADR-006):
 - Fiat values (`price`, `fiat_value`, `amount` on invoices) are unconstrained `NUMERIC` in
   the display units of the named currency, full precision internally.
 - **Rounding happens only at export boundaries**: half-up to 2 decimal places per journal
-  line; if a journal then fails to balance by ±0.01·n, the residue goes to a dedicated
-  rounding-difference line (configurable account) so every exported journal balances to
-  exactly 0.00. The residue line is part of the export contract, not an error.
+  line. How a journal then balances is per exporter: the Face A close-pack draft appends a
+  dedicated `Rounding` line absorbing any ±0.01·n residue (part of that export's contract,
+  not an error), while the recon-backed QBO/Xero drafts are balanced by construction and
+  fail the export on any non-zero residue instead of appending a correction line.
 
 In code (`packages/core`):
 
@@ -175,8 +176,9 @@ transaction for confirm/reject) and pinned by property tests, not triggers:
    `overpaid` (> amount). `void` is manual and terminal.
 
 Valuation of each leg is pinned (`price_snapshot_id`, `fx_rate_id`) at suggestion time and
-recomputed-and-repinned at confirmation time if stale — the confirmed numbers are the
-ones exported.
+carries through confirmation unchanged — confirm never re-prices (the block-time snapshot
+is immutable; a same-currency stablecoin leg is face value with no refs, see
+[02 §6.4](02-mcp-contracts.md)). The confirmed numbers are the ones exported.
 
 `rationale JSONB` records which deterministic rules fired (amount-within-tolerance,
 date window, expected address hit, counterparty history) with weights — the agent

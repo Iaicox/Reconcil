@@ -171,9 +171,9 @@ only the cases it applies to (G3 → `must_cite`, G4 → refusals, G5 → inject
 counts only cases carrying ground-truth `numbers` — the native balance/gas cases this slice, since
 erc20 figures await unblocker (a) above. On a small applicable set the "≥ 90%" quality bar rounds
 up — with 3 numbers-cases it takes 3/3 (2/3 = 0.67 misses), so it is effectively 100% until the
-numbers/Face-A set grows; that is stricter than 90% by design, never looser. The dataset is the **24 Face A cases** today; the "≥ 27/30"
-target is the full set once the Face B cases (import → suggest → confirm → status → journal, ≈6) land
-with the `recon` slice (their tools are not in the registry yet).
+numbers set grows; that is stricter than 90% by design, never looser. The dataset is the full
+**30 cases** — 24 Face A plus the 6 numbers-free Face B recon cases (import → suggest → confirm →
+status → journal) — and the "≥ 27/30" target applies to it.
 
 Failing the gate blocks the OSS demo publication, by definition of "done" for week 5.
 

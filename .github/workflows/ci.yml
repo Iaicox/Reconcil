@@ -96,7 +96,7 @@ jobs:
       - id: k
         run: echo "has_key=${{ secrets.ANTHROPIC_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
 
-  # Live agent smoke (5 cases × 1 run): the only cheap catch for contract/prompt drift.
+  # Live agent smoke (6 cases × 1 run): the only cheap catch for contract/prompt drift.
   # Runs only when the secret exists AND on a same-repo PR (fork PRs have no secrets).
   # Docker (testcontainers) is present on ubuntu-latest; the runner spins its own throwaway
   # Postgres. ANTHROPIC_API_KEY (secret) + ANTHROPIC_BASE_URL (repo variable, optional

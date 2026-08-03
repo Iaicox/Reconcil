@@ -7,7 +7,7 @@
  * G2 numeric must pass **≥ 90% of applicable cases by majority-of-runs**. Denominators
  * are the *applicable* cases — G2 counts only cases carrying ground-truth `numbers`
  * (native cases this slice; erc20 cases are numbers-free until that capture lands), and
- * the dataset is the 24 Face A cases (full 30 arrives with the Face B recon slice).
+ * the dataset is all 30 cases — 24 Face A plus 6 numbers-free Face B recon cases.
  */
 import {
   METRICS,

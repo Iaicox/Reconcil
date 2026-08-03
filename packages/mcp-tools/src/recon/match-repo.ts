@@ -222,7 +222,7 @@ export async function suggestMatches(
     const addresses = [...new Set(scoped.map((w) => w.address))];
     const addrSet = new Set(addresses);
 
-    // 3. Candidate settlement events: verified-stablecoin transfers touching those wallets,
+    // 3. Candidate settlement events: verified-token transfers touching those wallets,
     //    bounded to the union date window when every record carries a reference date.
     const refDates = recRows.map((r) => r.dueOn ?? r.issuedOn);
     let timeFrom: Date | undefined;
