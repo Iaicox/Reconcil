@@ -377,7 +377,7 @@ output: { entities: Array<{ entity_id: string; name: string; kind: string; curat
 
 **`directory_upsert_entity`** (write)
 ```ts
-input:  { entity_id?: string;                                    // present = update
+input:  { entity_id?: string;                                    // UUID; present = update
           name: string; kind: 'self'|'client'|'vendor'|'exchange'|'contract'|'employee'|'other';
           client_id?: string; notes?: string;
           addresses?: Array<{ chain_id?: number; address: string }> }
@@ -407,7 +407,7 @@ output: { inserted: number; skipped_duplicates: number;
 
 **`recon_suggest_matches`** — deterministic matching engine run (ADR-010).
 ```ts
-input:  { period?: Period; client_id?: string; record_ids?: string[];
+input:  { period?: Period; client_id?: string; record_ids?: string[];          // UUIDs (external_records.id)
           tolerances?: { amount_pct?: number;                    // default 1.0 (%)
                          amount_abs?: DecimalString;             // in record currency
                          date_window_days?: number } }           // default 14
@@ -439,7 +439,8 @@ snapshot (or no FX for a required conversion) **cannot match** — the record st
 
 **`recon_confirm_match`** / **`recon_reject_match`** (write, HITL)
 ```ts
-input:  { match_id: string; note?: string }
+input:  { match_id: string;                                      // UUID (matches row id)
+          note?: string }
 output: { match_id: string; status: 'confirmed' | 'rejected';
           record_status: 'open'|'partially_matched'|'matched'|'overpaid';
           valuation: { fiat_value: DecimalString; price_ref?: PriceRef; fx_ref?: FxRef } }

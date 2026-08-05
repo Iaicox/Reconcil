@@ -402,7 +402,9 @@ export type DirectoryListEntitiesOutput = z.infer<typeof directoryListEntitiesOu
 
 export const directoryUpsertEntityInput = z
   .object({
-    entity_id: z.string().optional(), // present = update
+    // `entities` row id (UUID); present = update. A non-UUID value is INVALID_INPUT at
+    // validation, never a raw Postgres uuid-cast error (directory/repo.ts).
+    entity_id: z.string().uuid().optional(),
     name: z.string(),
     kind: directoryEntityKind,
     client_id: z.string().optional(),
@@ -713,7 +715,9 @@ export const reconSuggestMatchesInput = z
   .object({
     period: periodSchema.optional(),
     client_id: z.string().optional(),
-    record_ids: z.array(z.string()).optional(),
+    // `external_records.id` (UUID): a non-UUID value is INVALID_INPUT at validation,
+    // never a raw Postgres uuid-cast error (mirrors resolveClientId).
+    record_ids: z.array(z.string().uuid()).optional(),
     tolerances: reconTolerancesSchema.optional(),
   })
   .strict();
@@ -774,7 +778,11 @@ export type ReconSuggestMatchesOutput = z.infer<typeof reconSuggestMatchesOutput
  * free-text note (audited via the tool_call, not stored on the row). Exported under
  * both tool names so the registry references a schema per tool.
  */
-const matchDecisionInput = z.object({ match_id: z.string(), note: z.string().optional() }).strict();
+// `match_id` is the `matches` row id (UUID): a non-UUID value is INVALID_INPUT at
+// validation, never a raw Postgres uuid-cast error (decision-repo.ts, mirrors
+// resolveClientId). `note` is caller-supplied free text, not a hostile import/chain
+// string — it is audited via the tool_call, never stored/echoed (C6 does not apply).
+const matchDecisionInput = z.object({ match_id: z.string().uuid(), note: z.string().optional() }).strict();
 export const reconConfirmMatchInput = matchDecisionInput;
 export const reconRejectMatchInput = matchDecisionInput;
 export type ReconMatchDecisionInput = z.infer<typeof matchDecisionInput>;
