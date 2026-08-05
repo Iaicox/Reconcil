@@ -70,7 +70,7 @@ export async function reconStatus(
   try {
     reconStatusOutput.parse(data);
   } catch (err) {
-    throw new ToolError('INTERNAL', `recon_status produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', 'recon_status produced an output that violates its contract', undefined, err);
   }
 
   // C5: unmatched_settlements reads chain_events, so its "authoritative" count is only as

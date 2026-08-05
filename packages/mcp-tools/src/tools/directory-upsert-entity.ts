@@ -39,7 +39,7 @@ export async function directoryUpsertEntity(
       try {
         directoryUpsertEntityOutput.parse(data);
       } catch (err) {
-        throw new ToolError('INTERNAL', `directory_upsert_entity produced an output that violates its contract: ${String(err)}`);
+        throw new ToolError('INTERNAL', 'directory_upsert_entity produced an output that violates its contract', undefined, err);
       }
 
       return { data, envelope: { coverage: [], warnings } };
