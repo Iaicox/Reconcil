@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { DecimalString } from '@reconcil/core';
 
+import { resolveFxRates } from '../src/fx.js';
 import type { ValueNeed } from '../src/types.js';
 import { valueQuantities } from '../src/value.js';
 
@@ -50,11 +51,11 @@ async function seedSnapshot(
   return Number((rows[0] as { id: string }).id); // pg returns int8 as string; prod path uses numbers
 }
 
-async function seedFx(f: { date: string; rate: string; base?: string; quote?: string }): Promise<number> {
+async function seedFx(f: { date: string; rate: string; base?: string; quote?: string; source?: string }): Promise<number> {
   const { rows } = await pool.query(
     `INSERT INTO fx_rates (rate_date, base_currency, quote_currency, rate, source)
-     VALUES ($1,$2,$3,$4,'ecb') RETURNING id`,
-    [f.date, f.base ?? 'EUR', f.quote ?? 'USD', f.rate],
+     VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+    [f.date, f.base ?? 'EUR', f.quote ?? 'USD', f.rate, f.source ?? 'ecb'],
   );
   return Number((rows[0] as { id: string }).id);
 }
@@ -85,6 +86,25 @@ describe('valueQuantities — fiat with pinned refs (C4), warnings, dedup', () =
     expect(res.values[0]?.fiatValue?.startsWith('18518.5185185185')).toBe(true);
     expect(res.fxRefs).toEqual([expect.objectContaining({ fxRateId: fxId, rate: '1.08', base: 'EUR', quote: 'USD' })]);
     expect(res.warnings).toHaveLength(0);
+  });
+
+  it('resolveFxRates prefers `manual` over `ecb` for the same date, regardless of insert order (H4)', async () => {
+    const ecbId = await seedFx({ date: '2026-06-01', rate: '1.08', source: 'ecb' });
+    const manualId = await seedFx({ date: '2026-06-01', rate: '1.10', source: 'manual' });
+    expect(ecbId).not.toBe(manualId);
+
+    const resolved = await resolveFxRates(db, ['2026-06-01'], { base: 'EUR', quote: 'USD' });
+    expect(resolved.get('2026-06-01')).toMatchObject({ row: { id: manualId, source: 'manual' }, shifted: false });
+  });
+
+  it('pins the identical fx_rate_id across repeated calls with the same same-date manual/ecb rows (H4)', async () => {
+    await seedFx({ date: '2026-06-01', rate: '1.08', source: 'ecb' });
+    const manualId = await seedFx({ date: '2026-06-01', rate: '1.10', source: 'manual' });
+
+    const first = await resolveFxRates(db, ['2026-06-01'], { base: 'EUR', quote: 'USD' });
+    const second = await resolveFxRates(db, ['2026-06-01'], { base: 'EUR', quote: 'USD' });
+    expect(first.get('2026-06-01')?.row.id).toBe(manualId);
+    expect(second.get('2026-06-01')?.row.id).toBe(manualId);
   });
 
   it('emits FX_DATE_SHIFTED when only a prior ECB rate exists', async () => {
@@ -138,6 +158,23 @@ describe('valueQuantities — fiat with pinned refs (C4), warnings, dedup', () =
     expect(res.values[0]?.fiatValue).toBe('108');
     expect(res.priceRefs[0]).toMatchObject({ snapshotId: pegId, source: 'peg', currency: 'EUR' });
     expect(res.fxRefs).toHaveLength(1);
+  });
+
+  it('a GBP-pegged stablecoin valued in EUR gets no value + PRICE_MISSING naming the unsupported pair, never a wrong number (H5)', async () => {
+    await seedToken(8, { decimals: 6, isStablecoin: true, pegCurrency: 'GBP', symbol: 'GBPC' });
+    await seedSnapshot({ tokenId: 8, date: '2026-06-01', price: '1', source: 'peg', currency: 'GBP' });
+
+    const res = await valueQuantities(
+      db,
+      [need({ tokenId: 8, amount: ds('100'), isStablecoin: true, pegCurrency: 'GBP', symbol: 'GBPC' })],
+      { currency: 'EUR', policy: 'peg_for_stables' },
+    );
+    expect(res.values).toEqual([{ tokenId: 8, date: '2026-06-01' }]);
+    expect(res.priceRefs).toHaveLength(0);
+    expect(res.fxRefs).toHaveLength(0);
+    const warning = res.warnings.find((w) => w.code === 'PRICE_MISSING');
+    expect(warning?.message).toMatch(/GBP/);
+    expect(warning?.message).toMatch(/EUR/);
   });
 
   it('dedups refs and warnings across repeated (token, date) needs', async () => {

@@ -4,7 +4,7 @@
  * deterministic `valueQuantities` (mcp-tools composes it over ledger rows).
  */
 // Valuation read-core (mcp-tools composes this over ledger rows).
-export { valueQuantities, valueOne, type ValuedOne } from './value.js';
+export { valueQuantities, valueOne, isSupportedFxPair, type ValuedOne } from './value.js';
 export { resolvePrices, pickSnapshot, priceKey } from './resolve.js';
 export { resolveFxRates, pickLatestRate } from './fx.js';
 export { multiply, divide, roundHalfUp, sumDecimals, numberToDecimalString } from './decimal.js';
