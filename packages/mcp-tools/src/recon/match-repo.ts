@@ -25,7 +25,7 @@ import {
 } from '@reconcil/db';
 import type { TokenMeta } from '@reconcil/ledger';
 import {
-  priceKey, resolveFxRates, resolvePrices, valueOne,
+  isSupportedFxPair, priceKey, resolveFxRates, resolvePrices, valueOne,
   type Currency, type FxResolved,
   type FxRef as PricingFxRef, type PriceRef as PricingPriceRef, type ValueNeed,
 } from '@reconcil/pricing';
@@ -120,9 +120,11 @@ interface ValuedCandidate {
 /**
  * Value every candidate event into `target` via pinned market snapshots (+ ECB FX), keyed
  * by event id. Same-currency stablecoins are excluded here — the caller uses their face value
- * (P5). A token with no usable snapshot (or no FX for a required conversion) is simply absent
- * from the map: the caller drops that candidate and raises PRICE_MISSING (ADR-007, never
- * interpolate). Batched: one `resolvePrices` + at most one `resolveFxRates` for the whole set.
+ * (P5). A token with no usable snapshot, no FX for a required conversion, or a snapshot
+ * currency that isn't EUR↔USD-convertible to `target` (H5, e.g. a GBP-pegged stablecoin) is
+ * simply absent from the map: the caller drops that candidate and raises PRICE_MISSING
+ * (ADR-007, never interpolate — and never a wrong number, never a batch-failing throw).
+ * Batched: one `resolvePrices` + at most one `resolveFxRates` for the whole set.
  */
 async function valueEventsInto(
   tx: Tx,
@@ -147,7 +149,7 @@ async function valueEventsInto(
   const fxDates = new Set<string>();
   for (const n of needs) {
     const snap = prices.get(priceKey(n.tokenId, n.date));
-    if (snap && snap.currency !== target) fxDates.add(n.date);
+    if (snap && snap.currency !== target && isSupportedFxPair(snap.currency, target)) fxDates.add(n.date);
   }
   const fx = fxDates.size > 0
     ? await resolveFxRates(tx, [...fxDates], { base: 'EUR', quote: 'USD' })
@@ -158,6 +160,7 @@ async function valueEventsInto(
     if (!snap) continue;
     let fxResolved: FxResolved | undefined;
     if (snap.currency !== target) {
+      if (!isSupportedFxPair(snap.currency, target)) continue; // unsupported pair → PRICE_MISSING at the caller
       fxResolved = fx.get(n.date);
       if (!fxResolved) continue; // required conversion has no rate → PRICE_MISSING at the caller
     }

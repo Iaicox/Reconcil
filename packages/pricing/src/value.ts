@@ -26,9 +26,13 @@ export interface ValuedOne {
  * The single supported conversion pair (H5): ECB only publishes EUR-based rates,
  * so cross-currency valuation is EUR↔USD only. Anything else (e.g. a
  * GBP-pegged stablecoin) must degrade to PRICE_MISSING, never be silently
- * multiplied by the EUR/USD rate.
+ * multiplied by the EUR/USD rate. Exported so every valuation call site — not
+ * just this package's own `valueQuantities` — can apply the same guard before
+ * calling `valueOne` instead of duplicating the pair list (e.g.
+ * `@reconcil/mcp-tools`' `recon/match-repo.ts`, which values suggest-match
+ * candidates independently of `valueQuantities`).
  */
-function isSupportedFxPair(from: string, to: string): boolean {
+export function isSupportedFxPair(from: string, to: string): boolean {
   return (from === 'USD' && to === 'EUR') || (from === 'EUR' && to === 'USD');
 }
 

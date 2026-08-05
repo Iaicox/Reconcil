@@ -35,7 +35,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await pool.query(
-    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls RESTART IDENTITY CASCADE',
+    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls, fx_rates RESTART IDENTITY CASCADE',
   );
   await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'acme', 'acme')`, [TENANT]);
   await pool.query(`INSERT INTO clients (id, tenant_id, name) VALUES ($1, $2, 'Client One')`, [CLIENT, TENANT]);
@@ -79,6 +79,18 @@ async function seedNonStableToken(): Promise<number> {
     `INSERT INTO tokens (chain_id, address, standard, symbol_display, decimals, is_stablecoin, peg_currency, verified)
      VALUES (1, $1, 'erc20', 'WETH', 18, false, null, true) RETURNING id`,
     [WETH_ADDR],
+  );
+  return Number(rows[0]!.id);
+}
+
+const GBP_TOKEN_ADDR = `0x${'e'.repeat(40)}`; // a verified GBP-pegged stablecoin (H5: unsupported FX pair)
+
+/** A verified GBP-pegged stablecoin (6 decimals) — GBP↔EUR/USD has no ECB rate (H5). Returns its token id. */
+async function seedGbpToken(): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO tokens (chain_id, address, standard, symbol_display, decimals, is_stablecoin, peg_currency, verified)
+     VALUES (1, $1, 'erc20', 'GBPC', 6, true, 'GBP', true) RETURNING id`,
+    [GBP_TOKEN_ADDR],
   );
   return Number(rows[0]!.id);
 }
@@ -368,5 +380,38 @@ describe('recon_suggest_matches — market valuation (non-stablecoin)', () => {
     expect(env.data.suggestions).toHaveLength(0);
     expect(env.data.unmatched_records).toBe(1);
     expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
+  });
+
+  it('H5 regression: a GBP-pegged stablecoin with a manual GBP snapshot is dropped as PRICE_MISSING, not thrown — the batch succeeds and other candidates still match', async () => {
+    // The working candidate: an EUR-pegged stablecoin settling its own invoice normally.
+    const eurToken = await seedToken();
+    await seedEvent(eurToken, PAYER, WALLET, '1000000000', '2026-06-14T10:00:00Z'); // 1000.00 EURC
+    await seedInvoice('INV-100', '1000.00', PAYER);
+
+    // An EUR/USD rate exists (so a naive "no rate at all" skip wouldn't accidentally save this
+    // case) but is irrelevant to GBP — proving the drop comes from the pair guard, not a missing
+    // rate.
+    await seedFx('2026-06-14', '1.10');
+
+    // The regression candidate: resolvePrices' `manual` outranks every other source (resolve.ts
+    // marketPref) regardless of currency, so a manual GBP snapshot wins as this token's would-be
+    // valuation even though the target is EUR — GBP↔EUR has no ECB rate (H5). No invoice claims
+    // it; it's a floating settlement from an unrelated sender. Before this fix, match-repo.ts's
+    // own valueEventsInto call site (independent of packages/pricing's guarded valueQuantities)
+    // called valueOne on it directly and threw, failing the whole suggest batch — including the
+    // unrelated INV-100 match above.
+    const gbpTokenId = await seedGbpToken();
+    await seedSnapshot(gbpTokenId, '1', '2026-06-14', 'GBP', 'manual');
+    await seedEvent(gbpTokenId, STRANGER, WALLET, '500000000', '2026-06-14T11:00:00Z', 1); // 500.00 GBPC
+
+    const env = await reconSuggestMatches(ctx(), {}); // must not throw
+
+    // Only the working candidate is suggested; the GBP one is simply absent (never a wrong number).
+    expect(env.data.suggestions.map((s) => s.record.external_ref)).toEqual(['INV-100']);
+    expect(env.data.unmatched_records).toBe(0);
+    expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
+
+    const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM matches`);
+    expect(rows[0]!.n).toBe('1'); // only the working leg persisted
   });
 });
