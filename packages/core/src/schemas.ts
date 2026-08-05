@@ -24,8 +24,29 @@ export const scopeSchema = z
   .strict();
 export type Scope = z.infer<typeof scopeSchema>;
 
-/** ISO calendar date on the wire (UTC day); malformed dates fail as INVALID_INPUT. */
-export const isoDateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be an ISO date (YYYY-MM-DD)');
+/** Parse an already-regex-matched `YYYY-MM-DD` string into its UTC Date — no
+ *  calendar validation here, components may roll over (e.g. day 32 → next month). */
+function parseIsoDateComponentsUtc(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+/** True when `s` is a real calendar date: the parsed Date's UTC components
+ *  round-trip to the same y/m/d. Rejects `2026-02-30` / `2026-13-01` rather than
+ *  letting `Date.UTC` silently roll them over into March / next January (H6). */
+function isRealCalendarDate(s: string): boolean {
+  const [y, m, d] = s.split('-').map(Number) as [number, number, number];
+  const parsed = parseIsoDateComponentsUtc(s);
+  return parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d;
+}
+
+/** ISO calendar date on the wire (UTC day); malformed dates fail as INVALID_INPUT —
+ *  both wrong format and impossible calendar dates (`2026-02-30`, `2026-13-01`),
+ *  which would otherwise silently roll over inside `new Date(...)` (H6). */
+export const isoDateString = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'must be an ISO date (YYYY-MM-DD)')
+  .refine(isRealCalendarDate, 'must be a real calendar date');
 
 export const periodSchema = z.object({ from: isoDateString, to: isoDateString }).strict();
 export type Period = z.infer<typeof periodSchema>;
@@ -106,7 +127,7 @@ export const analyticsBalancesInput = z
   .object({
     scope: scopeSchema.optional(),
     chain_ids: z.array(z.number()).optional(),
-    as_of: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'as_of must be an ISO date (YYYY-MM-DD)').optional(),
+    as_of: isoDateString.optional(),
     include_unverified: z.boolean().optional(),
     valuation: valuationSchema.optional(),
   })
@@ -473,19 +494,15 @@ export const ledgerTrackWalletInput = z
   // F4 (ADR-008): anchored mode needs a real, past baseline date. The worker
   // resolves anchored_from → a block via getBlockByTime, so a missing/future/
   // non-calendar date must fail closed here rather than mis-anchor downstream.
+  // Calendar validity (real y/m/d) is already enforced by `isoDateString` on the
+  // field itself (H6) — this only adds the two business rules that need the
+  // parsed value: required-when-anchored, and not-in-the-future.
   .superRefine((v, ctx) => {
     if (v.mode === 'anchored' && v.anchored_from === undefined) {
       ctx.addIssue({ code: 'custom', path: ['anchored_from'], message: "anchored_from is required when mode='anchored'" });
     }
-    if (v.anchored_from !== undefined) {
-      const [y, m, d] = v.anchored_from.split('-').map(Number) as [number, number, number];
-      const parsed = new Date(Date.UTC(y, m - 1, d));
-      const real = parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d;
-      if (!real) {
-        ctx.addIssue({ code: 'custom', path: ['anchored_from'], message: 'anchored_from is not a valid calendar date' });
-      } else if (parsed.getTime() > Date.now()) {
-        ctx.addIssue({ code: 'custom', path: ['anchored_from'], message: 'anchored_from must not be in the future' });
-      }
+    if (v.anchored_from !== undefined && parseIsoDateComponentsUtc(v.anchored_from).getTime() > Date.now()) {
+      ctx.addIssue({ code: 'custom', path: ['anchored_from'], message: 'anchored_from must not be in the future' });
     }
   });
 export type LedgerTrackWalletInput = z.infer<typeof ledgerTrackWalletInput>;
