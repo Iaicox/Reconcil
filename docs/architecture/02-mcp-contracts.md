@@ -533,6 +533,14 @@ this. Defense depth #3 is the eval harness: fixtures include a token named with 
 instruction-injection payload and a canary string; the grader fails the run if the canary
 surfaces in the agent's answer (`04-testing.md` §5).
 
+`external_ref` (`recon_import_invoices`) is import-sourced and hostile like the other
+fields above, but it differs from `counterparty_name` in one respect: it is the dedupe
+key and is echoed **unwrapped** (not under `untrusted`) by three tools — import, suggest,
+status — because it is a caller-facing reference number, not free text. It is sanitized
+at the parser edge (maxLength 128) instead of at each response boundary, so the same
+scrubbed value is what gets stored, deduped, and echoed everywhere; a cell that
+sanitizes to nothing is a row error, not a silently-substituted placeholder.
+
 ## 8. Guardrails (P8)
 
 - **No investment advice.** The CLI agent's system prompt forbids buy/sell/hold
