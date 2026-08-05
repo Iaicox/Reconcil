@@ -160,6 +160,23 @@ describe('valueQuantities — fiat with pinned refs (C4), warnings, dedup', () =
     expect(res.fxRefs).toHaveLength(1);
   });
 
+  it('a GBP-pegged stablecoin valued in EUR gets no value + PRICE_MISSING naming the unsupported pair, never a wrong number (H5)', async () => {
+    await seedToken(8, { decimals: 6, isStablecoin: true, pegCurrency: 'GBP', symbol: 'GBPC' });
+    await seedSnapshot({ tokenId: 8, date: '2026-06-01', price: '1', source: 'peg', currency: 'GBP' });
+
+    const res = await valueQuantities(
+      db,
+      [need({ tokenId: 8, amount: ds('100'), isStablecoin: true, pegCurrency: 'GBP', symbol: 'GBPC' })],
+      { currency: 'EUR', policy: 'peg_for_stables' },
+    );
+    expect(res.values).toEqual([{ tokenId: 8, date: '2026-06-01' }]);
+    expect(res.priceRefs).toHaveLength(0);
+    expect(res.fxRefs).toHaveLength(0);
+    const warning = res.warnings.find((w) => w.code === 'PRICE_MISSING');
+    expect(warning?.message).toMatch(/GBP/);
+    expect(warning?.message).toMatch(/EUR/);
+  });
+
   it('dedups refs and warnings across repeated (token, date) needs', async () => {
     await seedToken(1);
     await seedSnapshot({ tokenId: 1, date: '2026-06-01', price: '2000', source: 'defillama' });

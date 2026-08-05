@@ -23,9 +23,22 @@ export interface ValuedOne {
 }
 
 /**
+ * The single supported conversion pair (H5): ECB only publishes EUR-based rates,
+ * so cross-currency valuation is EUR↔USD only. Anything else (e.g. a
+ * GBP-pegged stablecoin) must degrade to PRICE_MISSING, never be silently
+ * multiplied by the EUR/USD rate.
+ */
+function isSupportedFxPair(from: string, to: string): boolean {
+  return (from === 'USD' && to === 'EUR') || (from === 'EUR' && to === 'USD');
+}
+
+/**
  * Value one need against an already-resolved snapshot (and FX if the snapshot's
  * currency differs from the target). Only USD↔EUR is supported; ECB publishes
  * base=EUR (rate = USD per 1 EUR), so USD→EUR divides and EUR→USD multiplies.
+ * `valueQuantities` never calls this for an unsupported pair (it routes those to
+ * PRICE_MISSING first) — the throw below documents the invariant for other
+ * callers and should be unreachable in practice.
  */
 export function valueOne(
   need: ValueNeed,
@@ -38,6 +51,9 @@ export function valueOne(
   let warning: PricingWarning | undefined;
 
   if (snapshot.currency !== target) {
+    if (!isSupportedFxPair(snapshot.currency, target)) {
+      throw new Error(`valueOne: unsupported FX pair ${snapshot.currency}→${target} (only EUR↔USD is supported)`);
+    }
     if (!fx) {
       throw new Error(`valueOne: FX required to convert ${snapshot.currency}→${target} but none provided`);
     }
@@ -67,8 +83,10 @@ export function valueOne(
  * Value a batch of needs: resolve pinned snapshots (+ FX where the snapshot
  * currency differs), compute fiat, and collect dedup'd price/FX citation refs +
  * warnings. Every fiat value is covered by a ref (C4); a need with no usable
- * price (or no FX for a required conversion) is returned without a value and
- * raises PRICE_MISSING — never interpolated. mcp-tools composes this over ledger rows.
+ * price, no FX for a required conversion, or a snapshot currency that isn't
+ * EUR↔USD-convertible to the target (H5, e.g. a GBP-pegged stablecoin) is
+ * returned without a value and raises PRICE_MISSING — never interpolated, never
+ * a wrong number. mcp-tools composes this over ledger rows.
  */
 export async function valueQuantities(
   db: Db | Tx,
@@ -81,11 +99,13 @@ export async function valueQuantities(
 
   const prices = await resolvePrices(db, needs, { currency: target, policy });
 
-  // FX is needed only when a winning snapshot is not already in the target currency.
+  // FX is needed only when a winning snapshot is not already in the target currency,
+  // and only for the supported EUR↔USD pair — an unsupported pair is handled below by
+  // routing straight to PRICE_MISSING, so there's no point resolving FX for its date.
   const fxDates = new Set<string>();
   for (const need of needs) {
     const snap = prices.get(priceKey(need.tokenId, need.date));
-    if (snap && snap.currency !== target) fxDates.add(need.date);
+    if (snap && snap.currency !== target && isSupportedFxPair(snap.currency, target)) fxDates.add(need.date);
   }
   const fx = fxDates.size > 0
     ? await resolveFxRates(db, [...fxDates], { base: 'EUR', quote: 'USD' })
@@ -115,6 +135,10 @@ export async function valueQuantities(
 
     let fxResolved: FxResolved | undefined;
     if (snap.currency !== target) {
+      if (!isSupportedFxPair(snap.currency, target)) {
+        missing(need, `FX pair ${snap.currency}→${target} unsupported`);
+        continue;
+      }
       fxResolved = fx.get(need.date);
       if (!fxResolved) { missing(need, 'FX rate'); continue; }
     }
