@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ToolContext } from '../src/context.js';
+import { ToolError } from '../src/errors.js';
 import { exportClosePack } from '../src/tools/export-close-pack.js';
 import { exportPdfSummary } from '../src/tools/export-pdf-summary.js';
 import { EXT, OWNED, TENANT, WALLET_OWNED, eth, makeSeeder, type Seeder } from './seed.js';
@@ -30,9 +31,13 @@ beforeAll(async () => {
   db = createDb(pool);
   S = makeSeeder(pool, db);
   outDir = await mkdtemp(join(tmpdir(), 'pet-export-'));
+  // The export root (`RECONCIL_EXPORT_DIR`) — `out_dir` (below) is now confined to a
+  // subpath *under* this root, so tests point the root itself at the temp dir (H2).
+  process.env.RECONCIL_EXPORT_DIR = outDir;
 }, 120_000);
 
 afterAll(async () => {
+  delete process.env.RECONCIL_EXPORT_DIR;
   await pool.end();
   await container.stop();
   await rm(outDir, { recursive: true, force: true });
@@ -65,7 +70,7 @@ function sha256File(buf: Buffer): string {
 describe('export_close_pack — materialization, manifest, tenancy', () => {
   it('writes the 7-file bundle, registers the exports row, and persists the tool_call (C2)', async () => {
     await seedWorld();
-    const env = await exportClosePack(ctx(), { month: MONTH, valuation: { currency: 'USD' }, out_dir: outDir });
+    const env = await exportClosePack(ctx(), { month: MONTH, valuation: { currency: 'USD' } });
 
     // --- output shape ---
     expect(env.data.kind).toBe('close_pack');
@@ -145,7 +150,7 @@ describe('export_close_pack — materialization, manifest, tenancy', () => {
 describe('export_pdf_summary', () => {
   it('writes a PDF + manifest and registers a pdf_summary export', async () => {
     await seedWorld();
-    const env = await exportPdfSummary(ctx(), { month: MONTH, valuation: { currency: 'USD' }, out_dir: outDir });
+    const env = await exportPdfSummary(ctx(), { month: MONTH, valuation: { currency: 'USD' } });
 
     expect(env.data.kind).toBe('pdf_summary');
     expect(env.data.files.map((f) => f.name)).toEqual(['summary.pdf', 'manifest.json']);
@@ -158,5 +163,49 @@ describe('export_pdf_summary', () => {
     const { rows } = await pool.query(`SELECT kind, status FROM exports`);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: 'pdf_summary', status: 'done' });
+  });
+});
+
+describe('export_close_pack — out_dir confinement (security, H2)', () => {
+  it('writes under a relative out_dir subpath inside the export root', async () => {
+    await seedWorld();
+    const env = await exportClosePack(ctx(), { month: MONTH, valuation: { currency: 'USD' }, out_dir: 'june/close' });
+
+    const manifestFile = env.data.files.find((f) => f.name === 'manifest.json')!;
+    expect(manifestFile.path).toContain(join(outDir, 'june', 'close'));
+    await expect(readFile(manifestFile.path, 'utf8')).resolves.toBeTruthy(); // actually on disk
+
+    const { rows } = await pool.query(`SELECT file_path FROM exports WHERE id = $1`, [env.data.export_id]);
+    expect((rows[0] as { file_path: string }).file_path).toContain(join(outDir, 'june', 'close'));
+  });
+
+  it('rejects a traversal out_dir without leaking the export root path, and registers no new export', async () => {
+    await seedWorld();
+    const before = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM exports`);
+
+    let thrown: ToolError | undefined;
+    try {
+      await exportClosePack(ctx(), { month: MONTH, valuation: { currency: 'USD' }, out_dir: '../x' });
+    } catch (err) {
+      thrown = err as ToolError;
+    }
+    expect(thrown?.code).toBe('INVALID_INPUT');
+    expect(thrown?.message).not.toContain(outDir); // no internal-path leak (finding H2)
+    expect(thrown?.hint).toContain('RECONCIL_EXPORT_DIR');
+
+    const after = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM exports`);
+    expect(after.rows[0]?.n).toBe(before.rows[0]?.n); // no orphan row from the rejected call
+  });
+
+  it('rejects an absolute out_dir outside the export root (the temp-dir root itself)', async () => {
+    await seedWorld();
+    const before = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM exports`);
+
+    await expect(
+      exportClosePack(ctx(), { month: MONTH, valuation: { currency: 'USD' }, out_dir: tmpdir() }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+
+    const after = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM exports`);
+    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
   });
 });

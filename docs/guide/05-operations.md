@@ -163,7 +163,11 @@ Domain failures come back as MCP tool errors with a structured payload:
 ## Exports on disk
 
 Layout: `<export root>/<export_id>/`, one directory per export, each with its
-`manifest.json`. The root is `out_dir` (per call) → `RECONCIL_EXPORT_DIR` → `<cwd>/exports`.
+`manifest.json`. The root is `RECONCIL_EXPORT_DIR` → `<cwd>/exports`. A per-call `out_dir`
+is a *subpath under* that root, not a different one — it is resolved against the root and
+confined to it (prefix-checked, then `realpath`-rechecked past symlinks, same discipline as
+the `file_path` confinement below); an escape (`..` traversal, an absolute path outside the
+root) is rejected as `INVALID_INPUT` rather than writing anywhere else.
 
 In compose, that is the `exports` named volume, shared by the server and worker containers.
 Retrieve files with:

@@ -538,6 +538,9 @@ export type ExportFileView = z.infer<typeof exportFileSchema>;
  * `export_close_pack` (contract §6.5) — monthly close bundle (6 CSVs + manifest).
  * Non-read-only (writes files, registers an `exports` row) but never destructive.
  * `valuation` is required: the pack values balances/flows and derives a journal draft.
+ * `out_dir`, if given, is a subpath under the export root (`RECONCIL_EXPORT_DIR`, default
+ * `<cwd>/exports`) — never an arbitrary write location; a path that escapes the root
+ * (absolute outside it, `..` traversal) is rejected as `INVALID_INPUT`.
  */
 export const exportClosePackInput = z
   .object({
@@ -545,7 +548,7 @@ export const exportClosePackInput = z
     scope: scopeSchema.optional(),
     client_id: z.string().optional(),
     valuation: valuationSchema,
-    out_dir: z.string().optional(),
+    out_dir: z.string().optional(), // subpath under the export root; escapes → INVALID_INPUT
   })
   .strict();
 export type ExportClosePackInput = z.infer<typeof exportClosePackInput>;
@@ -560,14 +563,15 @@ export const exportClosePackOutput = z
   .strict();
 export type ExportClosePackOutput = z.infer<typeof exportClosePackOutput>;
 
-/** `export_pdf_summary` (contract §6.5) — one-page PDF summary + manifest. Same input shape. */
+/** `export_pdf_summary` (contract §6.5) — one-page PDF summary + manifest. Same input shape,
+ *  including `out_dir` confinement to the export root (see `exportClosePackInput`). */
 export const exportPdfSummaryInput = z
   .object({
     month: monthString,
     scope: scopeSchema.optional(),
     client_id: z.string().optional(),
     valuation: valuationSchema,
-    out_dir: z.string().optional(),
+    out_dir: z.string().optional(), // subpath under the export root; escapes → INVALID_INPUT
   })
   .strict();
 export type ExportPdfSummaryInput = z.infer<typeof exportPdfSummaryInput>;
@@ -590,7 +594,8 @@ export type ExportPdfSummaryOutput = z.infer<typeof exportPdfSummaryOutput>;
  * vat_input / rounding) to the caller's chart-of-accounts codes; unmapped-but-present
  * categories come back in `unmapped_categories`. `balanced` is a guarantee by
  * construction: every entry is internally balanced, no rounding line is ever appended,
- * and a non-zero per-currency residue fails the export (invariant violation).
+ * and a non-zero per-currency residue fails the export (invariant violation). `out_dir`
+ * confinement to the export root is the same as `exportClosePackInput`.
  */
 export const exportJournalDraftsInput = z
   .object({
@@ -598,7 +603,7 @@ export const exportJournalDraftsInput = z
     target: z.enum(['qbo', 'xero']),
     client_id: z.string().optional(),
     account_mapping: z.record(z.string(), z.string()).optional(),
-    out_dir: z.string().optional(),
+    out_dir: z.string().optional(), // subpath under the export root; escapes → INVALID_INPUT
   })
   .strict();
 export type ExportJournalDraftsInput = z.infer<typeof exportJournalDraftsInput>;
