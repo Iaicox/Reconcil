@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "eslint": "catalog:",
+    "fast-check": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

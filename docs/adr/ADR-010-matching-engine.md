@@ -1,6 +1,7 @@
 # ADR-010: Matching — source-agnostic records, pair-level m:n legs, deterministic scoring
 
-**Status:** accepted · **Date:** 2026-07-14
+**Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-08-06 (edge-case
+remediation — see Consequences)
 
 ## Context
 
@@ -56,3 +57,46 @@ matching; P8 requires human confirmation.
 - Every match decision is explainable to an auditor from `rationale` + citations.
 - Bounded search can miss exotic splits; such records simply stay `open`/partial for
   manual matching — a visible, honest failure mode.
+
+*Amendment (2026-08-06, edge-case remediation — audit findings H18, A3–A6):*
+
+- **No zero-confidence legs (H18).** The engine previously treated the tolerance-band
+  edge as a full match (`withinBand` is inclusive, `<=`) while `amountScore` scores that
+  same edge 0 — a candidate landing exactly there, with no address/history/date signal,
+  was suggested at `confidence: 0` with an empty `rationale`, violating C1 ("no number
+  without provenance"). `suggestForRecord` now pushes a leg — and counts it toward the
+  full-match short-circuit — only when the scored confidence is `> 0`; since
+  `scoreCandidate` only records a rule when it actually contributed, a positive
+  confidence is a non-empty rationale by construction. The band-edge case with no other
+  signal now correctly produces no suggestion, not a provenance-free one.
+- **Exact `Σ weights === confidence` under the clamp (A3).** `Math.min(1, Σ)` broke the
+  invariant exactly when it fired (float summation landing a hair above 1, near-
+  unreachable given weights sum to 1.0 and scores ≤ 1, but not impossible). `scoreCandidate`
+  now rescales every shipped weight by `1 / rawSum` when `rawSum > 1` and recomputes
+  confidence **from** the rescaled rationale (not derived independently), so the two stay
+  reproducible from each other by construction, not merely approximately equal.
+- **Zero-amount records (A4/A5).** `deriveRecordStatus` special-cased `applied === 0n` to
+  `'open'` before ever consulting the band, so a genuinely zero-amount record
+  (`amount="0"`, nothing applied) could never reach `'matched'` — the band `{0,0}`
+  trivially contains 0, but the short-circuit fired first. Status is now derived via the
+  band FIRST; `'open'` is reserved for the true zero-progress case (`applied=0` on a
+  record whose band does *not* already contain 0). Independently, `suggestForRecord` now
+  returns no legs for any record with `openAmount <= 0` before scoring anything, and
+  `recon_suggest_matches`'s record query filters the same condition at the SQL level —
+  a freshly imported zero-amount invoice sits at `status='open'` from the DB default
+  regardless of the status-derivation fix (import never calls `deriveRecordStatus`), so
+  without this guard every payment from its expected sender would still be suggested as
+  a settlement for an invoice with nothing outstanding.
+- **Tolerance `amount_pct` precision (A6).** `computeBand` resolved percent tolerances to
+  basis points (`Math.round(pct * 100)`, 2 decimal places) — `amount_pct: 0.004` rounded
+  to 0 and silently collapsed the band to the absolute tolerance alone. It now resolves to
+  4 decimal places (`Math.round(pct * 10_000)` over a `1_000_000n` divisor); precision
+  finer than that still rounds — a documented contract, not an error.
+- **Honest subset-search wording.** The engine's docstring and this contract's §6.4 text
+  previously implied the only miss-mode was "a record only a larger combination would
+  settle." The pool is actually the ≤ 6 LARGEST-valued candidates in the date window, so
+  an exact split whose small member falls outside that top-6-by-size pool is *also*
+  unreachable, independent of whether ≤ 6 events would have sufficed. Both failure modes
+  are now named explicitly; no behavior changed for this point — a characterization test
+  pins the small-member case as documented behavior, so widening the pool selection later
+  is a conscious choice, not an accidental fix.

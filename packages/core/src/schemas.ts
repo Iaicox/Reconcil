@@ -685,6 +685,8 @@ export type ReconImportInvoicesOutput = z.infer<typeof reconImportInvoicesOutput
  * Match tolerances (contract §6.4). All optional; the engine applies the defaults
  * (amount_pct 1.0, date_window_days 14). `amount_pct` is a percent, not money, so it
  * rides as a number; `amount_abs` is money and stays a decimal string (ADR-004).
+ * `amount_pct` resolves to 4 decimal places (e.g. `0.0001`); precision finer than
+ * that still rounds — a documented contract, never an error (ADR-010 A6).
  */
 export const reconTolerancesSchema = z
   .object({

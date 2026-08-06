@@ -424,9 +424,18 @@ output: { suggestions: Array<{
 ```
 
 The engine (not the LLM) scores candidates; the agent's job is to *present* rationale and
-collect the human decision. Split/partial detection uses bounded subset search
-(≤ 6 candidate events per record) — documented complexity cap, no heuristics hidden in
-prompts.
+collect the human decision. Split/partial detection uses a bounded subset search: the
+pool is the ≤ 6 LARGEST-valued candidate events in the date window (largest first, so a
+full settlement needs the fewest legs), and every subset within that pool is tried —
+documented complexity cap, no heuristics hidden in prompts. Two cases therefore stay
+open, honestly: a record that would need more than 6 events to settle at all, and one
+whose only exact split includes a member too small to make the top-6-by-size pool even
+though fewer than 6 events would suffice.
+
+A suggestion always carries a non-empty `rationale`: the engine only emits a leg when its
+scored confidence is `> 0` — a candidate with no articulable reason (e.g. landing exactly
+on the tolerance-band edge with no other signal) is silently not suggested, never shipped
+at `confidence: 0` with an empty rationale (C1).
 
 Each candidate is valued into the record's currency (C4, "priced means pinned"): a
 same-currency **stablecoin** at face value (its peg, reproducible as amount × 1, no snapshot
