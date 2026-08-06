@@ -41,6 +41,9 @@ jobs:
       # ADR-011 transitive guard: depcruise skips node_modules, so scan the full lockfile
       # for signing/key-material packages (needs only the lockfile + cruiser config).
       - run: pnpm check:supply-chain
+      # Unit coverage for the guard's two lockfile parsers (node:test, no new deps) — this
+      # IS the ADR-011 enforcement, so its own parsing blind spots matter.
+      - run: pnpm test:scripts
 
   test:
     runs-on: ubuntu-latest
