@@ -209,6 +209,21 @@ describe('renderJournalDrafts — recon-backed QBO/Xero draft (§6.5)', () => {
     ).toThrow(/CR-1/);
   });
 
+  it('skips an effectively-zero (negative-rounds-to-zero) gross instead of throwing', () => {
+    // roundHalfUp('-0.001', 2) === '-0.00', and isNegative('-0.00') is true — isZero
+    // is checked first (V is tested for zero before it is tested for negative), so
+    // this is skipped like any other zero-valued entry, not thrown on.
+    const out = renderJournalDrafts(
+      input({
+        accountMapping: MAPPING,
+        entries: [
+          { externalRef: 'ZERO-1', counterparty: 'ACME', direction: 'receivable', grossFiat: '-0.001', vatRate: null, currency: 'EUR', date: '2026-06-15' },
+        ],
+      }),
+    );
+    expect(out.lines).toBe(0);
+  });
+
   it('has no `rounding` category: an unmapped/unknown mapping key is accepted and silently unused', () => {
     // `rounding` used to be a documented-but-dead category. It is no longer part of
     // JournalCategory, and account_mapping is an unconstrained Record<string, string>

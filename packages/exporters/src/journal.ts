@@ -94,11 +94,15 @@ export function buildJournalDraft(input: JournalInput, currency: Currency, date:
 
   if (input.gasFiat !== undefined) {
     const gas = roundHalfUp(input.gasFiat, 2);
-    // See the docstring above: gas has no direction to sign-flip, so this throws.
-    if (isNegative(gas)) {
-      throw new Error(`journal: gasFiat ${gas} is negative; credit notes/reversals are not modelled yet — they must flip the entry's sides, not emit a negative amount`);
-    }
+    // isZero is checked first, matching entryLines: `roundHalfUp` preserves the sign
+    // of a negative value that rounds to zero (e.g. '-0.001' -> '-0.00', and
+    // isNegative('-0.00') is true), so an effectively-zero gas must be skipped before
+    // the negative check runs, not thrown on. Gas has no direction to sign-flip (see
+    // the docstring above), so a genuinely negative gas throws.
     if (!isZero(gas)) {
+      if (isNegative(gas)) {
+        throw new Error(`journal: gasFiat ${gas} is negative; credit notes/reversals are not modelled yet — they must flip the entry's sides, not emit a negative amount`);
+      }
       lines.push(debitLine(date, ACCOUNT_GAS, 'Gas fees (DRAFT)', gas, currency));
       lines.push(creditLine(date, ACCOUNT_ASSETS, 'Gas fees (DRAFT)', gas, currency));
     }
