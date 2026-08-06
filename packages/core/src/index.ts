@@ -23,4 +23,6 @@ export { formatUnits, parseUnits, type RawAmount, type DecimalString } from './m
 
 export { sanitize, type Sanitized } from './sanitizer.js';
 
+export { SECRET_QUERY_PARAMS } from './redaction.js';
+
 export * from './schemas.js';

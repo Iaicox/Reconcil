@@ -1,3 +1,4 @@
+import { createLogger, type Logger } from '@reconcil/core';
 import { chainEvents, createDb, runMigrations, type Db } from '@reconcil/db';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
@@ -7,6 +8,22 @@ import { runPriceFill } from '../src/fill.js';
 import type { PriceBundle, PriceProvider } from '../src/providers/types.js';
 import type { ValueNeed } from '../src/types.js';
 import { valueQuantities } from '../src/value.js';
+
+// FillDeps.logger is required (a swallowed provider outage must always surface
+// somewhere) — most tests don't assert on log output, so a plain stdout logger
+// suffices there; the failure-path test below uses a spy instead.
+const logger = createLogger({ name: 'fill.itest' });
+
+/** Captures warn() calls so a test can assert a failure was actually recorded. */
+function spyLogger(): Logger & { warnCalls: { msg: string; fields?: Record<string, unknown> }[] } {
+  const warnCalls: { msg: string; fields?: Record<string, unknown> }[] = [];
+  return {
+    warnCalls,
+    info: () => undefined,
+    warn: (msg, fields) => { warnCalls.push({ msg, fields }); },
+    error: () => undefined,
+  };
+}
 
 let container: StartedPostgreSqlContainer;
 let db: Db;
@@ -73,10 +90,10 @@ describe('runPriceFill — gaps → fetch → append, then valuation reads it', 
     await seedEvent(1, '2026-06-01');
     const bundle = stubBundle({ [`ethereum:${addr(1)}|2026-06-01`]: '2000' });
 
-    const first = await runPriceFill({ db, bundle });
-    expect(first).toMatchObject({ gaps: 1, pricesInserted: 1, fxInserted: 1 });
+    const first = await runPriceFill({ db, bundle, logger });
+    expect(first).toMatchObject({ gaps: 1, pricesInserted: 1, fxInserted: 1, failedGaps: 0 });
     // Re-run: nothing new (append-only idempotency).
-    expect(await runPriceFill({ db, bundle })).toMatchObject({ pricesInserted: 0, fxInserted: 0, gaps: 0 });
+    expect(await runPriceFill({ db, bundle, logger })).toMatchObject({ pricesInserted: 0, fxInserted: 0, gaps: 0, failedGaps: 0 });
 
     const usd = await valueQuantities(db, [need({ tokenId: 1, amount: '3' as ValueNeed['amount'], date: '2026-06-01' })], { currency: 'USD' });
     expect(usd.values[0]?.fiatValue).toBe('6000');
@@ -101,9 +118,17 @@ describe('runPriceFill — gaps → fetch → append, then valuation reads it', 
       fx: { source: 'ecb', rangeRates: () => Promise.resolve([]) },
     };
 
-    // Must resolve (not reject) and still have inserted token 2's snapshot.
-    const res = await runPriceFill({ db, bundle });
+    // Must resolve (not reject) and still have inserted token 2's snapshot — but the
+    // outage on token 1 must be visible in the result, not only swallowed into logs
+    // (a bare unit test that forgets to check logs would otherwise see pricesInserted
+    // indistinguishable from "nothing to do").
+    const log = spyLogger();
+    const res = await runPriceFill({ db, bundle, logger: log });
     expect(res.pricesInserted).toBe(1);
+    expect(res.failedGaps).toBe(1);
+    expect(log.warnCalls).toHaveLength(1);
+    expect(log.warnCalls[0]?.msg).toMatch(/price fetch failed/);
+    expect(log.warnCalls[0]?.fields).toMatchObject({ tokenId: 1 });
     const usd = await valueQuantities(db, [need({ tokenId: 2, amount: '2' as ValueNeed['amount'], date: '2026-06-01' })], { currency: 'USD' });
     expect(usd.values[0]?.fiatValue).toBe('6000');
   });
@@ -111,7 +136,7 @@ describe('runPriceFill — gaps → fetch → append, then valuation reads it', 
   it('materializes peg snapshots for stablecoins during the fill', async () => {
     await seedToken(5, { isStablecoin: true, pegCurrency: 'USD' });
     await seedEvent(5, '2026-06-01');
-    const res = await runPriceFill({ db, bundle: stubBundle({}) });
+    const res = await runPriceFill({ db, bundle: stubBundle({}), logger });
     expect(res.pegInserted).toBe(1);
 
     const peg = await valueQuantities(

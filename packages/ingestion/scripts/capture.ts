@@ -29,13 +29,26 @@ const FIXTURES_ROOT = join(
   'providers',
 );
 
+// NOTE: duplicated (not shared) from packages/pricing/src/providers/transport.ts —
+// ingestion and pricing are sibling domain packages and may not import each other's
+// internals (dependency-cruiser `domain-depends-only-on-db-core`), and this is a script,
+// not a package export either side could re-export. Keep the two copies in sync.
 function throttled(inner: FetchJson, ms: number): FetchJson {
   let last = 0;
-  return async (url) => {
-    const wait = last + ms - Date.now();
-    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-    last = Date.now();
-    return inner(url);
+  // Concurrent callers must be serialized through ONE queue, not race the same `last`
+  // read (that let N same-tick calls compute an identical wait and fire together —
+  // the rate limit was bypassed exactly when it mattered). Chaining each call's
+  // wait-and-claim step onto the previous one serializes just that critical section;
+  // `inner(url)` itself still runs outside the chain so in-flight requests can overlap.
+  let queue: Promise<void> = Promise.resolve();
+  return (url) => {
+    const turn = queue.then(async () => {
+      const wait = last + ms - Date.now();
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      last = Date.now();
+    });
+    queue = turn.catch(() => undefined);
+    return turn.then(() => inner(url));
   };
 }
 

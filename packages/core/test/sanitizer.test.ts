@@ -28,10 +28,26 @@ describe('sanitize — hostile on-chain string scrubber (ADR-011 §1)', () => {
     expect(sanitize(`USDC${MONEY}`).display).toBe('USDC');
   });
 
-  it('caps length at the limit without counting truncation as heavy', () => {
+  it('caps length at the limit', () => {
     const r = sanitize('x'.repeat(100), { maxLength: 10 });
     expect(r.display).toHaveLength(10);
+  });
+
+  it('does not flag heavy when truncation removes ≤30% of the original', () => {
+    // 20/100 = 20% truncated — under the threshold, not heavy.
+    const r = sanitize('x'.repeat(100), { maxLength: 80 });
+    expect(r.display).toHaveLength(80);
     expect(r.heavy).toBe(false);
+  });
+
+  it('flags heavy when truncation alone removes >30% of the original — a clean, all-letters ' +
+    'name that is simply too long is still real content loss, not just hostile-charset stripping', () => {
+    // The audit example: a 10 000-char, all-letters name cut to the default 64-char cap
+    // is a ~99% content loss; nothing in it is hostile, so the charset scrub removes
+    // nothing on its own — truncation must be able to trigger `heavy` by itself.
+    const r = sanitize('A'.repeat(10_000));
+    expect(r.display).toHaveLength(64);
+    expect(r.heavy).toBe(true);
   });
 
   it('flags heavy when >30% (by code point) is stripped', () => {
