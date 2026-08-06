@@ -68,14 +68,9 @@ every deposit between the requested date and safeHead into the "as of anchor dat
 clamping — `block_number`/`block_time` on `opening_balance` rows stay mutually consistent by
 construction (no clamped write is ever produced).
 
-This decision does **not** extend to a synchronous rejection in `ledger_track_wallet`: per
-the amendment above, the write tool cannot make a synchronous provider call, and anchor
-resolution (`getBlockByTime`) only happens later, worker-side, in the asynchronous `anchor`
-job — there is no request/response call stack connecting the two. `AnchorTooRecentError`
-therefore surfaces the same way every other `runAnchor`/`ingestOnce` processor failure does
-today: a failed BullMQ job (exponential backoff, DLQ after 8 attempts, `serializeError`d in
-the worker logs). Nothing yet writes the checkpoint to `status: 'error'` on a processor
-failure — that general error-surfacing gap is pre-existing and already tracked as a
-follow-up (see the failure-path note in `apps/worker/src/onboard.ts`); wiring `ledger_status`
-to reflect a stuck `anchoring` checkpoint (retried date resolving too recent every attempt)
-is deferred to that same slice rather than solved ad hoc for this one error.
+The rejection happens in the asynchronous `anchor` job, not synchronously in
+`ledger_track_wallet` (per the amendment above, the write tool cannot make a synchronous
+provider call) — so today it surfaces only as a failed BullMQ job (retry/DLQ,
+`serializeError`d in the worker logs), never a clamped/mis-dated `opening_balance`.
+Surfacing it to the tool/read edge rides on the pre-existing checkpoint
+error-status gap (`apps/worker/src/onboard.ts`'s failure-path note) and stays deferred there.
