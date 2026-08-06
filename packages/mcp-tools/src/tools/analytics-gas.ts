@@ -73,9 +73,9 @@ export async function analyticsGas(
   // --- data -----------------------------------------------------------------
   const rows: GasRowView[] = gasRows.map((r: GasRow, i) => ({
     group: r.group,
-    native_amount: r.nativeAmount as string,
+    native_amount: r.nativeAmount,
     tx_count: r.txCount,
-    ...(fiatByRow[i] !== undefined ? { fiat_value: fiatByRow[i]! } : {}),
+    ...(fiatByRow[i] !== undefined ? { fiat_value: fiatByRow[i] } : {}),
   }));
   const data: AnalyticsGasOutput = { rows };
 
@@ -96,7 +96,7 @@ export async function analyticsGas(
     throw new ToolError('INTERNAL', `analytics_gas produced an output that violates its contract: ${String(err)}`);
   }
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
+    toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });

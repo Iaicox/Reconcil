@@ -97,7 +97,7 @@ export async function exportJournalDrafts(
   // reconciles disk manifests against the audit table).
   return runWriteTool<ExportJournalDraftsOutput>(ctx, {
     toolName: TOOL_NAME,
-    args: input as Record<string, unknown>,
+    args: input,
     toolCallId,
     body: async (txCtx) => {
       await txCtx.db.insert(exportsTable).values({

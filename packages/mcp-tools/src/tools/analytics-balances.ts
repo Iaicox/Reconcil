@@ -79,7 +79,7 @@ export async function analyticsBalances(
       address: r.address,
       chain_id: r.chainId,
       token: toTokenView(r.token),
-      amount: r.amount as string,
+      amount: r.amount,
       ...(fiat !== undefined ? { fiat_value: fiat } : {}),
     };
   });
@@ -121,7 +121,7 @@ export async function analyticsBalances(
     throw new ToolError('INTERNAL', `analytics_balances produced an output that violates its contract: ${String(err)}`);
   }
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
+    toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });

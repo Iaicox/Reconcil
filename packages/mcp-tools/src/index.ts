@@ -60,77 +60,77 @@ const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false };
 export const analyticsBalancesTool: ToolDescriptor = {
   name: BALANCES_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(analyticsBalancesInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(analyticsBalancesInput),
   handler: analyticsBalances,
 };
 
 export const analyticsFlowsTool: ToolDescriptor = {
   name: FLOWS_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(analyticsFlowsInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(analyticsFlowsInput),
   handler: analyticsFlows,
 };
 
 export const analyticsGasTool: ToolDescriptor = {
   name: GAS_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(analyticsGasInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(analyticsGasInput),
   handler: analyticsGas,
 };
 
 export const analyticsStablecoinMovementsTool: ToolDescriptor = {
   name: STABLECOIN_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(analyticsStablecoinInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(analyticsStablecoinInput),
   handler: analyticsStablecoinMovements,
 };
 
 export const analyticsListEventsTool: ToolDescriptor = {
   name: LIST_EVENTS_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(analyticsListEventsInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(analyticsListEventsInput),
   handler: analyticsListEvents,
 };
 
 export const analyticsCounterpartiesTool: ToolDescriptor = {
   name: COUNTERPARTIES_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(analyticsCounterpartiesInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(analyticsCounterpartiesInput),
   handler: analyticsCounterparties,
 };
 
 export const directoryListEntitiesTool: ToolDescriptor = {
   name: DIRECTORY_LIST_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(directoryListEntitiesInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(directoryListEntitiesInput),
   handler: directoryListEntities,
 };
 
 export const directoryUpsertEntityTool: ToolDescriptor = {
   name: DIRECTORY_UPSERT_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(directoryUpsertEntityInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(directoryUpsertEntityInput),
   handler: directoryUpsertEntity,
 };
 
 export const ledgerStatusTool: ToolDescriptor = {
   name: LEDGER_STATUS_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(ledgerStatusInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(ledgerStatusInput),
   handler: ledgerStatus,
 };
 
 export const ledgerTraceToolCallTool: ToolDescriptor = {
   name: LEDGER_TRACE_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(ledgerTraceToolCallInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(ledgerTraceToolCallInput),
   handler: ledgerTraceToolCall,
 };
 
 export const ledgerTrackWalletTool: ToolDescriptor = {
   name: LEDGER_TRACK_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(ledgerTrackWalletInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(ledgerTrackWalletInput),
   handler: ledgerTrackWallet,
 };
 
@@ -141,14 +141,14 @@ export const ledgerTrackWalletTool: ToolDescriptor = {
 export const exportClosePackTool: ToolDescriptor = {
   name: EXPORT_CLOSE_PACK_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(exportClosePackInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(exportClosePackInput),
   handler: exportClosePack,
 };
 
 export const exportPdfSummaryTool: ToolDescriptor = {
   name: EXPORT_PDF_SUMMARY_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(exportPdfSummaryInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(exportPdfSummaryInput),
   handler: exportPdfSummary,
 };
 
@@ -156,7 +156,7 @@ export const exportPdfSummaryTool: ToolDescriptor = {
 export const reconImportInvoicesTool: ToolDescriptor = {
   name: RECON_IMPORT_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(reconImportInvoicesInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(reconImportInvoicesInput),
   handler: reconImportInvoices,
 };
 
@@ -164,7 +164,7 @@ export const reconImportInvoicesTool: ToolDescriptor = {
 export const reconSuggestMatchesTool: ToolDescriptor = {
   name: RECON_SUGGEST_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(reconSuggestMatchesInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(reconSuggestMatchesInput),
   handler: reconSuggestMatches,
 };
 
@@ -172,7 +172,7 @@ export const reconSuggestMatchesTool: ToolDescriptor = {
 export const reconConfirmMatchTool: ToolDescriptor = {
   name: RECON_CONFIRM_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(reconConfirmMatchInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(reconConfirmMatchInput),
   handler: reconConfirmMatch,
 };
 
@@ -180,7 +180,7 @@ export const reconConfirmMatchTool: ToolDescriptor = {
 export const reconRejectMatchTool: ToolDescriptor = {
   name: RECON_REJECT_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(reconRejectMatchInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(reconRejectMatchInput),
   handler: reconRejectMatch,
 };
 
@@ -188,7 +188,7 @@ export const reconRejectMatchTool: ToolDescriptor = {
 export const reconStatusTool: ToolDescriptor = {
   name: RECON_STATUS_TOOL,
   annotations: READ_ONLY,
-  inputSchema: z.toJSONSchema(reconStatusInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(reconStatusInput),
   handler: reconStatusHandler,
 };
 
@@ -196,7 +196,7 @@ export const reconStatusTool: ToolDescriptor = {
 export const exportJournalDraftsTool: ToolDescriptor = {
   name: EXPORT_JOURNAL_DRAFTS_TOOL,
   annotations: WRITE,
-  inputSchema: z.toJSONSchema(exportJournalDraftsInput) as Record<string, unknown>,
+  inputSchema: z.toJSONSchema(exportJournalDraftsInput),
   handler: exportJournalDrafts,
 };
 

@@ -18,15 +18,15 @@ const ONE_ETH = 1_000_000_000_000_000_000n;
 const bundle: ProviderBundle = {
   indexer: {
     kind: 'blockscout',
-    getHead: async () => 1_000_000n,
-    getNativeTxs: async () => ({ items: [] }),
-    getErc20Transfers: async () => ({ items: [] }),
+    getHead: () => Promise.resolve(1_000_000n),
+    getNativeTxs: () => Promise.resolve({ items: [] }),
+    getErc20Transfers: () => Promise.resolve({ items: [] }),
   },
-  getReceipts: async () => [],
-  getBlockByTime: async () => 500n,
-  getNativeBalanceAt: async () => ({ balance: ONE_ETH, provider: 'blockscout' }),
-  getErc20BalanceAt: async () => ({ balance: 2_500_000n, provider: 'blockscout' }),
-  estimateTxCount: async () => 75_000,
+  getReceipts: () => Promise.resolve([]),
+  getBlockByTime: () => Promise.resolve(500n),
+  getNativeBalanceAt: () => Promise.resolve({ balance: ONE_ETH, provider: 'blockscout' }),
+  getErc20BalanceAt: () => Promise.resolve({ balance: 2_500_000n, provider: 'blockscout' }),
+  estimateTxCount: () => Promise.resolve(75_000),
 };
 const deps = (db: Db, over: Partial<ProviderBundle> = {}): ProcessorDeps => ({
   db,
@@ -103,19 +103,19 @@ describe('runAnchor — native stream', () => {
     await runAnchor(deps(db), { chainId: 1, address: ADDR, stream: 'native', anchorFrom: '2024-01-01' });
     const again = await runAnchor(deps(db), { chainId: 1, address: ADDR, stream: 'native', anchorFrom: '2024-01-01' });
     expect(again.inserted).toBe(0);
-    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM chain_events`);
-    expect(rows[0].n).toBe(1);
+    const { rows } = await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM chain_events`);
+    expect(rows[0]?.n).toBe(1);
   });
 
   it('skips a zero native balance (no baseline event needed)', async () => {
     await seedAnchoring(1, 'native', '2024-01-01');
     const res = await runAnchor(
-      deps(db, { getNativeBalanceAt: async () => ({ balance: 0n, provider: 'blockscout' }) }),
+      deps(db, { getNativeBalanceAt: () => Promise.resolve({ balance: 0n, provider: 'blockscout' }) }),
       { chainId: 1, address: ADDR, stream: 'native', anchorFrom: '2024-01-01' },
     );
     expect(res.inserted).toBe(0);
-    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM chain_events`);
-    expect(rows[0].n).toBe(0);
+    const { rows } = await pool.query<{ n: number }>(`SELECT count(*)::int AS n FROM chain_events`);
+    expect(rows[0]?.n).toBe(0);
   });
 });
 
@@ -149,21 +149,21 @@ describe('runProbe', () => {
 
     const hint = await runProbe(deps(db), { chainId: 1, address: ADDR });
     expect(hint).toBe(75_000);
-    const { rows } = await pool.query(
+    const { rows } = await pool.query<{ tx_count_hint: string | null }>(
       `SELECT tx_count_hint FROM ingestion_checkpoints WHERE stream='native'`,
     );
-    expect(rows[0].tx_count_hint).toBe('75000');
+    expect(rows[0]?.tx_count_hint).toBe('75000');
     // hint set ⇒ self-empties, the next scan won't re-probe
     expect(await listProbeTargets(db)).toEqual([]);
   });
 
   it('degrades quietly when no provider can estimate (hint stays null)', async () => {
     await seedQueued('native');
-    const hint = await runProbe(deps(db, { estimateTxCount: async () => undefined }), { chainId: 1, address: ADDR });
+    const hint = await runProbe(deps(db, { estimateTxCount: () => Promise.resolve(undefined) }), { chainId: 1, address: ADDR });
     expect(hint).toBeUndefined();
-    const { rows } = await pool.query(
+    const { rows } = await pool.query<{ tx_count_hint: string | null }>(
       `SELECT tx_count_hint FROM ingestion_checkpoints WHERE stream='native'`,
     );
-    expect(rows[0].tx_count_hint).toBeNull();
+    expect(rows[0]?.tx_count_hint).toBeNull();
   });
 });

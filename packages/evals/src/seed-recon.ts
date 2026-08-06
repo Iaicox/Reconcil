@@ -51,7 +51,11 @@ export async function seedReconFixture(
   tenantId: string,
   role: ReconFixtureRole = 'recon-smb',
 ): Promise<SeededReconFixture> {
-  if (role !== 'recon-smb') throw new Error(`unknown recon fixture role "${role}"`);
+  // role is a single-literal type today, so this branch is statically unreachable
+  // (TS narrows it to `never`) — kept as a runtime guard for callers outside the
+  // type system (untyped JS, or a future role added without updating every call
+  // site). String(role) sidesteps restrict-template-expressions on the `never`.
+  if (role !== 'recon-smb') throw new Error(`unknown recon fixture role "${String(role)}"`);
 
   const [client] = await db
     .insert(clients)
