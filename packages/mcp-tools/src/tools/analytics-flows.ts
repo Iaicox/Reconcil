@@ -55,9 +55,8 @@ export async function analyticsFlows(
     noMatch
       ? Promise.resolve({ rows: [], internal: [] })
       : computeFlows(ctx.db, {
-          scope: { addresses },
+          scope: { addresses, ...chainScope },
           period: input.period,
-          ...chainScope, // computeFlows reads chainIds at the top level
           ...(input.direction ? { direction: input.direction } : {}),
           ...(input.group_by ? { groupBy: input.group_by } : {}),
           ...(restrictTokenIds ? { restrictTokenIds } : {}),

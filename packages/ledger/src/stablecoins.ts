@@ -18,11 +18,13 @@ export async function computeStablecoinMovements(db: Db, p: StablecoinParams): P
   const ids = (await db.select({ id: tokens.id }).from(tokens).where(and(...conds))).map((r) => r.id);
   if (ids.length === 0) return { rows: [], internal: [] };
 
+  // `p.chainIds` (distinct from `p.scope.chainIds`) only narrows the stablecoin
+  // token-universe query above; `computeFlows` now reads chainIds exclusively
+  // from `scope.chainIds` (H10), which is already threaded through unchanged here.
   const params: FlowsParams = {
     scope: p.scope,
     period: p.period,
     restrictTokenIds: ids,
-    ...(p.chainIds ? { chainIds: p.chainIds } : {}),
     ...(p.direction ? { direction: p.direction } : {}),
     ...(p.groupBy ? { groupBy: p.groupBy } : {}),
   };

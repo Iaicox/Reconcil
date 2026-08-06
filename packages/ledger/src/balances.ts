@@ -6,10 +6,11 @@
  */
 import { formatUnits } from '@reconcil/core';
 import { chainEvents, type Db } from '@reconcil/db';
-import { and, type SQL, inArray, lte, or, sql } from 'drizzle-orm';
+import { and, type SQL, inArray, lt, or, sql } from 'drizzle-orm';
 
 import { resolveAsOf } from './as-of.js';
 import { bucketBacking, emptyBacking } from './backing.js';
+import { dayEndExclusive } from './scope-sql.js';
 import { loadTokenMeta } from './token-meta.js';
 import type { BackingEvents, BalanceRow, BalancesParams, BalancesResult } from './types.js';
 
@@ -20,11 +21,13 @@ const key = (addr: string, tokenId: number): string => `${addr} ${tokenId}`;
 export async function computeBalances(db: Db, p: BalancesParams): Promise<BalancesResult> {
   const addresses = p.scope.addresses.map((a) => a.toLowerCase());
   const chainIds = p.scope.chainIds;
-  const cutoff = p.asOf ? new Date(`${p.asOf}T23:59:59.999Z`) : undefined;
+  // Exclusive next-day boundary (scope-sql.ts dayEndExclusive) — same half-open
+  // convention as periodRange/timeBetween (H10 minors).
+  const cutoff = p.asOf ? dayEndExclusive(p.asOf) : undefined;
   if (addresses.length === 0) return { asOf: [], rows: [] };
 
   const chainC = chainIds && chainIds.length > 0 ? inArray(chainEvents.chainId, chainIds) : undefined;
-  const timeC = cutoff ? lte(chainEvents.blockTime, cutoff) : undefined;
+  const timeC = cutoff ? lt(chainEvents.blockTime, cutoff) : undefined;
 
   // Two index-friendly aggregates (chain_events_to_idx / _from_idx). An internal
   // transfer lands in both — inflow for the recipient, outflow for the sender.
