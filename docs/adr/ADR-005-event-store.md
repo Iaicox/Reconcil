@@ -2,7 +2,9 @@
 
 **Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-07-15 (`token_id`
 added to the idempotency key — see decision 2) · 2026-07-24 (trace-level internal
-transfers activated — see decision 2)
+transfers activated — see decision 2) · 2026-08-06 (internal transfers wired into
+the worker's `native` stream; `n` re-specified from provider order to a stable
+per-tx rank — see decision 2)
 
 ## Context
 
@@ -16,9 +18,17 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    (no materialized state to invalidate in MVP).
 2. **Idempotency key `UNIQUE (chain_id, tx_hash, log_index, token_id)`** with sentinel
    `log_index` values for non-log facts: `-1` native transfer, `-2` gas fee,
-   `-3` opening balance, `-(1000+n)` trace-level internal transfer *n* (0-based, in
-   provider order within the parent tx — `txlistinternal`; a tx can carry several
-   contract-initiated native inflows, so a single `-1` slot cannot hold them).
+   `-3` opening balance, `-(1000+n)` trace-level internal transfer *n*
+   (`txlistinternal`; a tx can carry several contract-initiated native inflows, so a
+   single `-1` slot cannot hold them). *n* is 0-based and is the trace's **rank
+   inside its parent tx under a stable order** — the provider's own trace label when
+   it sends one (Etherscan `traceId`, Blockscout `index`; both enumerate the call
+   tree in execution order), otherwise a `(from, to, value)` tuple. It is
+   deliberately **not** arrival order: the sentinel is half of the idempotency key,
+   so it must be a function of the row set alone, or a re-fetch that returns the same
+   traces in a different order (the overlap boundary block, or the other provider
+   after a failover) would renumber them into each other's slots and `ON CONFLICT DO
+   NOTHING` would silently drop a real value movement.
    One uniform key ⇒ one dedup mechanism (`ON CONFLICT DO NOTHING`) everywhere.
    `token_id` is functionally dependent on the first three columns for real logs (a log
    carries exactly one token), but load-bearing for anchored opening balances: anchoring
@@ -56,7 +66,11 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
   `gas_fee` already covers it), so they normalize to `native_transfer` only. Ingesting
   them closes the R3 gap where `txlist` alone omits contract-initiated native inflows, so
   the computed native balance reconciles to the recorded `eth_get_balance` (the R3
-  integrity check, 04-testing.md §2). The 0-based sub-index `n` is assigned per parent tx
-  when a tx's internal rows are normalized together (the seed/backfill path collects all
-  pages before `normalize`); page-independent trace indexing for a streamed worker path is
-  a follow-up.
+  integrity check, 04-testing.md §2).
+- The worker's `native` stream fetches `txlist` **and** `txlistinternal` over the same
+  window behind one checkpoint (03-ingestion.md §3). Page-independent trace indexing —
+  once listed here as a follow-up — is what decision 2's stable rank delivers: `n` no
+  longer depends on how the pages were cut. The cursor takes the **minimum** of the two
+  pages' candidates so it can never pass a block whose internal transfers were
+  truncated, and a block holding ≥ `PAGE_LIMIT` internal transfers fails loudly for the
+  same reason a `txlist` flood does (block-granular pagination cannot split a block).

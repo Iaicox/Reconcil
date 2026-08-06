@@ -101,9 +101,12 @@ export interface ChainDataProvider {
   readonly kind: 'etherscan-v2' | 'blockscout' | (string & {});
   getHead(chainId: number): Promise<bigint>;
   getNativeTxs(q: PageQuery): Promise<Page<RawNativeTx>>;
-  // Contract-initiated native inflows (`txlistinternal`). Optional capability
-  // (ADR-009): closes the R3 gap where txlist alone omits internal value moves, so a
-  // native balance reconciles to eth_get_balance (04-testing.md §2, ADR-005 d2).
+  // Contract-initiated native value moves (`txlistinternal`), fetched by the worker's
+  // `native` stream alongside txlist over the same window (processors/ingest.ts). Closes
+  // the R3 gap where txlist alone omits them, so a native balance reconciles to
+  // eth_get_balance to the wei (04-testing.md §2, ADR-005 d2). Optional capability
+  // (ADR-009): both shipping adapters implement it and failoverProvider forwards it, but
+  // a chain served by neither degrades to txlist-only rather than failing every page.
   getInternalTxs?(q: PageQuery): Promise<Page<RawInternalTx>>;
   getErc20Transfers(q: PageQuery): Promise<Page<RawErc20Transfer>>;
   getTokenMeta?(chainId: number, address: string): Promise<RawTokenMeta>;

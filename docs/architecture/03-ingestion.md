@@ -70,18 +70,24 @@ For each `(chain, address, stream)`, ascending block order:
 cursor = checkpoint.last_processed_block          // 0 or anchor_block initially
 safe   = safeHead(chain)                          // head - finality_depth
 loop:
-  page = provider.getPage(address, from=cursor+1, to=safe, limit=1000, sort=asc)
-  events = normalize(page)                        // pure function, packages/ingestion
+  pages = provider.getPages(address, from=cursor+1, to=safe, limit=1000, sort=asc)
+  // stream 'native' fetches TWO pages over that window: txlist + txlistinternal
+  // (ADR-005 d2). stream 'erc20' fetches one (tokentx).
+  events = normalize(pages)                       // pure function, packages/ingestion
   tx {                                            // single Postgres transaction
     INSERT ... ON CONFLICT (chain_id, tx_hash, log_index, token_id) DO NOTHING
     UPDATE ingestion_checkpoints SET last_processed_block = newCursor
   }
   enqueue token-resolve for unseen contracts
-  if page.length < limit: status = live; break
-  // page full: a block's events may be split across pages ->
-  // newCursor = last item's block_number - 1; the overlap re-fetches that block
-  // and the idempotency key dedupes. Correctness needs no provider ordering
-  // guarantees beyond block-level sort.
+  if every page.length < limit: status = live; break
+  // a full page means the window still holds rows the provider truncated, and a
+  // block's events may be split across pages -> that page's candidate cursor is
+  // its last item's block_number - 1; the overlap re-fetches that block and the
+  // idempotency key dedupes. Correctness needs no provider ordering guarantees
+  // beyond block-level sort.
+  // newCursor = MIN(candidate over all pages) -- with two pages behind one
+  // checkpoint, anything larger would step past a block whose other page was
+  // truncated, and nothing ever revisits a passed block.
 ```
 
 The **transactional cursor advance** is the crash-safety core: a worker killed mid-page
@@ -115,8 +121,17 @@ freshness and is documented as unsupported for accounting use.
 Safety net: the **integrity job** (daily + on-demand per wallet) recomputes native + top
 token balances from events at the checkpoint block and compares with the provider's
 balance-at-block. Drift ⇒ `last_integrity.clean = false`, surfaced in `ledger_status` and
-as a tool warning. Known systematic drift sources it will catch: missed internal
-(trace-level) ETH transfers — an explicit MVP gap (see `05-risks-open-questions.md`).
+as a tool warning.
+
+Internal (trace-level) ETH transfers — once the headline systematic drift source and an
+explicit MVP gap — are **ingested** as of the internal-transfer slice: the `native`
+stream pulls `txlistinternal` alongside `txlist` (§3, ADR-005 d2), and the golden-wallet
+reconciliation now matches `eth_get_balance` to the wei through the production processor
+(`packages/evals/test/reconcile.itest.ts`). Two caveats remain, both loud rather than
+silent: a chain whose providers serve no trace data degrades to `txlist`-only (the
+integrity job catches the drift), and a single block holding ≥ `PAGE_LIMIT` (1000)
+internal transfers for one wallet stalls that stream with an explicit error instead of
+skipping rows — the same block-granular pagination limit `txlist` has.
 
 ## 5. Provider abstraction (P6, ADR-009)
 
@@ -127,6 +142,7 @@ interface ChainDataProvider {
   getHead(chainId: number): Promise<bigint>;
   getNativeTxs(q: PageQuery): Promise<Page<RawNativeTx>>;
   getErc20Transfers(q: PageQuery): Promise<Page<RawErc20Transfer>>;
+  getInternalTxs?(q: PageQuery): Promise<Page<RawInternalTx>>;                           // txlistinternal (ADR-005 d2)
   getTokenMeta?(chainId: number, address: string): Promise<RawTokenMeta>;
   getNativeBalanceAt?(chainId: number, address: string, block: bigint): Promise<bigint>;   // anchoring, integrity
   getErc20BalanceAt?(chainId: number, address: string, token: string, block: bigint): Promise<bigint>;
@@ -154,7 +170,16 @@ in adapters; correctness logic exists once.
   tail keeps running (tail is cheap; backfills are the spender).
 - Circuit breaker per provider: open after 5 consecutive failures, half-open probe after
   60 s. Open primary ⇒ route to secondary. Both open ⇒ checkpoint `error` + backoff retry.
-- Every stored event records `provider` — mixed-provider histories are auditable.
+- Every stored event records `provider` — mixed-provider histories are auditable. The
+  `native` stream makes two calls per page (txlist, txlistinternal) and stamps both with
+  the provider that answered last: a failover *between* the two calls mislabels the
+  earlier rows' `provider`. Audit-level imprecision on a rare path, nothing computed
+  reads that column.
+- `failoverProvider` mirrors optionality rather than flattening it: a capability method
+  exists on the wrapper iff at least one provider serves it, and failover walks only the
+  providers that do. `typeof indexer.getInternalTxs === 'function'` therefore stays an
+  honest probe, and a chain with no trace-capable provider degrades to `txlist`-only
+  instead of failing every page.
 
 ## 6. Fee strategies (per-chain config)
 

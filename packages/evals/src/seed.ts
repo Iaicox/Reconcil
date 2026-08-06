@@ -28,6 +28,7 @@ import {
   toChainEventRow,
   type ChainDataProvider,
   type PageQuery,
+  type ProviderBundle,
   type WalletManifestEntry,
 } from '@reconcil/ingestion';
 
@@ -113,6 +114,72 @@ export async function seedGoldenWallet(db: Db, role: string, chainId = 1): Promi
     nativeTransfers: events.filter((e) => e.eventKind === 'native_transfer').length,
     internalTransfers: events.filter((e) => e.eventKind === 'native_transfer' && e.logIndex <= -1000).length,
     gasFees: events.filter((e) => e.eventKind === 'gas_fee').length,
+  };
+}
+
+/** A golden wallet wired up so the PRODUCTION processors can ingest it from fixtures. */
+export interface GoldenIngestFixture {
+  address: string;
+  chainId: number;
+  /** What `ProcessorDeps.bundleFor` must hand back for this wallet. */
+  bundle: ProviderBundle;
+  /** head − finalityDepth, pinned to the manifest window's last block. */
+  safeBlock: bigint;
+}
+
+/**
+ * The same recorded fixtures, but driven through `ingestOnce` (checkpoint → pages →
+ * normalize → commitPage) instead of the seed harness's own replay loop — the R3
+ * reconciliation over the code that actually runs in the worker.
+ *
+ * Two window adjustments make a URL-keyed fixture set replayable under a processor
+ * that picks its own window, and neither changes what the provider answered:
+ *  - `getHead` is pinned to `toBlock + finalityDepth`, so the processor's
+ *    `safeHead = head − finalityDepth` lands exactly on the recorded `endblock`
+ *    (and ADR-005's "never query past safeHead" still holds, by construction);
+ *  - the query's `fromBlock` is rewritten to the manifest's `fromBlock` (0), because
+ *    a fresh checkpoint starts the processor at block 1 while capture recorded
+ *    `startblock=0`. Block 0 is genesis and holds no transactions, so [0, toBlock]
+ *    and [1, toBlock] contain the same rows.
+ */
+export function goldenIngestFixture(role: string, chainId = 1): GoldenIngestFixture {
+  const chain = chainById(chainId);
+  const entry = manifestEntry(role);
+  const window = entry.chains[String(chainId)];
+  if (!window) throw new Error(`golden wallet "${role}" has no chain ${String(chainId)} in the manifest`);
+  const provider = blockscoutFor(chainId);
+  const recordedFrom = BigInt(window.fromBlock);
+  const toBlock = BigInt(window.toBlock);
+  const atRecordedWindow = (q: PageQuery): PageQuery => ({ ...q, fromBlock: recordedFrom });
+
+  const indexer: ChainDataProvider = {
+    kind: provider.kind,
+    getHead: () => Promise.resolve(toBlock + BigInt(chain.finalityDepth)),
+    getNativeTxs: (q) => provider.getNativeTxs(atRecordedWindow(q)),
+    getInternalTxs: (q) => provider.getInternalTxs!(atRecordedWindow(q)),
+    getErc20Transfers: (q) => provider.getErc20Transfers(atRecordedWindow(q)),
+  };
+
+  return {
+    address: entry.address,
+    chainId,
+    safeBlock: toBlock,
+    bundle: {
+      indexer,
+      // chain 1 is feeStrategy 'txlist' — gas comes off the txlist row, so the
+      // processor never asks for a receipt here (the OP-stack capture is deferred).
+      getReceipts: () => Promise.resolve([]),
+      getBlockByTime: (unixSeconds) => provider.getBlockByTime!(chainId, unixSeconds),
+      getNativeBalanceAt: async (address, block) => ({
+        balance: await provider.getNativeBalanceAt!(chainId, address, block),
+        provider: provider.kind,
+      }),
+      getErc20BalanceAt: async (address, token, block) => ({
+        balance: await provider.getErc20BalanceAt!(chainId, address, token, block),
+        provider: provider.kind,
+      }),
+      estimateTxCount: () => Promise.resolve(undefined),
+    },
   };
 }
 
