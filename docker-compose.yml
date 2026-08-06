@@ -41,8 +41,13 @@ services:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/reconcil
       REDIS_URL: redis://redis:6379
       SELF_HOST_TENANT_SLUG: ${SELF_HOST_TENANT_SLUG:-self-host}
+      SELF_HOST_TENANT_NAME: ${SELF_HOST_TENANT_NAME:-Self-hosted}
     ports:
-      - "8484:8484"
+      # PORT (config.ts default 8484) is env_file-fed to the app; a hardcoded
+      # "8484:8484" here would silently desync from a PORT override (the
+      # container listens on PORT but compose still publishes 8484) — mirror
+      # the same default so both sides move together.
+      - "${PORT:-8484}:${PORT:-8484}"
     depends_on:
       postgres:
         condition: service_healthy
