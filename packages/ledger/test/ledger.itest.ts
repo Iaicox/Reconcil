@@ -840,6 +840,57 @@ describe('getLedgerStatus', () => {
     expect(byChain.get(8453)!.streams[0]?.lastBlockTime).toBe('2026-04-01T00:00:00.000Z');
   });
 
+  it('H9 kill-shot: an old erc20 transfer and a recent native transfer give each stream its OWN lastBlockTime', async () => {
+    // Before the fix, both streams inherited one wallet-wide max(block_time) — the
+    // recent native transfer would have leaked onto the (actually dead) erc20
+    // stream, defeating the DATA_STALE signal it feeds.
+    const e = events();
+    e.push({ eventKind: 'erc20_transfer', tokenId: USDC.tokenId, amountRaw: 100n, fromAddr: EXT, toAddr: OWNED, blockTime: new Date('2025-01-01T00:00:00Z'), blockNumber: 1 });
+    e.push({ eventKind: 'native_transfer', tokenId: NATIVE.tokenId, amountRaw: 1n, fromAddr: EXT, toAddr: OWNED, blockTime: new Date('2026-03-01T00:00:00Z'), blockNumber: 2 });
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT], tokens: [NATIVE, USDC], chainIds: [1] });
+    await pool.query('TRUNCATE ingestion_checkpoints');
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO ingestion_checkpoints (chain_id, address, stream, status, last_processed_block, updated_at) VALUES
+        (1, $1, 'native', 'live', 100, $2),
+        (1, $1, 'erc20', 'live', 100, $2)`,
+      [OWNED, now],
+    );
+
+    const cov = await getLedgerStatus(db, { addresses: [OWNED] });
+    const c1 = cov.find((c) => c.chainId === 1)!;
+    const native = c1.streams.find((s) => s.stream === 'native')!;
+    const erc20 = c1.streams.find((s) => s.stream === 'erc20')!;
+    expect(erc20.lastBlockTime).toBe('2025-01-01T00:00:00.000Z');
+    expect(native.lastBlockTime).toBe('2026-03-01T00:00:00.000Z');
+  });
+
+  it('an erc20-anchored wallet (opening_balance on an erc20 token, no erc20 transfers) reflects the anchor on the erc20 stream only', async () => {
+    // opening_balance is written for whichever stream anchored it (anchor.ts:
+    // nativeBalances() vs erc20Balances()) — same eventKind either way, so only
+    // the anchored TOKEN's standard (not the eventKind) says which stream this
+    // is. This is the case a kind-only native_transfer/gas_fee/erc20_transfer/
+    // opening_balance→stream map gets wrong for an erc20 anchor.
+    const e = events();
+    e.push({ eventKind: 'opening_balance', tokenId: USDC.tokenId, amountRaw: 5_000_000n, fromAddr: '0x0000000000000000000000000000000000000000', toAddr: OWNED, blockTime: new Date('2024-06-01T00:00:00Z'), blockNumber: 1 });
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT], tokens: [NATIVE, USDC], chainIds: [1] });
+    await pool.query('TRUNCATE ingestion_checkpoints');
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO ingestion_checkpoints (chain_id, address, stream, status, last_processed_block, anchor_block, updated_at) VALUES
+        (1, $1, 'native', 'backfilling', 0, NULL, $2),
+        (1, $1, 'erc20', 'backfilling', 1, 1, $2)`,
+      [OWNED, now],
+    );
+
+    const cov = await getLedgerStatus(db, { addresses: [OWNED] });
+    const c1 = cov.find((c) => c.chainId === 1)!;
+    const native = c1.streams.find((s) => s.stream === 'native')!;
+    const erc20 = c1.streams.find((s) => s.stream === 'erc20')!;
+    expect(erc20.lastBlockTime).toBe('2024-06-01T00:00:00.000Z');
+    expect(native.lastBlockTime).toBeUndefined();
+  });
+
   it('picks the wallet integrity result deterministically when both streams report one', async () => {
     // Checkpoint row order from Postgres is otherwise unspecified; without the
     // ORDER BY (chainId, address, stream) in getLedgerStatus this pick could flip
