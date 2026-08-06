@@ -123,9 +123,10 @@ the eval suite that gates every release, so they are safe to use as real copy:
 - "Who are my top counterparties by total turnover?"
 - "Explain how you arrived at the gas figure from my previous question — show the underlying events."
 
-Plus two exports: a **monthly close pack** (7 files — `transactions.csv`,
-`balances_opening.csv`, `balances_closing.csv`, `gas.csv`, `counterparty_summary.csv`,
-`journal_draft.csv`, `manifest.json`) and a **PDF summary**.
+Plus two exports: a **monthly close pack** (7 files, each name carrying the period —
+`transactions_2026-06.csv`, `balances_opening_2026-06.csv`, `balances_closing_2026-06.csv`,
+`gas_2026-06.csv`, `counterparty_summary_2026-06.csv`, `journal_draft_2026-06.csv`,
+`manifest.json`) and a **PDF summary**.
 
 ### Face B — reconciliation (the headline story)
 

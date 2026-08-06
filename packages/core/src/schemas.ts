@@ -587,8 +587,11 @@ export type ExportPdfSummaryOutput = z.infer<typeof exportPdfSummaryOutput>;
  * from CONFIRMED matches only (P8). No `valuation`: the journal values from each
  * confirmed leg's pinned fiat (face value, P5). `account_mapping` maps our line
  * categories (crypto_asset / accounts_receivable / accounts_payable / vat_output /
- * vat_input / rounding) to the caller's chart-of-accounts codes; unmapped-but-present
- * categories come back in `unmapped_categories`. `balanced` is a guarantee by
+ * vat_input) to the caller's chart-of-accounts codes; unmapped-but-present
+ * categories come back in `unmapped_categories`. There is no `rounding` category: a
+ * standalone rounding line is itself an unbalanced journal, so it is never emitted —
+ * see the throw-on-imbalance comment in `@reconcil/exporters`' journal-drafts renderer.
+ * `balanced` is a guarantee by
  * construction: every entry is internally balanced, no rounding line is ever appended,
  * and a non-zero per-currency residue fails the export (invariant violation).
  */

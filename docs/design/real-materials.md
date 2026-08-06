@@ -64,8 +64,8 @@ The export response first:
 
 ```json
 { "data": { "export_id": "bfd25c08-…",
-            "file": { "name": "journal_draft_qbo_DRAFT.csv",
-                      "path": "/app/exports/bfd25c08-…/journal_draft_qbo_DRAFT.csv",
+            "file": { "name": "journal_draft_qbo_2026-06_DRAFT.csv",
+                      "path": "/app/exports/bfd25c08-…/journal_draft_qbo_2026-06_DRAFT.csv",
                       "sha256": "9f62c3a4828fe1debf1455b1b66028929048c32179d43df4ec088414631fb212" },
             "lines": 9, "unmapped_categories": [], "balanced": true } }
 ```
@@ -317,8 +317,8 @@ do I owe?"*, and *"will ETH go up next month?"* — tools return facts, never ju
 [`../guide/03-face-a-analytics.md`](../guide/03-face-a-analytics.md) §5:
 
 ```
-balances_opening.csv  balances_closing.csv  transactions.csv
-gas.csv  counterparty_summary.csv  journal_draft.csv  manifest.json
+balances_opening_2026-06.csv  balances_closing_2026-06.csv  transactions_2026-06.csv
+gas_2026-06.csv  counterparty_summary_2026-06.csv  journal_draft_2026-06.csv  manifest.json
 ```
 
 Every export writes that `manifest.json` beside its files:
@@ -337,7 +337,7 @@ Every export writes that `manifest.json` beside its files:
   "coverage": [ … ],
   "price_refs": [], "fx_refs": [],
   "rounding_residues": [ { "currency": "EUR", "residue": "0.00" } ],
-  "files": [ { "name": "balances_opening.csv", "sha256": "3501fb55…" }, … ]
+  "files": [ { "name": "balances_opening_2026-06.csv", "sha256": "3501fb55…" }, … ]
 }
 ```
 
