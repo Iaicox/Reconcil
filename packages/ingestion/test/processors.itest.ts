@@ -44,10 +44,10 @@ type NativeFn = ChainDataProvider['getNativeTxs'];
 type Erc20Fn = ChainDataProvider['getErc20Transfers'];
 type ReceiptsFn = ProviderBundle['getReceipts'];
 
-const bundleOf = (opts: { native?: NativeFn; erc20?: Erc20Fn; receipts?: ReceiptsFn }): ProviderBundle => ({
+const bundleOf = (opts: { native?: NativeFn; erc20?: Erc20Fn; receipts?: ReceiptsFn; head?: bigint }): ProviderBundle => ({
   indexer: {
     kind: 'etherscan-v2',
-    getHead: async () => 1_000_000n,
+    getHead: async () => opts.head ?? 1_000_000n,
     getNativeTxs: opts.native ?? (async () => ({ items: [] })),
     getErc20Transfers: opts.erc20 ?? (async () => ({ items: [] })),
   },
@@ -84,6 +84,19 @@ describe('processors', () => {
 
   const deps = (bundle: () => ProviderBundle): ProcessorDeps => ({
     db, bundleFor: () => bundle(), logger: createLogger({ name: 'test' }),
+  });
+
+  // Captures warn() calls so H7's "skip, don't regress" branch can assert it logged
+  // instead of silently swallowing the stale/negative-safe condition.
+  const warnLog: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const depsWithWarnSpy = (bundle: () => ProviderBundle): ProcessorDeps => ({
+    db,
+    bundleFor: () => bundle(),
+    logger: {
+      info: () => {},
+      warn: (msg, fields) => { warnLog.push({ msg, fields }); },
+      error: () => {},
+    },
   });
 
   beforeAll(async () => {
@@ -200,6 +213,72 @@ describe('processors', () => {
     expect(res.lastProcessedBlock).toBe(SAFE);
     const { rows } = await pool.query('SELECT count(*)::int AS n FROM chain_events');
     expect(rows[0].n).toBe(0);
+  });
+
+  // H7 — a stale (load-balanced) provider head must never regress the cursor, and a
+  // fresh/dev chain whose head is below finalityDepth must never write a negative one.
+  describe('H7 — cursor never regresses or goes negative', () => {
+    it('stale head (safe < cursor): skips the commit, cursor stays put, status unchanged, warns with numbers only', async () => {
+      warnLog.length = 0;
+      await reset('native', 1000, 'live');
+      // head 990 ⇒ safe = 990 − 64 finalityDepth(chain 1) is actually below — use a head
+      // that keeps safe itself already below the cursor without going through finalityDepth
+      // arithmetic surprises: head 1000, finalityDepth 64 ⇒ safe = 936 < cursor 1000.
+      const res = await runBackfillPage(
+        depsWithWarnSpy(() => bundleOf({ native: () => { throw new Error('must not query when regressed'); }, head: 1000n })),
+        { chainId: 1, address: ADDR, stream: 'native' },
+      );
+      expect(res).toEqual({ status: 'live', lastProcessedBlock: 1000, inserted: 0, unseenContracts: [] });
+      const cp = await getCheckpoint(db, 1, ADDR, 'native');
+      expect(cp).toMatchObject({ status: 'live', lastProcessedBlock: 1000 });
+      expect(warnLog).toHaveLength(1);
+      expect(warnLog[0]!.fields).toMatchObject({ chainId: 1, address: ADDR, stream: 'native', safe: 936, lastProcessedBlock: 1000 });
+      // no provider text anywhere in the logged message/fields
+      expect(JSON.stringify(warnLog[0])).not.toMatch(/provider|rpc|http/i);
+    });
+
+    it('preserves a backfilling status (not silently flipped to live) on the skip path', async () => {
+      warnLog.length = 0;
+      await reset('native', 1000, 'backfilling');
+      const res = await runBackfillPage(
+        depsWithWarnSpy(() => bundleOf({ native: () => { throw new Error('must not query when regressed'); }, head: 1000n })),
+        { chainId: 1, address: ADDR, stream: 'native' },
+      );
+      expect(res.status).toBe('backfilling');
+      expect(res.lastProcessedBlock).toBe(1000);
+      const cp = await getCheckpoint(db, 1, ADDR, 'native');
+      expect(cp).toMatchObject({ status: 'backfilling', lastProcessedBlock: 1000 });
+    });
+
+    it('negative safe (fresh/dev chain: head < finalityDepth): skips the commit, never writes a negative cursor, reports the stored status exactly (queued, not coerced to live)', async () => {
+      warnLog.length = 0;
+      await reset('native', 0, 'queued');
+      // head 3, finalityDepth 64 (chain 1) ⇒ safe = -61.
+      const res = await runBackfillPage(
+        depsWithWarnSpy(() => bundleOf({ native: () => { throw new Error('must not query when regressed'); }, head: 3n })),
+        { chainId: 1, address: ADDR, stream: 'native' },
+      );
+      expect(res.status).toBe('queued');
+      expect(res.lastProcessedBlock).toBe(0);
+      expect(res.inserted).toBe(0);
+      const cp = await getCheckpoint(db, 1, ADDR, 'native');
+      expect(cp).toMatchObject({ status: 'queued', lastProcessedBlock: 0 });
+      expect(cp?.lastProcessedBlock).toBeGreaterThanOrEqual(0);
+      expect(warnLog).toHaveLength(1);
+      expect(warnLog[0]!.fields).toMatchObject({ safe: -61, lastProcessedBlock: 0 });
+    });
+
+    it('legitimate empty advance is preserved: safe > cursor with no items still advances the cursor to safe', async () => {
+      await reset('native', 1000, 'live');
+      // head 1114, finalityDepth 64 (chain 1) ⇒ safe = 1050, comfortably above cursor 1000.
+      const res = await runBackfillPage(
+        deps(() => bundleOf({ native: async () => ({ items: [] }), head: 1114n })),
+        { chainId: 1, address: ADDR, stream: 'native' },
+      );
+      expect(res).toEqual({ status: 'live', lastProcessedBlock: 1050, inserted: 0, unseenContracts: [] });
+      const cp = await getCheckpoint(db, 1, ADDR, 'native');
+      expect(cp).toMatchObject({ status: 'live', lastProcessedBlock: 1050 });
+    });
   });
 
   it('fails loudly when one block holds a full page of relevant txs (no forward progress)', async () => {

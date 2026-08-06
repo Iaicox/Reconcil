@@ -56,3 +56,21 @@ so the write tool cannot make a synchronous provider call. `suggests_anchored` t
 surfaces on **`ledger_status`** (the estimate is stored on the wallet's native checkpoint),
 not in the write tool's response — the HITL decision point is unchanged (02-mcp-contracts
 §6.2). Anchored seeding enters the `anchoring` state directly rather than via `queued`.
+
+*Amendment (2026-08-06, anchor-too-recent guard — H8):* `runAnchor` resolves `anchor_from`
+to a block via `getBlockByTime`, then previously clamped it to `safeHead` when the
+resolved block fell inside the reorg-unsafe tip (`resolved > safeHead`). That clamp fetched
+the provider-attested balance *at safeHead* but stamped the `opening_balance` event's
+`block_time` at midnight-of-anchor-date — a block/time pair that no longer describes the
+same instant, breaking the monotonicity `ledger/src/as-of.ts` assumes, and silently pulling
+every deposit between the requested date and safeHead into the "as of anchor date" balance.
+`runAnchor` now throws `AnchorTooRecentError` (`packages/ingestion/src/types.ts`) instead of
+clamping — `block_number`/`block_time` on `opening_balance` rows stay mutually consistent by
+construction (no clamped write is ever produced).
+
+The rejection happens in the asynchronous `anchor` job, not synchronously in
+`ledger_track_wallet` (per the amendment above, the write tool cannot make a synchronous
+provider call) — so today it surfaces only as a failed BullMQ job (retry/DLQ,
+`serializeError`d in the worker logs), never a clamped/mis-dated `opening_balance`.
+Surfacing it to the tool/read edge rides on the pre-existing checkpoint
+error-status gap (`apps/worker/src/onboard.ts`'s failure-path note) and stays deferred there.
