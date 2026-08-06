@@ -250,7 +250,7 @@ describe('processors', () => {
       expect(cp).toMatchObject({ status: 'backfilling', lastProcessedBlock: 1000 });
     });
 
-    it('negative safe (fresh/dev chain: head < finalityDepth): skips the commit, never writes a negative cursor', async () => {
+    it('negative safe (fresh/dev chain: head < finalityDepth): skips the commit, never writes a negative cursor, reports the stored status exactly (queued, not coerced to live)', async () => {
       warnLog.length = 0;
       await reset('native', 0, 'queued');
       // head 3, finalityDepth 64 (chain 1) ⇒ safe = -61.
@@ -258,10 +258,11 @@ describe('processors', () => {
         depsWithWarnSpy(() => bundleOf({ native: () => { throw new Error('must not query when regressed'); }, head: 3n })),
         { chainId: 1, address: ADDR, stream: 'native' },
       );
+      expect(res.status).toBe('queued');
       expect(res.lastProcessedBlock).toBe(0);
       expect(res.inserted).toBe(0);
       const cp = await getCheckpoint(db, 1, ADDR, 'native');
-      expect(cp?.lastProcessedBlock).toBe(0);
+      expect(cp).toMatchObject({ status: 'queued', lastProcessedBlock: 0 });
       expect(cp?.lastProcessedBlock).toBeGreaterThanOrEqual(0);
       expect(warnLog).toHaveLength(1);
       expect(warnLog[0]!.fields).toMatchObject({ safe: -61, lastProcessedBlock: 0 });
