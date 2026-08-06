@@ -9,6 +9,7 @@
 import { toCsv, type CsvValue } from './csv.js';
 import { buildManifest, serializeManifest } from './manifest.js';
 import { buildJournalDraft, type JournalLine } from './journal.js';
+import { periodSlug } from './period.js';
 import { sha256 } from './sha256.js';
 import type {
   BalanceExportRow, ClosePackInput, CounterpartyExportRow, Currency, GasExportRow,
@@ -111,13 +112,17 @@ export function renderClosePack(input: ClosePackInput): RenderedExport {
   const journal = buildJournalDraft(input.journal, input.currency, input.period.end);
   const roundingResidues: RoundingResidue[] = [{ currency: input.currency, residue: journal.residue }];
 
+  // Identifying, byte-stable names (see period.ts for the scheme): each is a pure
+  // function of its base name + `input.period`, so two periods' packs never collide
+  // if copied into one folder.
+  const slug = periodSlug(input.period);
   const csvFiles = [
-    { name: 'balances_opening.csv', content: balancesCsv(input.balancesOpening, input.currency) },
-    { name: 'balances_closing.csv', content: balancesCsv(input.balancesClosing, input.currency) },
-    { name: 'transactions.csv', content: transactionsCsv(input.transactions) },
-    { name: 'gas.csv', content: gasCsv(input.gas, input.currency) },
-    { name: 'counterparty_summary.csv', content: counterpartiesCsv(input.counterparties, input.currency) },
-    { name: 'journal_draft.csv', content: journalCsv(journal.lines, input.currency) },
+    { name: `balances_opening_${slug}.csv`, content: balancesCsv(input.balancesOpening, input.currency) },
+    { name: `balances_closing_${slug}.csv`, content: balancesCsv(input.balancesClosing, input.currency) },
+    { name: `transactions_${slug}.csv`, content: transactionsCsv(input.transactions) },
+    { name: `gas_${slug}.csv`, content: gasCsv(input.gas, input.currency) },
+    { name: `counterparty_summary_${slug}.csv`, content: counterpartiesCsv(input.counterparties, input.currency) },
+    { name: `journal_draft_${slug}.csv`, content: journalCsv(journal.lines, input.currency) },
   ];
   const hashed: RenderedFile[] = csvFiles.map((f) => ({ ...f, sha256: sha256(f.content) }));
 

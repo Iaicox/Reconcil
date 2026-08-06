@@ -166,8 +166,7 @@ export type JournalCategory =
   | 'accounts_receivable'
   | 'accounts_payable'
   | 'vat_output'
-  | 'vat_input'
-  | 'rounding';
+  | 'vat_input';
 
 /**
  * One confirmed settlement to journalize. `grossFiat` is the confirmed leg's stored
