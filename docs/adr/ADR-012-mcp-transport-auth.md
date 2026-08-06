@@ -1,6 +1,7 @@
 # ADR-012: MCP transport & auth — stdio for self-host, streamable HTTP + bearer for hosted; OAuth post-gate
 
-**Status:** accepted · **Date:** 2026-07-14
+**Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-08-06 (transport-level
+defense in depth — see decision 6)
 
 ## Context
 
@@ -29,6 +30,25 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    no server process in the eval loop, deterministic and fast.
 5. **Tool naming**: wire names use underscores (`analytics_balances`); dots break the
    Claude API's tool-name constraint (`^[a-zA-Z0-9_-]+$`). Namespaces are conventions.
+6. **Transport-level defense in depth, layered on top of bearer auth (2026-08-06).** Two
+   protections that don't change the auth model itself, added to the streamable-HTTP
+   entrypoint:
+   - **DNS-rebinding protection.** `StreamableHTTPServerTransport` is constructed with
+     `enableDnsRebindingProtection: true` plus a `Host`-header allowlist
+     (`resolveAllowedHosts`, `apps/mcp-server/src/config.ts`); `RECONCIL_ALLOWED_HOSTS`
+     overrides it, unset defaults to the localhost/127.0.0.1/compose-service-name forms at
+     the configured port.
+   - **Two-layer rate limiting** (`apps/mcp-server/src/http.ts`). A per-IP backstop runs at
+     Fastify's `onRequest` stage, before auth and before any DB work, so it catches a
+     request regardless of credential validity. A per-tenant fairness bucket runs from the
+     auth `preHandler`, reachable only once `authenticate()` has resolved a DB-verified
+     tenant. This replaced a single limiter keyed on the *presented* (unverified) bearer
+     token: rotating a fresh garbage `Authorization` header per request landed each one in
+     a new bucket, so the limit never tripped while every request still paid for a live
+     `resolveTenantByBearer` DB lookup — unbounded 401 + query amplification per IP.
+   - A hijacked transport's own request-handling failure is always caught and answered
+     (`handleHijackedTransport`) — no unhandled rejection can leave a hijacked socket open
+     indefinitely.
 
 ## Alternatives considered
 
