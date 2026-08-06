@@ -32,6 +32,12 @@ describe('buildJournalDraft — Face A minimal draft', () => {
     expect(r.lines).toHaveLength(0);
     expect(r.residue).toBe('0.00');
   });
+
+  it('throws on a negative gasFiat instead of silently sign-flipping', () => {
+    expect(() =>
+      buildJournalDraft({ movements: [], gasFiat: '-50.00' }, 'USD', '2026-06-30'),
+    ).toThrow(/gasFiat/);
+  });
 });
 
 describe('balanceJournal — the balance guarantee (invariant #8)', () => {
