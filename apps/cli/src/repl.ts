@@ -21,8 +21,7 @@ import type { ToolContext } from '@reconcil/mcp-tools';
 import { Pool } from 'pg';
 
 import { buildRunnableTools, buildSystemPrompt, type Invocation } from './agent/core.js';
-
-const DEFAULT_MODEL = 'claude-opus-4-8';
+import { DEFAULT_MODEL } from './model.js';
 
 /** One line of REPL input, classified. Slash commands are handled locally; everything else is a question. */
 export type Command =
