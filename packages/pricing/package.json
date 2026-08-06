@@ -23,15 +23,15 @@
     "@reconcil/core": "workspace:*",
     "@reconcil/db": "workspace:*",
     "decimal.js": "catalog:",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "catalog:"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^11.0.0",
+    "@testcontainers/postgresql": "catalog:",
     "@types/node": "catalog:",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "catalog:",
     "eslint": "catalog:",
     "fast-check": "catalog:",
-    "pg": "^8.22.0",
+    "pg": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

@@ -19,12 +19,12 @@
     "@reconcil/pricing": "workspace:*",
     "bullmq": "^5.34.0",
     "ioredis": "^5.4.0",
-    "pg": "^8.22.0",
+    "pg": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "catalog:",
     "eslint": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

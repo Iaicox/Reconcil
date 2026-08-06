@@ -53,8 +53,8 @@ documents, the MCP tool contract, and 13 ADRs.
 ## What it will not do
 
 Read-only by construction (MiCA, P8): no private keys, no custody, no transaction
-initiation — enforced by a dependency-cruiser rule and a lockfile scan in CI, not by
-convention. No investment advice. Journal entries are drafts for professional review.
+initiation — enforced by a dependency-cruiser rule and a scan of both lockfiles in CI, not
+by convention. No investment advice. Journal entries are drafts for professional review.
 
 Out of scope by design: DeFi decoding, staking derivatives, bridges, cross-chain tracing,
 NFTs, cost basis and realized P&L. Chains: Ethereum and Base.
@@ -88,7 +88,8 @@ pnpm build        # turbo run build (tsc -b, project references)
 pnpm typecheck
 pnpm lint
 pnpm test
-pnpm depcruise    # dependency direction + signing-library ban (run after build)
+pnpm depcruise    # dependency direction + signing-library ban on DIRECT workspace imports
+pnpm check:supply-chain # ADR-011 transitive guard: same denylist, scans both lockfiles
 pnpm smoke:compose # full self-host stack + stdio MCP client, then tears down
 ```
 

@@ -17,7 +17,7 @@ module.exports = {
       from: {},
       to: {
         path: [
-          'node_modules/(ethers|viem|web3|web3-eth-accounts|@ethereumjs/(tx|wallet)|ethereumjs-wallet|ethereumjs-tx|bip39|bip32|hdkey|elliptic|secp256k1|tiny-secp256k1|@noble/(secp256k1|curves)|@scure/(bip32|bip39)|eth-crypto|@metamask/eth-sig-util)(/|$)',
+          'node_modules/(ethers|viem|web3|web3-eth-accounts|@ethereumjs/(tx|wallet)|ethereumjs-wallet|ethereumjs-tx|bip39|bip32|hdkey|elliptic|secp256k1|tiny-secp256k1|@noble/(secp256k1|curves|hashes|ed25519)|@scure/(bip32|bip39|base)|eth-crypto|ethereum-cryptography|micro-eth-signer|ox|bitcoinjs-lib|@solana/web3\\.js|starknet|@ledgerhq/(hw-app-eth|hw-transport)|@metamask/eth-sig-util)(/|$)',
         ],
       },
     },
