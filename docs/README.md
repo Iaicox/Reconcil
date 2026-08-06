@@ -32,7 +32,8 @@ Reading order:
 5. [`architecture/03-ingestion.md`](architecture/03-ingestion.md) — ingestion state machine, queues, providers, backfill, finality.
 6. [`architecture/04-testing.md`](architecture/04-testing.md) — fixtures, property invariants, agent evals, demo gate.
 7. [`architecture/05-risks-open-questions.md`](architecture/05-risks-open-questions.md) — top-5 risks, open questions.
-8. [`adr/`](adr/) — 13 decision records (below).
+8. [`architecture/09-known-gaps.md`](architecture/09-known-gaps.md) — register of items deliberately deferred during implementation: what, why, and what would trigger doing them.
+9. [`adr/`](adr/) — 13 decision records (below).
 
 ## ADR index
 
@@ -104,7 +105,9 @@ ledger (weeks 1–3), Face A exporters (close pack, PDF), and Face B reconciliat
 → suggest → confirm/reject → status → journal drafts) are implemented, exposed as a
 19-tool MCP surface, behind a green CI gate (build, lint, depcruise, unit + integration,
 hermetic evals). What remains is the **business** validation gate — problem interviews,
-pricing, LOIs. Kill list and gate criteria: `brief.md`.
+pricing, LOIs. Kill list and gate criteria: `brief.md`. Implementation gaps deliberately
+deferred along the way — not blockers, but not silence either — are tracked in
+[`architecture/09-known-gaps.md`](architecture/09-known-gaps.md).
 
 The product is documented for use as well as for design: [`guide/`](guide/README.md) covers
 installation, client setup, both workflows, and operations.
