@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SECRET_QUERY_PARAMS } from '@reconcil/core';
 import type { FetchJson } from './types.js';
 
-/** One canonical URL form shared by capture (record) and tests (replay). */
+/**
+ * One canonical URL form shared by capture (record) and tests (replay). The redacted
+ * param list is `@reconcil/core`'s `SECRET_QUERY_PARAMS` — shared with pricing's sibling
+ * transport (`packages/pricing/src/providers/transport.ts`) so the two don't drift (this
+ * used to redact only `apikey`, missing the keys pricing already knew about).
+ */
 export function canonicalizeUrl(url: string): string {
   const u = new URL(url);
-  if (u.searchParams.has('apikey')) u.searchParams.set('apikey', 'REDACTED');
+  for (const p of SECRET_QUERY_PARAMS) if (u.searchParams.has(p)) u.searchParams.set(p, 'REDACTED');
   u.searchParams.sort();
   return u.toString();
 }

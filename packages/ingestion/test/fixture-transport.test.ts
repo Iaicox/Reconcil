@@ -22,6 +22,18 @@ describe('canonicalizeUrl', () => {
     expect(keys).toEqual([...keys].sort());
   });
 
+  // Redaction key list is shared with pricing's transport (@reconcil/core
+  // SECRET_QUERY_PARAMS) — this used to redact only `apikey`, silently missing any
+  // provider that authenticates via `token` or `x_cg_demo_api_key`.
+  it('redacts every key in the shared secret-param list, not just apikey', () => {
+    const url = 'https://example.com/api?module=x&token=SECRETTOK&x_cg_demo_api_key=SECRETCG';
+    const c = canonicalizeUrl(url);
+    expect(c).not.toContain('SECRETTOK');
+    expect(c).not.toContain('SECRETCG');
+    expect(c).toContain('token=REDACTED');
+    expect(c).toContain('x_cg_demo_api_key=REDACTED');
+  });
+
   it('is stable regardless of original param order', () => {
     const shuffled =
       'https://api.etherscan.io/v2/api?apikey=SECRET123&chainid=1&sort=asc&offset=1000&page=1&endblock=100&startblock=0&address=0xAbC1230000000000000000000000000000000000&action=txlist&module=account';
