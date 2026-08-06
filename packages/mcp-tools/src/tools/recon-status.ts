@@ -54,10 +54,13 @@ export async function reconStatus(
       // Executable re-enumeration of the backing events (C3): scoped to the SAME wallet
       // subset and period the figure was computed over (superset — list_events can't
       // express "no confirmed leg"/"stablecoin-only" — but never wider on client scope).
+      // Threads the CANONICAL resolved `clientId`, not the caller's raw `input.client_id`
+      // (C3b) — the two only diverge on mixed-case input, but the raw value is never the
+      // right thing to hand back into another tool call.
       drilldown: {
         tool: 'analytics_list_events',
         args: {
-          ...(input.client_id !== undefined ? { scope: { client_id: input.client_id } } : {}),
+          ...(clientId !== undefined ? { scope: { client_id: clientId } } : {}),
           ...(input.period !== undefined ? { period: input.period } : {}),
         },
       },

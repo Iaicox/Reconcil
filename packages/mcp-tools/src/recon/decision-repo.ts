@@ -15,12 +15,13 @@
  * the stored `fiat_value` (the canonical band, ADR-010) — never a fresh price.
  */
 import type { FxRef, PriceRef } from '@reconcil/core';
-import { chainEvents, externalRecords, fxRates, matches, priceSnapshots, tokens } from '@reconcil/db';
+import { chainEvents, externalRecords, matches } from '@reconcil/db';
 import { deriveRecordStatus, type DerivedRecordStatus } from '@reconcil/recon';
 import { and, eq, sql } from 'drizzle-orm';
 
 import type { TxContext } from '../context.js';
 import { ToolError } from '../errors.js';
+import { hydrateFxRefs, hydratePriceRefs } from '../pricing-refs.js';
 
 /** The leg is actioned on the human's behalf; the context carries no user id yet. */
 const ACTOR = 'agent';
@@ -74,9 +75,13 @@ export async function decideMatchInTx(
     throw new ToolError('NOT_SUGGESTED', `match ${matchId} is '${leg.status}', not 'suggested'`);
   }
 
-  // 3. Parent record (tenant-scoped) for its amount/status.
+  // 3. Parent record (tenant-scoped) for its amount/status/currency (the last feeds the
+  //    confirmed-fiat sum's currency predicate below, C6).
   const [rec] = await tx
-    .select({ id: externalRecords.id, amount: externalRecords.amount, status: externalRecords.status })
+    .select({
+      id: externalRecords.id, amount: externalRecords.amount, status: externalRecords.status,
+      currency: externalRecords.currency,
+    })
     .from(externalRecords)
     .where(and(eq(externalRecords.tenantId, ctx.tenantId), eq(externalRecords.id, leg.externalRecordId)))
     .limit(1);
@@ -119,20 +124,38 @@ export async function decideMatchInTx(
       );
     }
 
-    await tx
+    // The `status = 'suggested'` predicate makes this a compare-and-swap, not a blind
+    // write (C8): the step-2 check above only proves the leg WAS suggested at SELECT
+    // time. `decideMatchInTx` is a public export whose safety (only ever called inside
+    // runWriteTool's SERIALIZABLE transaction, which would surface a concurrent conflict
+    // as a retryable 40001 long before this point) is documented, not enforced — a
+    // future caller under plain read-committed could otherwise silently re-stamp a leg
+    // whose status changed underneath it. 0 rows here means the CAS lost the race.
+    const updated = await tx
       .update(matches)
       .set({ status: 'confirmed', confirmedAt: new Date(), confirmedBy: ACTOR })
-      .where(and(eq(matches.tenantId, ctx.tenantId), eq(matches.id, matchId)));
+      .where(and(eq(matches.tenantId, ctx.tenantId), eq(matches.id, matchId), eq(matches.status, 'suggested')))
+      .returning({ id: matches.id });
+    if (updated.length === 0) {
+      throw new ToolError('INTERNAL', `match ${matchId} was no longer 'suggested' when confirmed — concurrent modification under a non-serializable transaction`);
+    }
   } else {
-    // Reject: nothing to check — a rejected leg is removed from every sum. The
-    // confirmed_* columns double as the "actioned by/at" stamp.
-    await tx
+    // Reject: nothing to check beyond the CAS above — a rejected leg is removed from
+    // every sum. The confirmed_* columns double as the "actioned by/at" stamp.
+    const updated = await tx
       .update(matches)
       .set({ status: 'rejected', confirmedAt: new Date(), confirmedBy: ACTOR })
-      .where(and(eq(matches.tenantId, ctx.tenantId), eq(matches.id, matchId)));
+      .where(and(eq(matches.tenantId, ctx.tenantId), eq(matches.id, matchId), eq(matches.status, 'suggested')))
+      .returning({ id: matches.id });
+    if (updated.length === 0) {
+      throw new ToolError('INTERNAL', `match ${matchId} was no longer 'suggested' when rejected — concurrent modification under a non-serializable transaction`);
+    }
   }
 
-  // 5. Record status is a pure function of its confirmed legs' summed fiat value.
+  // 5. Record status is a pure function of its confirmed legs' summed fiat value, in the
+  //    RECORD's currency (C6) — match-repo always writes fiat_currency = record currency,
+  //    but nothing at the schema level enforces that, so a leg written any other way (a
+  //    future writer, a manual correction) must not pollute this sum.
   const [fiatRow] = await tx
     .select({ fiat: sql<string>`coalesce(sum(${matches.fiatValue}), 0)::text` })
     .from(matches)
@@ -141,6 +164,7 @@ export async function decideMatchInTx(
         eq(matches.tenantId, ctx.tenantId),
         eq(matches.externalRecordId, rec.id),
         eq(matches.status, 'confirmed'),
+        eq(matches.fiatCurrency, rec.currency),
       ),
     );
   // Design note (ADR-010): the band is the canonical DEFAULT tolerance, not the
@@ -154,41 +178,15 @@ export async function decideMatchInTx(
     .set({ status: recordStatus })
     .where(and(eq(externalRecords.tenantId, ctx.tenantId), eq(externalRecords.id, rec.id)));
 
-  // 7. Re-hydrate the pinned valuation refs (if any) for the decision envelope (C4). A
-  //    stablecoin face-value leg has no pins → the refs stay absent.
-  let priceRef: PriceRef | undefined;
-  let fxRef: FxRef | undefined;
-  if (leg.priceSnapshotId !== null) {
-    const [snap] = await tx
-      .select({
-        id: priceSnapshots.id, tokenId: priceSnapshots.tokenId, priceDate: priceSnapshots.priceDate,
-        currency: priceSnapshots.currency, price: priceSnapshots.price, source: priceSnapshots.source,
-        symbol: tokens.symbolDisplay,
-      })
-      .from(priceSnapshots)
-      .innerJoin(tokens, eq(tokens.id, priceSnapshots.tokenId))
-      .where(eq(priceSnapshots.id, leg.priceSnapshotId))
-      .limit(1);
-    if (snap !== undefined) {
-      priceRef = {
-        snapshot_id: snap.id, token: snap.symbol ?? String(snap.tokenId), date: snap.priceDate,
-        currency: snap.currency, source: snap.source, price: snap.price,
-      };
-    }
-  }
-  if (leg.fxRateId !== null) {
-    const [fx] = await tx
-      .select({
-        id: fxRates.id, rateDate: fxRates.rateDate, base: fxRates.baseCurrency,
-        quote: fxRates.quoteCurrency, rate: fxRates.rate, source: fxRates.source,
-      })
-      .from(fxRates)
-      .where(eq(fxRates.id, leg.fxRateId))
-      .limit(1);
-    if (fx !== undefined) {
-      fxRef = { fx_rate_id: fx.id, date: fx.rateDate, base: fx.base, quote: fx.quote, rate: fx.rate, source: fx.source };
-    }
-  }
+  // 7. Re-hydrate the pinned valuation refs (if any) for the decision envelope (C4), via
+  //    the hydration shared with export-journal-drafts (H11). A stablecoin face-value leg
+  //    has no pins → the refs stay absent.
+  const priceRef: PriceRef | undefined = leg.priceSnapshotId !== null
+    ? (await hydratePriceRefs(tx, [leg.priceSnapshotId])).get(leg.priceSnapshotId)
+    : undefined;
+  const fxRef: FxRef | undefined = leg.fxRateId !== null
+    ? (await hydrateFxRefs(tx, [leg.fxRateId])).get(leg.fxRateId)
+    : undefined;
 
   return {
     matchId,

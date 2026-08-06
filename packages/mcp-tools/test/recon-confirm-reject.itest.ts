@@ -194,6 +194,31 @@ describe('recon_confirm_match — HITL confirmation', () => {
     await expect(reconConfirmMatch(ctx(), { match_id: MISSING_MATCH })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
+  it('excludes a wrong-currency confirmed leg from the record-status sum (C6)', async () => {
+    const tokenId = await seedToken();
+    const recId = await seedInvoice('INV-100', '1000.00');
+
+    // A confirmed leg in the WRONG currency on the SAME record, inserted via raw SQL — the
+    // normal writer (match-repo.ts) always pins fiat_currency = record currency, so this
+    // bypasses it deliberately. Its huge amount would push the record to 'overpaid' if it
+    // (wrongly) counted toward the EUR sum.
+    const usdEvent = await seedEvent(tokenId, '999999000000', 9);
+    await pool.query(
+      `INSERT INTO matches
+         (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+       VALUES ($1,$2,$3,$4,$5,'USD','confirmed','agent','agent',now(),0.9,'{}'::jsonb)`,
+      [TENANT, recId, usdEvent, '999999000000', '999999.00'],
+    );
+
+    const eurEvent = await seedEvent(tokenId, '1000000000');
+    const matchId = await seedSuggestedLeg(recId, eurEvent, '1000000000', '1000.00');
+
+    const env = await reconConfirmMatch(ctx(), { match_id: matchId });
+
+    expect(env.data.record_status).toBe('matched'); // NOT 'overpaid' — the USD leg must not count
+    expect(await recordStatus(recId)).toBe('matched');
+  });
+
   it('isolates tenants: a foreign tenant cannot confirm the leg (INVALID_INPUT), leaving it suggested', async () => {
     const tokenId = await seedToken();
     const eventId = await seedEvent(tokenId, '1000000000');

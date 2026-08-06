@@ -170,6 +170,30 @@ describe('recon_status — open amounts per currency', () => {
   });
 });
 
+describe('recon_status — confirmed-leg currency predicate (C6)', () => {
+  it('ignores a wrong-currency confirmed leg when computing open_amounts', async () => {
+    const tokenId = await seedToken();
+    const rec = await seedInvoice('INV-EUR', '1000.00', { status: 'open' });
+    const evEur = await seedEvent(tokenId, '400000000', { logIndex: 1 });
+    await seedConfirmedLeg(rec, evEur, '400000000', '400.00'); // real EUR leg → 600.00 open
+
+    // A confirmed leg in the WRONG currency on the SAME record, inserted via raw SQL — the
+    // normal writer (match-repo.ts) always pins fiat_currency = record currency, so this
+    // bypasses it deliberately to prove the currency predicate, not just exercise it.
+    const evUsd = await seedEvent(tokenId, '999999000000', { logIndex: 2 });
+    await pool.query(
+      `INSERT INTO matches
+         (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+       VALUES ($1,$2,$3,$4,$5,'USD','confirmed','agent','agent',now(),0.9,'{}'::jsonb)`,
+      [TENANT, rec, evUsd, '999999000000', '999999.00'],
+    );
+
+    const env = await reconStatus(ctx(), {});
+
+    expect(env.data.open_amounts).toEqual([{ currency: 'EUR', value: '600.00' }]);
+  });
+});
+
 describe('recon_status — overpayments', () => {
   it('reports the excess (confirmed − amount) for each overpaid record', async () => {
     const tokenId = await seedToken();

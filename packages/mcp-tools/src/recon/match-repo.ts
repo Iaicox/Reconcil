@@ -237,9 +237,13 @@ export async function suggestMatches(
     let timeFrom: Date | undefined;
     let timeTo: Date | undefined;
     if (refDates.every((d): d is string => d !== null) && refDates.length > 0) {
+      // Reduce, not `Math.min(...ts)`/`Math.max(...ts)` (C10): a spread of every in-scope
+      // record's timestamp blows the call-stack argument limit on a large tenant (RangeError).
       const ts = refDates.map((d) => Date.parse(d));
-      timeFrom = new Date(Math.min(...ts) - windowDays * MS_PER_DAY);
-      timeTo = new Date(Math.max(...ts) + (windowDays + 1) * MS_PER_DAY); // +1 day covers the whole 'to' day
+      const minTs = ts.reduce((a, b) => (b < a ? b : a));
+      const maxTs = ts.reduce((a, b) => (b > a ? b : a));
+      timeFrom = new Date(minTs - windowDays * MS_PER_DAY);
+      timeTo = new Date(maxTs + (windowDays + 1) * MS_PER_DAY); // +1 day covers the whole 'to' day
     }
 
     let eventRows: EventRow[] = [];

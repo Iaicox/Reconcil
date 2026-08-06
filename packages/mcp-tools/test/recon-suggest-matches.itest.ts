@@ -389,3 +389,41 @@ describe('recon_suggest_matches — market valuation (non-stablecoin)', () => {
     expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
   });
 });
+
+describe('recon_suggest_matches — summarized drilldown scope (H12/C3b)', () => {
+  it('threads the CANONICAL resolved client_id into the drilldown when client-scoped; omits it when unscoped', async () => {
+    const tokenId = await seedToken();
+    // > REF_CAP (64) suggestions so the envelope summarizes with a drilldown instead of
+    // inlining event_refs (refs.ts selectRefs only carries `drilldown` in that shape).
+    // Each record gets its OWN counterparty address (the address rule alone would
+    // otherwise fire for every record against every event sharing one PAYER, regardless
+    // of amount) and `amount_pct: 0` forces an exact-amount match, so exactly one leg is
+    // suggested per record — no cross-matching between the 65.
+    for (let i = 0; i < 65; i += 1) {
+      const payer = `0x${(1000 + i).toString(16).padStart(40, '0')}`;
+      const amount = String(1000 + i);
+      await seedEvent(tokenId, payer, WALLET, `${amount}000000`, '2026-06-14T10:00:00Z', i);
+      await seedInvoice(`INV-${String(i)}`, `${amount}.00`, payer);
+    }
+    const tolerances = { amount_pct: 0 };
+
+    // Mixed-case input: resolveClientId already canonicalizes, but the drilldown must
+    // carry THAT resolved id, never the caller's raw casing (C3b).
+    const scoped = await reconSuggestMatches(ctx(), { client_id: CLIENT.toUpperCase(), tolerances });
+    expect(scoped.data.suggestions).toHaveLength(65);
+    expect(scoped.citations.event_ref_summary?.count).toBe(65);
+    expect(scoped.citations.event_ref_summary?.drilldown.args).toEqual({ scope: { client_id: CLIENT } });
+
+    const unscoped = await reconSuggestMatches(ctx(), { tolerances });
+    expect(unscoped.citations.event_ref_summary?.count).toBe(65);
+    expect(unscoped.citations.event_ref_summary?.drilldown.args).toEqual({});
+  });
+});
+
+describe('recon_suggest_matches — input bounds (C9)', () => {
+  it('rejects date_window_days beyond the 3650-day bound with INVALID_INPUT', async () => {
+    await expect(
+      reconSuggestMatches(ctx(), { tolerances: { date_window_days: 1e15 } }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+});
