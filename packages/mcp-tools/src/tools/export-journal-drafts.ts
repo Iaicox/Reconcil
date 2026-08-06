@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { exportJournalDraftsInput, exportJournalDraftsOutput, type ExportJournalDraftsOutput, type Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
-import { renderJournalDrafts } from '@reconcil/exporters';
+import { isZero, renderJournalDrafts } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
@@ -67,13 +67,17 @@ export async function exportJournalDrafts(
   }
 
   // Validate the output BEFORE the DB write, so a contract violation can't leave an
-  // orphan `done` exports row (the file already on disk is harmless).
+  // orphan `done` exports row (the file already on disk is harmless). `balanced` is
+  // derived from the actual residues, not hardcoded: renderJournalDrafts already threw
+  // on any per-currency imbalance, so this is always true today — but it is a real
+  // check, not an assumption.
+  const balanced = rendered.roundingResidues.every((r) => isZero(r.residue));
   const outputData = {
     export_id: exportId,
     file: { name: rendered.file.name, path: filePath, sha256: rendered.file.sha256 },
     lines: rendered.lines,
     unmapped_categories: rendered.unmappedCategories,
-    balanced: true as const,
+    balanced,
   };
   let validated: ExportJournalDraftsOutput;
   try {
@@ -83,7 +87,7 @@ export async function exportJournalDrafts(
   }
 
   const residueWarnings: Warning[] = rendered.roundingResidues
-    .filter((r) => Number(r.residue) !== 0)
+    .filter((r) => !isZero(r.residue))
     .map((r) => ({
       code: 'ROUNDING_RESIDUE',
       message: `journal rounding residue ${r.residue} ${r.currency}`,
