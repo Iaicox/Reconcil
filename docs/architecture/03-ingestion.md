@@ -75,6 +75,11 @@ loop:
   // (ADR-005 d2). stream 'erc20' fetches one (tokentx).
   events = normalize(pages)                       // pure function, packages/ingestion
   tx {                                            // single Postgres transaction
+    // only events with block_number <= newCursor: a page cut at the limit can end
+    // mid-tx, and an internal transfer's sentinel is derived from the traces of its
+    // tx present in that normalize() call. Withheld rows are re-fetched whole by the
+    // next window (which starts at newCursor + 1), so nothing is lost -- and the
+    // store's "complete for blocks <= last_processed_block" holds literally.
     INSERT ... ON CONFLICT (chain_id, tx_hash, log_index, token_id) DO NOTHING
     UPDATE ingestion_checkpoints SET last_processed_block = newCursor
   }

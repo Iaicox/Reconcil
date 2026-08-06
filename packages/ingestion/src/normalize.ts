@@ -140,15 +140,18 @@ export function normalize(
   // CONFLICT DO NOTHING dedupes it. Arrival-order numbering would renumber the traces
   // into each other's slots and silently drop a real value movement.
   //
-  // Two residual caveats, both accepted:
-  //  - two byte-identical traces in one tx (same from/to/value) with no trace label tie,
-  //    and fall back to the provider's response order among the ties;
-  //  - a provider page that ends mid-tx stores a PREFIX of that tx's traces. Their keys
-  //    match the whole-tx re-fetch only because the truncation is a prefix of the
-  //    provider's order and the trace label agrees with it; the tuple fallback trades
-  //    that for order-independence. Both shipping providers send a label, so the
-  //    fallback is defensive only — and the cursor always overlaps the boundary block
-  //    (processors/ingest.ts), so the tx is always re-fetched whole afterwards.
+  // The rank is computed over the traces PRESENT IN THIS CALL, so it is only a stable
+  // key for a WHOLE tx: a truncated page holds a prefix of one, and a prefix can rank
+  // differently from the full set (the tuple fallback reorders freely, and a group with
+  // mixed labelled/unlabelled traces can even switch comparators between the two calls).
+  // That is a write-side concern, and processors/ingest.ts owns it: it never commits an
+  // event above the new cursor, so a truncated tx is withheld and stored only once its
+  // whole trace set has been fetched. Anything that feeds `internal` here must uphold
+  // the same rule — pass whole transactions, or drop the partial one.
+  //
+  // One residual caveat, accepted: two byte-identical traces in one tx (same
+  // from/to/value) with no trace label tie, and fall back to the provider's response
+  // order among the ties.
   //
   // Emission stays in arrival order; only the sentinel comes from the rank.
   const internalRows: InternalValueMove[] = (input.internal?.items ?? [])

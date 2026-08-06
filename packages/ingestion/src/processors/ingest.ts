@@ -178,6 +178,28 @@ export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Pro
     );
   }
   const status = full ? 'backfilling' : 'live';
-  const inserted = await commitPage(deps.db, target, events, { lastProcessedBlock: newCursor, status }, chain);
+  // NEVER STORE PAST THE CURSOR. A page cut at PAGE_LIMIT can end in the middle of a
+  // transaction, and `normalize` derives an internal transfer's sentinel from the
+  // traces PRESENT IN THAT CALL: committing a truncated tx would store its traces
+  // under ranks computed from a partial set, then the overlap re-fetch would see the
+  // whole set, assign different ranks, and the two numberings would interleave —
+  // ON CONFLICT dropping a real value movement while re-inserting another under a
+  // fresh sentinel. Double-counted and lost money, silently.
+  //
+  // Withholding everything above `newCursor` closes that by construction: the next
+  // window starts at newCursor + 1 and runs to `safe`, so every withheld row is
+  // re-fetched — and re-fetched WHOLE, because the cursor is block-granular and can
+  // never stop inside a block. It also makes the store's own invariant literal
+  // ("events are complete for blocks ≤ last_processed_block") rather than merely
+  // true-in-practice, and it costs nothing: the rows were going to be re-fetched by
+  // the overlap anyway.
+  //
+  // Applied uniformly, not just to internal rows. Native/erc20 rows above the cursor
+  // are individually safe to store (their sentinels are fixed, −1/−2/log index), but
+  // a uniform rule is the one that stays correct when a future stream gains
+  // set-derived keys, and re-fetching them is already the pagination contract.
+  const cursorBlock = BigInt(newCursor);
+  const committable = events.filter((e) => e.blockNumber <= cursorBlock);
+  const inserted = await commitPage(deps.db, target, committable, { lastProcessedBlock: newCursor, status }, chain);
   return { status, lastProcessedBlock: newCursor, inserted, unseenContracts };
 }

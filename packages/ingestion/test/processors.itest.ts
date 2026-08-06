@@ -48,7 +48,9 @@ const erc20Receipt = (hash: string): RawReceipt => ({
 
 // One trace-level ETH inflow (txlistinternal): no gas fields, `traceId` orders the
 // traces that share a parent tx (see normalize()).
-const internalTx = (block: number, hash: string, traceId: string, value = '400'): RawInternalTx => ({
+const internalTx = (
+  block: number, hash: string, traceId: string | undefined, value = '400',
+): RawInternalTx => ({
   blockNumber: String(block), timeStamp: '1700000000', hash,
   from: DEST, to: ADDR, value, isError: '0', traceId,
 });
@@ -112,6 +114,27 @@ const internalSpamBlock: InternalFn = async (q) => ({
         internalTx(300, `0xflood${String(Math.floor(i / 2))}`, String(i % 2)))
     : [],
 });
+// The mid-tx truncation hazard, worst case. One parent tx at block 1299 carries three
+// traces whose stable rank DEPENDS ON THE SET: '0xsplit' mixes a labelled trace with an
+// unlabelled one, so the whole-tx fetch ranks by the (from,to,value) tuple
+// (100 → −1000, 500 → −1001, 900 → −1002) while a page truncated after the first trace
+// would rank that trace alone by its label (900 → −1000). Storing the truncated page
+// would therefore drop the 100-wei trace on conflict AND re-insert the 900-wei one at a
+// second sentinel. 999 single-trace fillers put the cut exactly there.
+const SPLIT_BLOCK = 1299;
+const splitTraces: RawInternalTx[] = [
+  internalTx(SPLIT_BLOCK, '0xsplit', '5', '900'),
+  internalTx(SPLIT_BLOCK, '0xsplit', undefined, '100'),
+  internalTx(SPLIT_BLOCK, '0xsplit', '1', '500'),
+];
+const splitFillers = Array.from({ length: 999 }, (_, i) =>
+  internalTx(300 + i, `0xfill${String(i)}`, '0'));
+const internalSplitTx: InternalFn = async (q) => {
+  const from = Number(q.fromBlock);
+  return {
+    items: [...splitFillers, ...splitTraces].filter((t) => Number(t.blockNumber) >= from).slice(0, 1000),
+  };
+};
 // One erc20 transfer at block 200, with matching receipts.
 const erc20At200: Erc20Fn = async (q) => ({ items: Number(q.fromBlock) <= 200 ? [erc20Row(200, '0xerc1')] : [] });
 const erc20Receipts: ReceiptsFn = async (hashes) => hashes.map((h) => erc20Receipt(h));
@@ -192,16 +215,19 @@ describe('processors', () => {
     expect(await snapshot()).toBe(first);
   });
 
-  it('full page stays backfilling (cursor = last − 1), then the overlapped boundary block dedups', async () => {
+  it('full page stays backfilling (cursor = last − 1), then the withheld boundary block lands on the next page', async () => {
     await reset('native', 0, 'queued');
     const bundle = (): ProviderBundle => bundleOf({ native: nativeFull });
     const res1 = await runBackfillPage(deps(bundle), { chainId: 1, address: ADDR, stream: 'native' });
     expect(res1.status).toBe('backfilling');
     expect(res1.lastProcessedBlock).toBe(999); // 1000 − 1: re-fetch the boundary next page
-    expect(res1.inserted).toBe(2000); // 1000 native_transfer + 1000 gas_fee
+    // Blocks 1..999 only (999 transfers + 999 gas): a page cut can end mid-block, so
+    // nothing above the new cursor is stored — the boundary block waits for the
+    // re-fetch that sees it whole.
+    expect(res1.inserted).toBe(1998);
     const res2 = await runBackfillPage(deps(bundle), { chainId: 1, address: ADDR, stream: 'native' });
     expect(res2.status).toBe('live');
-    expect(res2.inserted).toBe(0); // boundary block 1000 re-fetched, all rows dedup
+    expect(res2.inserted).toBe(2); // block 1000's transfer + gas, stored exactly once
     const byKind = await kinds();
     expect(byKind.native_transfer).toBe(1000);
     expect(byKind.gas_fee).toBe(1000);
@@ -381,14 +407,16 @@ describe('processors', () => {
       // page pulls the shared cursor back to its own boundary block − 1.
       expect(res1.status).toBe('backfilling');
       expect(res1.lastProcessedBlock).toBe(698); // internal page ends at block 699
-      expect(res1.inserted).toBe(1006); // 6 native/gas + 1000 internal
-      // Next page re-fetches block 699 whole: its two traces dedupe on the
-      // idempotency key (stable per-tx sentinel order), nothing is dropped.
+      // 6 native/gas + 998 internal: block 699's two traces sit ABOVE the new cursor
+      // and are withheld — a page cut can end mid-tx, and a partially-fetched tx must
+      // never be stored under ranks derived from a partial trace set.
+      expect(res1.inserted).toBe(1004);
+      // Next page re-fetches block 699 whole and stores it then.
       const res2 = await runBackfillPage(deps(bundle), { chainId: 1, address: ADDR, stream: 'native' });
       expect(res2.status).toBe('live');
       expect(res2.lastProcessedBlock).toBe(SAFE);
-      expect(res2.inserted).toBe(0);
-      expect(await internalCount()).toBe(1000);
+      expect(res2.inserted).toBe(2);
+      expect(await internalCount()).toBe(1000); // every trace stored exactly once
     });
 
     it('when both pages are full the cursor is the MINIMUM of the two candidates', async () => {
@@ -400,6 +428,36 @@ describe('processors', () => {
       // native page ends at 1000 (candidate 999), internal at 699 (candidate 698).
       expect(res.status).toBe('backfilling');
       expect(res.lastProcessedBlock).toBe(698);
+    });
+
+    // Regression: the mid-tx truncation hazard. Without the "never store past the
+    // cursor" rule this loses one trace and double-counts another — silently.
+    it('a page cut mid-transaction stores nothing of that tx until the re-fetch sees it whole', async () => {
+      await reset('native', 0, 'queued');
+      const bundle = (): ProviderBundle => bundleOf({ internal: internalSplitTx });
+      const res1 = await runBackfillPage(deps(bundle), { chainId: 1, address: ADDR, stream: 'native' });
+      expect(res1.status).toBe('backfilling');
+      expect(res1.lastProcessedBlock).toBe(SPLIT_BLOCK - 1);
+      expect(res1.inserted).toBe(999); // the fillers only — the split tx is withheld
+      expect(await pool.query('select count(*)::int as n from chain_events where tx_hash = $1', ['0xsplit']))
+        .toMatchObject({ rows: [{ n: 0 }] });
+
+      const res2 = await runBackfillPage(deps(bundle), { chainId: 1, address: ADDR, stream: 'native' });
+      expect(res2.status).toBe('live');
+      expect(res2.inserted).toBe(3);
+
+      // The union of what is stored equals the complete single-fetch result: three
+      // rows, three distinct sentinels, each amount present exactly once.
+      const stored = (await pool.query(
+        'select log_index, amount_raw from chain_events where tx_hash = $1 order by log_index desc',
+        ['0xsplit'],
+      )).rows.map((r) => [r.log_index as number, r.amount_raw as string]);
+      expect(stored).toEqual([[-1000, '100'], [-1001, '500'], [-1002, '900']]);
+      expect(new Set(stored.map(([idx]) => idx)).size).toBe(3); // no collisions
+      // and no value invented or lost: Σ stored === Σ the provider's traces
+      expect(stored.reduce((s, [, amt]) => s + BigInt(amt as string), 0n))
+        .toBe(splitTraces.reduce((s, t) => s + BigInt(t.value), 0n));
+      expect(await internalCount()).toBe(1002);
     });
 
     it('fails loudly when one block holds a full page of internal transfers (same as native)', async () => {

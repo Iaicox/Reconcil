@@ -68,9 +68,17 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
   the computed native balance reconciles to the recorded `eth_get_balance` (the R3
   integrity check, 04-testing.md §2).
 - The worker's `native` stream fetches `txlist` **and** `txlistinternal` over the same
-  window behind one checkpoint (03-ingestion.md §3). Page-independent trace indexing —
-  once listed here as a follow-up — is what decision 2's stable rank delivers: `n` no
-  longer depends on how the pages were cut. The cursor takes the **minimum** of the two
-  pages' candidates so it can never pass a block whose internal transfers were
+  window behind one checkpoint (03-ingestion.md §3). The cursor takes the **minimum** of
+  the two pages' candidates so it can never pass a block whose internal transfers were
   truncated, and a block holding ≥ `PAGE_LIMIT` internal transfers fails loudly for the
   same reason a `txlist` flood does (block-granular pagination cannot split a block).
+- **A page never stores events above its new cursor.** Decision 2's rank is computed over
+  the traces a `normalize()` call can see, so it is a stable key only for a *whole*
+  transaction: a page cut at `PAGE_LIMIT` can end mid-tx, and storing that prefix under
+  ranks derived from a partial trace set would collide with the different ranks the
+  overlap re-fetch derives from the full set — `ON CONFLICT DO NOTHING` dropping one real
+  value movement while another re-inserts under a fresh sentinel. Withholding everything
+  above the cursor removes the hazard by construction (the next window starts at
+  `cursor + 1`, and the block-granular cursor can never stop inside a block, so the
+  withheld rows are re-fetched *whole*), and makes "events are complete for blocks ≤
+  `last_processed_block`" literally true at the write boundary.
