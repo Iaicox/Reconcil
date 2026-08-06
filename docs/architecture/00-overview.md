@@ -143,7 +143,9 @@ services:
   mcp-server:
     build: .
     command: node apps/mcp-server/dist/http.js   # streamable HTTP on :8484
-    env_file: .env                               # provider keys, MASTER_KEY, DATABASE_URL
+    env_file: .env                               # provider keys, MASTER_KEY
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?}@postgres:5432/reconcil
   worker:
     build: .
     command: node apps/worker/dist/main.js

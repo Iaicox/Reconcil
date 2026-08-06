@@ -1,6 +1,7 @@
 # ADR-011: Hostile on-chain strings & regulatory guardrails
 
-**Status:** accepted · **Date:** 2026-07-14
+**Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-08-06 (`SANITIZED_HEAVY`
+now also fires on truncation loss — see Consequences)
 
 ## Context
 
@@ -55,3 +56,14 @@ MiCA guardrails, enforced structurally where possible:
 - The `untrusted`-key convention must be honored by every future tool — enforced by the
   shared envelope builder + contract tests, not by memory.
 - Guardrail claims in marketing ("cannot touch funds") are literally verifiable from CI.
+
+*Amendment (2026-08-06, `SANITIZED_HEAVY` truncation coverage):* Layer 1's `heavy` flag
+originally measured hostile-charset stripping alone (`> 30%` of post-NFC code points
+removed by the allowlist). A wholly legitimate but very long name silently cut to the
+length cap still reported `heavy: false` — no hostile character was ever present, but the
+agent-visible value had still lost most of its content, which is exactly the kind of loss
+this warning exists to surface. `packages/core/src/sanitizer.ts`'s `sanitize()` now sums
+charset-stripping loss and length-cap loss over the original length for the same `> 30%`
+threshold; whitespace collapse stays excluded from both terms (it is normalization, not
+content removal). `02-mcp-contracts.md` §7 and `guide/05-operations.md` document the rule
+as implemented.
