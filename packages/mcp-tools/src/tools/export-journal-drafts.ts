@@ -6,6 +6,15 @@
  * happen there, ADR-004) and returns the citation envelope. Non-read-only, never
  * destructive. The export/tool_call ids are minted up front so the manifest cites the same
  * id the envelope carries (C2).
+ *
+ * H11: `computeJournalData` collects each confirmed leg's pinned (nullable)
+ * `price_snapshot_id`/`fx_rate_id` and its settlement event ref; this handler hydrates the
+ * distinct pinned ids into real `price_refs`/`fx_refs` (reusing the hydration
+ * decision-repo.ts's confirm/reject envelope already uses, `pricing-refs.ts`) and cites the
+ * backing events (`event_refs`/`event_ref_summary`, drilldown = analytics_list_events over
+ * the journal's own period + client scope, mirroring recon_status). A same-currency
+ * stablecoin leg pins neither id (face value at peg, P5), so a stablecoin-only journal
+ * correctly ships empty price/fx refs — only a volatile-token leg contributes them.
  */
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -18,6 +27,8 @@ import { renderJournalDrafts } from '@reconcil/exporters';
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { hydrateFxRefs, hydratePriceRefs } from '../pricing-refs.js';
+import { selectRefs } from '../refs.js';
 import { ulid } from '../ulid.js';
 import { runWriteTool } from '../write-tx.js';
 import { baseDir } from './export-run.js';
@@ -38,6 +49,29 @@ export async function exportJournalDrafts(
     ...(input.client_id !== undefined ? { clientId: input.client_id } : {}),
   });
 
+  // H11: hydrate the price/FX snapshots pinned on any volatile-token confirmed leg (C4).
+  // A stablecoin-only journal collects no ids, so both stay empty — correctly, not by omission.
+  const [priceRefMap, fxRefMap] = await Promise.all([
+    hydratePriceRefs(ctx.db, data.priceSnapshotIds),
+    hydrateFxRefs(ctx.db, data.fxRateIds),
+  ]);
+  const priceRefs = [...priceRefMap.values()];
+  const fxRefs = [...fxRefMap.values()];
+
+  // Cite the backing settlement events (C3): inline when ≤ cap, else a summary whose
+  // drilldown re-enumerates them via analytics_list_events over this journal's own period
+  // + the CANONICAL resolved client scope when present (mirrors recon_status's shape).
+  const refsParts = selectRefs(
+    [{ refs: data.eventRefs, totalCount: data.eventRefs.length }],
+    {
+      tool: 'analytics_list_events',
+      args: {
+        ...(data.scope.clientId != null ? { scope: { client_id: data.scope.clientId } } : {}),
+        period: input.period,
+      },
+    },
+  );
+
   const exportId = randomUUID();
   const toolCallId = ulid();
   const rendered = renderJournalDrafts({
@@ -51,8 +85,8 @@ export async function exportJournalDrafts(
       toolCallId,
       generatedAt: new Date().toISOString(),
       coverage: data.coverageRefs,
-      priceRefs: [],
-      fxRefs: [],
+      priceRefs,
+      fxRefs,
     },
   });
 
@@ -114,7 +148,7 @@ export async function exportJournalDrafts(
         completedAt: new Date(),
       });
 
-      return { data: validated, envelope: { coverage: data.coverageRefs, warnings } };
+      return { data: validated, envelope: { coverage: data.coverageRefs, ...refsParts, priceRefs, fxRefs, warnings } };
     },
   });
 }

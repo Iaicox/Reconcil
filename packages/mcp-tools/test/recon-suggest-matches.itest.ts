@@ -389,3 +389,102 @@ describe('recon_suggest_matches — market valuation (non-stablecoin)', () => {
     expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
   });
 });
+
+describe('recon_suggest_matches — confirmed-fiat currency predicate (C6)', () => {
+  it('ignores a wrong-currency confirmed leg in candidate eligibility and open_amount', async () => {
+    const tokenId = await seedToken();
+    const rec = await seedInvoice('INV-100', '1000.00', PAYER);
+
+    // The two pre-existing settlements are sent from STRANGER, not the invoice's
+    // `expected_address` (PAYER) — so neither is independently re-proposed as a FRESH
+    // suggestion candidate by this same call (no address/amount rule hit against the
+    // 600.00-band open amount); the only thing under test is whether their matches rows
+    // pollute the confirmed-fiat sums.
+
+    // A real EUR confirmed leg (400.00) — legitimately settles part of the invoice.
+    const { rows: eurEvRows } = await pool.query<{ id: string }>(
+      `INSERT INTO chain_events
+         (chain_id, tx_hash, log_index, event_kind, token_id, amount_raw, from_addr, to_addr, block_number, block_time, tx_from, provider, raw)
+       VALUES (1, $1, 1, 'erc20_transfer', $2, '400000000', $3, $4, 100, '2026-06-01T10:00:00Z', $3, 'test', '{}'::jsonb)
+       RETURNING id`,
+      [`0x${'1'.padStart(64, 'a')}`, tokenId, STRANGER, WALLET],
+    );
+    await pool.query(
+      `INSERT INTO matches
+         (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+       VALUES ($1,$2,$3,'400000000','400.00','EUR','confirmed','agent','agent',now(),0.9,'{}'::jsonb)`,
+      [TENANT, rec, eurEvRows[0]!.id],
+    );
+
+    // A bogus USD confirmed leg on the SAME record, inserted via raw SQL — the normal
+    // writer (this suggest flow) always pins fiat_currency = record currency, so this
+    // bypasses it deliberately (the reviewer's exact fixture shape). Its huge amount
+    // would, unfixed, push confirmedByRecord past the invoice amount — excluding the
+    // record from candidacy entirely (the SQL-level A4/A5 eligibility filter) — and
+    // separately corrupt the wire-visible open_amount.
+    const { rows: usdEvRows } = await pool.query<{ id: string }>(
+      `INSERT INTO chain_events
+         (chain_id, tx_hash, log_index, event_kind, token_id, amount_raw, from_addr, to_addr, block_number, block_time, tx_from, provider, raw)
+       VALUES (1, $1, 2, 'erc20_transfer', $2, '999999000000', $3, $4, 100, '2026-06-01T11:00:00Z', $3, 'test', '{}'::jsonb)
+       RETURNING id`,
+      [`0x${'2'.padStart(64, 'a')}`, tokenId, STRANGER, WALLET],
+    );
+    await pool.query(
+      `INSERT INTO matches
+         (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+       VALUES ($1,$2,$3,'999999000000','999999.00','USD','confirmed','agent','agent',now(),0.9,'{}'::jsonb)`,
+      [TENANT, rec, usdEvRows[0]!.id],
+    );
+
+    // The genuine remaining settlement: 600.00 EUR (1000.00 − 400.00), from the expected sender.
+    await seedEvent(tokenId, PAYER, WALLET, '600000000', '2026-06-14T10:00:00Z', 3);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    // Without the fix: confirmedByRecord = 400.00 + 999999.00 far exceeds the 1000.00
+    // invoice amount, so the record never enters scope — zero suggestions, silently.
+    expect(env.data.suggestions).toHaveLength(1);
+    const s = env.data.suggestions[0]!;
+    expect(s.record.external_ref).toBe('INV-100');
+    expect(s.record.open_amount).toBe('600'); // 1000 − 400 (EUR only); the USD leg ignored
+    expect(s.amount_applied).toBe('600');
+  });
+});
+
+describe('recon_suggest_matches — summarized drilldown scope (H12/C3b)', () => {
+  it('threads the CANONICAL resolved client_id into the drilldown when client-scoped; omits it when unscoped', async () => {
+    const tokenId = await seedToken();
+    // > REF_CAP (64) suggestions so the envelope summarizes with a drilldown instead of
+    // inlining event_refs (refs.ts selectRefs only carries `drilldown` in that shape).
+    // Each record gets its OWN counterparty address (the address rule alone would
+    // otherwise fire for every record against every event sharing one PAYER, regardless
+    // of amount) and `amount_pct: 0` forces an exact-amount match, so exactly one leg is
+    // suggested per record — no cross-matching between the 65.
+    for (let i = 0; i < 65; i += 1) {
+      const payer = `0x${(1000 + i).toString(16).padStart(40, '0')}`;
+      const amount = String(1000 + i);
+      await seedEvent(tokenId, payer, WALLET, `${amount}000000`, '2026-06-14T10:00:00Z', i);
+      await seedInvoice(`INV-${String(i)}`, `${amount}.00`, payer);
+    }
+    const tolerances = { amount_pct: 0 };
+
+    // Mixed-case input: resolveClientId already canonicalizes, but the drilldown must
+    // carry THAT resolved id, never the caller's raw casing (C3b).
+    const scoped = await reconSuggestMatches(ctx(), { client_id: CLIENT.toUpperCase(), tolerances });
+    expect(scoped.data.suggestions).toHaveLength(65);
+    expect(scoped.citations.event_ref_summary?.count).toBe(65);
+    expect(scoped.citations.event_ref_summary?.drilldown.args).toEqual({ scope: { client_id: CLIENT } });
+
+    const unscoped = await reconSuggestMatches(ctx(), { tolerances });
+    expect(unscoped.citations.event_ref_summary?.count).toBe(65);
+    expect(unscoped.citations.event_ref_summary?.drilldown.args).toEqual({});
+  });
+});
+
+describe('recon_suggest_matches — input bounds (C9)', () => {
+  it('rejects date_window_days beyond the 3650-day bound with INVALID_INPUT', async () => {
+    await expect(
+      reconSuggestMatches(ctx(), { tolerances: { date_window_days: 1e15 } }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+});

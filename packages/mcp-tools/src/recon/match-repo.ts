@@ -213,7 +213,11 @@ export async function suggestMatches(
           // A freshly imported zero-amount invoice sits at status='open' regardless of
           // this fix (the DB default is amount-independent), so this is load-bearing on
           // its own, not merely a mirror of the engine-layer guard in suggestForRecord.
-          sql`${externalRecords.amount} > coalesce((select sum(${matches.fiatValue}) from ${matches} where ${matches.externalRecordId} = ${externalRecords.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed'), 0)`,
+          // `fiat_currency = external_records.currency` (C6): match-repo always writes
+          // fiat_currency = record currency, but nothing at the schema level enforces
+          // that, so a leg written any other way must not count toward this record's
+          // applied sum — mirrors the same predicate in status-repo.ts/decision-repo.ts.
+          sql`${externalRecords.amount} > coalesce((select sum(${matches.fiatValue}) from ${matches} where ${matches.externalRecordId} = ${externalRecords.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed' and ${matches.fiatCurrency} = ${externalRecords.currency}), 0)`,
         ),
       )
       .orderBy(externalRecords.id); // stable suggestion order across runs
@@ -237,9 +241,13 @@ export async function suggestMatches(
     let timeFrom: Date | undefined;
     let timeTo: Date | undefined;
     if (refDates.every((d): d is string => d !== null) && refDates.length > 0) {
+      // Reduce, not `Math.min(...ts)`/`Math.max(...ts)` (C10): a spread of every in-scope
+      // record's timestamp blows the call-stack argument limit on a large tenant (RangeError).
       const ts = refDates.map((d) => Date.parse(d));
-      timeFrom = new Date(Math.min(...ts) - windowDays * MS_PER_DAY);
-      timeTo = new Date(Math.max(...ts) + (windowDays + 1) * MS_PER_DAY); // +1 day covers the whole 'to' day
+      const minTs = ts.reduce((a, b) => (b < a ? b : a));
+      const maxTs = ts.reduce((a, b) => (b > a ? b : a));
+      timeFrom = new Date(minTs - windowDays * MS_PER_DAY);
+      timeTo = new Date(maxTs + (windowDays + 1) * MS_PER_DAY); // +1 day covers the whole 'to' day
     }
 
     let eventRows: EventRow[] = [];
@@ -296,10 +304,22 @@ export async function suggestMatches(
     }
 
     // 5. Confirmed applied fiat per record → open amount (records here are open/partial).
+    //    Joined to external_records so the sum can be currency-matched (C6): a leg
+    //    written outside the normal writer in another currency must not count toward
+    //    THIS record's applied total (same predicate as the candidate-eligibility filter
+    //    above and status-repo.ts/decision-repo.ts's confirmed-fiat sums).
     const confSums = await tx
       .select({ recordId: matches.externalRecordId, sum: sql<string>`coalesce(sum(${matches.fiatValue}), 0)::text` })
       .from(matches)
-      .where(and(eq(matches.tenantId, ctx.tenantId), eq(matches.status, 'confirmed'), inArray(matches.externalRecordId, recIds)))
+      .innerJoin(externalRecords, eq(externalRecords.id, matches.externalRecordId))
+      .where(
+        and(
+          eq(matches.tenantId, ctx.tenantId),
+          eq(matches.status, 'confirmed'),
+          inArray(matches.externalRecordId, recIds),
+          eq(matches.fiatCurrency, externalRecords.currency),
+        ),
+      )
       .groupBy(matches.externalRecordId);
     const confirmedByRecord = new Map(confSums.map((r) => [r.recordId, r.sum]));
 

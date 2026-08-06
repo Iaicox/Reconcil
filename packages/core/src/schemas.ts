@@ -687,12 +687,15 @@ export type ReconImportInvoicesOutput = z.infer<typeof reconImportInvoicesOutput
  * rides as a number; `amount_abs` is money and stays a decimal string (ADR-004).
  * `amount_pct` resolves to 4 decimal places (e.g. `0.0001`); precision finer than
  * that still rounds — a documented contract, never an error (ADR-010 A6).
+ * `date_window_days` caps at 3650 (10y): unbounded input (e.g. `1e15`) overflows
+ * `Date` arithmetic in match-repo.ts into `Invalid Date`, which otherwise surfaces
+ * as an opaque INTERNAL rather than a clean INVALID_INPUT (C9).
  */
 export const reconTolerancesSchema = z
   .object({
     amount_pct: z.number().nonnegative().optional(),
     amount_abs: nonNegativeDecimalString.optional(), // in the record's currency
-    date_window_days: z.number().int().nonnegative().optional(),
+    date_window_days: z.number().int().nonnegative().max(3650).optional(),
   })
   .strict();
 export type ReconTolerances = z.infer<typeof reconTolerancesSchema>;

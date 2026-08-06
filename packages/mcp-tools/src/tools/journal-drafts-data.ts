@@ -6,10 +6,17 @@
  * `timeBetween` window, so the axis matches the rest of the ledger). Each row becomes a
  * `JournalEntryInput`; the exporters layer does the 2dp rounding + VAT split (ADR-004).
  *
- * Valuation is the leg's stored fiat (face value pinned at confirm, P5) — no fresh
- * pricing pass, so the journal carries no price/fx refs. Coverage/freshness is derived
- * over the client-scoped wallet set (getLedgerStatus) and surfaced by the caller (C5).
- * `clientId` is resolved to the tenant's own (ADR-006); tenant identity is always `ctx`.
+ * Valuation is the leg's stored fiat (P5) — never re-priced here. For a same-currency
+ * stablecoin that's face value at peg, pinning no snapshot; for a volatile-token leg it's
+ * the price (+ FX) snapshot pinned back at suggest time. This query also collects each
+ * leg's (nullable) `price_snapshot_id`/`fx_rate_id` and the backing settlement's event ref
+ * (chain_id/tx_hash/log_index) so the caller (export-journal-drafts.ts) can hydrate real
+ * `price_refs`/`fx_refs`/`event_refs` for the envelope (H11) — a stablecoin-only journal
+ * naturally collects no ids, so its refs stay empty, correctly.
+ *
+ * Coverage/freshness is derived over the client-scoped wallet set (getLedgerStatus) and
+ * surfaced by the caller (C5). `clientId` is resolved to the tenant's own (ADR-006);
+ * tenant identity is always `ctx`.
  */
 import type { CoverageRef, Warning } from '@reconcil/core';
 import { chainEvents, externalRecords, matches, wallets } from '@reconcil/db';
@@ -31,6 +38,11 @@ export interface JournalData {
   scope: { addresses: string[]; clientId: string | null };
   coverageRefs: CoverageRef[];
   coverageWarnings: Warning[];
+  /** Distinct non-null price_snapshot_id/fx_rate_id pinned on the confirmed legs (H11). */
+  priceSnapshotIds: number[];
+  fxRateIds: number[];
+  /** The settlement event backing each confirmed leg (C3), for the journal's citation. */
+  eventRefs: { chainId: number; txHash: string; logIndex: number }[];
 }
 
 export async function computeJournalData(ctx: ToolContext, input: JournalDataInput): Promise<JournalData> {
@@ -54,6 +66,11 @@ export async function computeJournalData(ctx: ToolContext, input: JournalDataInp
       currency: matches.fiatCurrency,
       vatRate: externalRecords.vatRate,
       blockTime: chainEvents.blockTime,
+      priceSnapshotId: matches.priceSnapshotId,
+      fxRateId: matches.fxRateId,
+      chainId: chainEvents.chainId,
+      txHash: chainEvents.txHash,
+      logIndex: chainEvents.logIndex,
     })
     .from(matches)
     .innerJoin(externalRecords, eq(externalRecords.id, matches.externalRecordId))
@@ -81,5 +98,14 @@ export async function computeJournalData(ctx: ToolContext, input: JournalDataInp
   const coverage = await getLedgerStatus(ctx.db, { addresses });
   const { coverageRefs, coverageWarnings } = mapCoverage(coverage);
 
-  return { entries, scope: { addresses, clientId }, coverageRefs, coverageWarnings };
+  // H11: distinct pinned ids (a same-currency stablecoin leg pins neither) + the
+  // settlement event ref behind every confirmed leg, for the caller to cite.
+  const priceSnapshotIds = [...new Set(rows.map((r) => r.priceSnapshotId).filter((id): id is number => id !== null))];
+  const fxRateIds = [...new Set(rows.map((r) => r.fxRateId).filter((id): id is number => id !== null))];
+  const eventRefs = rows.map((r) => ({ chainId: r.chainId, txHash: r.txHash, logIndex: r.logIndex }));
+
+  return {
+    entries, scope: { addresses, clientId }, coverageRefs, coverageWarnings,
+    priceSnapshotIds, fxRateIds, eventRefs,
+  };
 }

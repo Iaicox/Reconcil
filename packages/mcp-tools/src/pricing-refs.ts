@@ -4,7 +4,15 @@
  * `PriceRef`/`FxRef` to the wire snake_case (contract §2), and normalize
  * `PricingWarning` into the envelope `Warning`. Shared by balances/flows/gas/
  * stablecoin so a citation-mapping change lands in one place (C4/C5).
+ *
+ * Also the shared `price_snapshots`/`fx_rates` → wire `PriceRef`/`FxRef` hydration (H11):
+ * decision-repo re-hydrates a single leg's pinned refs for the confirm/reject envelope;
+ * export-journal-drafts batches the distinct pinned ids across a whole period's confirmed
+ * legs. Both read the exact same columns, so the SQL lives here once.
  */
+import { fxRates, priceSnapshots, tokens, type Db, type Tx } from '@reconcil/db';
+import { eq, inArray } from 'drizzle-orm';
+
 import type { FxRef, PriceRef, Warning } from '@reconcil/core';
 import type {
   FxRef as PricingFxRef, PriceRef as PricingPriceRef, Valuation, ValuationResult,
@@ -36,4 +44,47 @@ export function collectPricingRefs(valued: ValuationResult): { priceRefs: PriceR
     fxRefs: valued.fxRefs.map(toWireFxRef),
     warnings: valued.warnings.map((w) => ({ code: w.code, message: w.message, ...(w.context ? { context: w.context } : {}) })),
   };
+}
+
+/**
+ * Re-hydrate `price_snapshots` rows pinned by id into wire `PriceRef`s, keyed by
+ * `snapshot_id` (H11, C4 "priced means pinned"). `ids` is de-duplicated by the caller;
+ * an empty list short-circuits (no query) — the common stablecoin-face-value path.
+ */
+export async function hydratePriceRefs(db: Db | Tx, ids: number[]): Promise<Map<number, PriceRef>> {
+  const map = new Map<number, PriceRef>();
+  if (ids.length === 0) return map;
+  const rows = await db
+    .select({
+      id: priceSnapshots.id, tokenId: priceSnapshots.tokenId, priceDate: priceSnapshots.priceDate,
+      currency: priceSnapshots.currency, price: priceSnapshots.price, source: priceSnapshots.source,
+      symbol: tokens.symbolDisplay,
+    })
+    .from(priceSnapshots)
+    .innerJoin(tokens, eq(tokens.id, priceSnapshots.tokenId))
+    .where(inArray(priceSnapshots.id, ids));
+  for (const r of rows) {
+    map.set(r.id, {
+      snapshot_id: r.id, token: r.symbol ?? String(r.tokenId), date: r.priceDate,
+      currency: r.currency, source: r.source, price: r.price,
+    });
+  }
+  return map;
+}
+
+/** Re-hydrate `fx_rates` rows pinned by id into wire `FxRef`s, keyed by `fx_rate_id` (H11). */
+export async function hydrateFxRefs(db: Db | Tx, ids: number[]): Promise<Map<number, FxRef>> {
+  const map = new Map<number, FxRef>();
+  if (ids.length === 0) return map;
+  const rows = await db
+    .select({
+      id: fxRates.id, rateDate: fxRates.rateDate, base: fxRates.baseCurrency,
+      quote: fxRates.quoteCurrency, rate: fxRates.rate, source: fxRates.source,
+    })
+    .from(fxRates)
+    .where(inArray(fxRates.id, ids));
+  for (const r of rows) {
+    map.set(r.id, { fx_rate_id: r.id, date: r.rateDate, base: r.base, quote: r.quote, rate: r.rate, source: r.source });
+  }
+  return map;
 }

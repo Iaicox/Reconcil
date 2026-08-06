@@ -139,6 +139,29 @@ describe('analytics_list_events — listing, filters, pagination, citations', ()
     expect(env.citations.event_ref_summary?.drilldown.tool).toBe('analytics_list_events');
   });
 
+  it('strips cursor/limit from a summarized drilldown so it re-enumerates the FULL backing set (C11)', async () => {
+    await S.tenant(TENANT, 'acme');
+    await S.wallet(WALLET_OWNED, TENANT, OWNED);
+    await S.token(1, { decimals: 18, symbol: 'ETH', address: null });
+    for (let i = 0; i < 150; i += 1) await S.event({ tokenId: 1, amount: eth(1), from: EXT, to: OWNED });
+    await S.checkpoint(OWNED, 'native', 'live');
+
+    const first = await analyticsListEvents(ctx(), { limit: 10 });
+    const cursor = first.data.next_cursor;
+    expect(cursor).toBeDefined();
+
+    // A second, paginated call (cursor + limit both present in the input) only carries
+    // `total_count` on page 1 (ledger contract), so the ref-cap decision here falls back
+    // to this page's own size — 100 of the 140 remaining events, still past REF_CAP (64),
+    // so it summarizes. Its drilldown must carry neither paging key: replaying them would
+    // re-fetch only this one page, not the full backing set (the actual C11 bug).
+    const env = await analyticsListEvents(ctx(), { limit: 100, cursor });
+    expect(env.data.total_count).toBeUndefined();
+    expect(env.citations.event_ref_summary).toBeDefined();
+    expect(env.citations.event_ref_summary?.drilldown.args).not.toHaveProperty('cursor');
+    expect(env.citations.event_ref_summary?.drilldown.args).not.toHaveProperty('limit');
+  });
+
   it('rejects a malformed min_amount as INVALID_INPUT (not an opaque INTERNAL)', async () => {
     await seedMixed();
     // '-5' passes the DecimalString regex but the ledger guards non-negative → RangeError → INVALID_INPUT

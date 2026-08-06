@@ -27,6 +27,7 @@ const WALLET2 = `0x${'3'.repeat(40)}`;
 const OUTSIDER = `0x${'9'.repeat(40)}`;
 const PAYER = `0x${'2'.repeat(40)}`;
 const EUR_TOKEN = `0x${'c'.repeat(40)}`;
+const WETH_TOKEN = `0x${'d'.repeat(40)}`; // a verified non-stablecoin (volatile) token
 
 const PERIOD = { from: '2026-06-01', to: '2026-06-30' };
 const MAPPING = { crypto_asset: '1010', accounts_receivable: '1100', accounts_payable: '2000', vat_output: '2200', vat_input: '1300' };
@@ -67,6 +68,25 @@ async function seedToken(): Promise<number> {
   return Number(rows[0]!.id);
 }
 
+/** A verified NON-stablecoin ERC-20 (WETH-like, 18 decimals). Returns its token id. */
+async function seedVolatileToken(): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO tokens (chain_id, address, standard, symbol_display, decimals, is_stablecoin, peg_currency, verified)
+     VALUES (1, $1, 'erc20', 'WETH', 18, false, null, true) RETURNING id`,
+    [WETH_TOKEN],
+  );
+  return Number(rows[0]!.id);
+}
+
+/** A daily price snapshot for a token. Returns its id. */
+async function seedSnapshot(tokenId: number, price: string, date: string, currency = 'EUR'): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO price_snapshots (token_id, price_date, currency, price, source) VALUES ($1,$2,$3,$4,'defillama') RETURNING id`,
+    [tokenId, date, currency, price],
+  );
+  return Number(rows[0]!.id);
+}
+
 interface EventOpts { logIndex?: number; from?: string; to?: string; blockTime?: string }
 async function seedEvent(tokenId: number, amountRaw: string, opts: EventOpts = {}): Promise<number> {
   const { logIndex = 0, from = PAYER, to = WALLET, blockTime = '2026-06-14T10:00:00Z' } = opts;
@@ -96,15 +116,18 @@ async function seedRecord(externalRef: string, amount: string, opts: RecordOpts 
 
 async function seedLeg(
   recordId: string, eventId: number, amountAppliedRaw: string, fiatValue: string,
-  opts: { status?: 'confirmed' | 'suggested' | 'rejected'; currency?: string } = {},
+  opts: {
+    status?: 'confirmed' | 'suggested' | 'rejected'; currency?: string;
+    priceSnapshotId?: number; fxRateId?: number;
+  } = {},
 ): Promise<string> {
-  const { status = 'confirmed', currency = 'EUR' } = opts;
+  const { status = 'confirmed', currency = 'EUR', priceSnapshotId = null, fxRateId = null } = opts;
   const confirmed = status === 'confirmed';
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO matches
-       (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, 0.9, '{}'::jsonb) RETURNING id`,
-    [TENANT, recordId, eventId, amountAppliedRaw, fiatValue, currency, status, confirmed ? 'agent' : null, confirmed ? new Date() : null],
+       (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, price_snapshot_id, fx_rate_id, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'agent', $10, $11, 0.9, '{}'::jsonb) RETURNING id`,
+    [TENANT, recordId, eventId, amountAppliedRaw, fiatValue, currency, priceSnapshotId, fxRateId, status, confirmed ? 'agent' : null, confirmed ? new Date() : null],
   );
   return rows[0]!.id;
 }
@@ -226,5 +249,48 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     const env = await exportJournalDrafts(ctx(TENANT2), { period: PERIOD, target: 'qbo', out_dir: outDir });
     expect(env.data.balanced).toBe(true);
     expect(env.data.lines).toBe(0);
+  });
+});
+
+describe('export_journal_drafts — journal provenance (H11)', () => {
+  it('cites the pinned price snapshot and the settlement event for a volatile-token confirmed leg', async () => {
+    const weth = await seedVolatileToken();
+    const snapId = await seedSnapshot(weth, '2000.00', '2026-06-14', 'EUR');
+    const inv = await seedRecord('INV-ETH', '1000.00', { direction: 'receivable' });
+    // 0.5 WETH @ 2000.00 EUR/WETH = 1000.00 EUR, pinned at suggest time to `snapId`.
+    const ev = await seedEvent(weth, '500000000000000000', { logIndex: 1, to: WALLET, blockTime: '2026-06-14T10:00:00Z' });
+    await seedLeg(inv, ev, '500000000000000000', '1000.00', { priceSnapshotId: snapId });
+
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: outDir });
+
+    expect(env.data.lines).toBe(2); // no VAT: asset + receivable
+    expect(env.citations.price_refs).toHaveLength(1);
+    expect(env.citations.price_refs![0]!.snapshot_id).toBe(snapId);
+    expect(env.citations.price_refs![0]!.price).toBe('2000.00');
+    expect(env.citations.price_refs![0]!.currency).toBe('EUR');
+    expect(env.citations.fx_refs).toBeUndefined(); // same-currency valuation, no FX pinned
+
+    // The settlement event is cited too (C3), inline under the ref cap.
+    const { rows: evRow } = await pool.query<{ tx_hash: string; log_index: number }>(
+      `SELECT tx_hash, log_index FROM chain_events WHERE id = $1`, [ev],
+    );
+    expect(env.citations.event_refs).toContainEqual(
+      expect.objectContaining({ chain_id: 1, tx_hash: evRow[0]!.tx_hash, log_index: evRow[0]!.log_index }),
+    );
+  });
+
+  it('keeps price/fx refs empty for a stablecoin-only journal, while still citing the settlement event', async () => {
+    const token = await seedToken();
+    const inv = await seedRecord('INV-1', '1000.00', { direction: 'receivable' });
+    const ev = await seedEvent(token, '1000000000', { logIndex: 1, to: WALLET });
+    await seedLeg(inv, ev, '1000000000', '1000.00'); // face value: no priceSnapshotId/fxRateId
+
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: outDir });
+
+    expect(env.data.balanced).toBe(true);
+    expect(env.citations.price_refs).toBeUndefined();
+    expect(env.citations.fx_refs).toBeUndefined();
+    expect(env.citations.event_refs).toBeDefined();
+    expect(env.citations.event_refs!.length).toBeGreaterThan(0);
   });
 });

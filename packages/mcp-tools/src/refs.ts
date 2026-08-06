@@ -15,6 +15,19 @@ interface LedgerBacking { refs: { chainId: number; txHash: string; logIndex: num
 
 type Drilldown = { tool: 'analytics_list_events'; args: Record<string, unknown> };
 
+/**
+ * A summary's `drilldown` must re-enumerate the FULL backing set (C11): stripping the
+ * caller's own `cursor`/`limit` before it rides into `event_ref_summary.drilldown.args`
+ * stops a paginated call (e.g. `analytics_list_events` citing itself) from handing back a
+ * drilldown that replays just the one page that was summarized.
+ */
+function stripPaging(args: Record<string, unknown>): Record<string, unknown> {
+  const rest = { ...args };
+  delete rest.cursor;
+  delete rest.limit;
+  return rest;
+}
+
 export function dedupeRefs(refs: WireEventRef[]): WireEventRef[] {
   const seen = new Set<string>();
   const out: WireEventRef[] = [];
@@ -41,5 +54,11 @@ export function selectRefs(
   const deduped = dedupeRefs(allRefs);
   return totalCount <= REF_CAP && deduped.length <= REF_CAP
     ? { eventRefs: deduped }
-    : { eventRefSummary: { count: totalCount, sample: deduped.slice(0, 10), drilldown } };
+    : {
+        eventRefSummary: {
+          count: totalCount,
+          sample: deduped.slice(0, 10),
+          drilldown: { ...drilldown, args: stripPaging(drilldown.args) },
+        },
+      };
 }

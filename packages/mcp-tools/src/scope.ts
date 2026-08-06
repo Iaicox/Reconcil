@@ -43,7 +43,22 @@ export async function resolveScope(ctx: ToolContext, scope?: Scope): Promise<Res
   let picked = rows;
 
   if (scope?.client_id !== undefined) {
-    picked = picked.filter((r) => r.clientId === scope.client_id);
+    // Canonical lowercase compare (clients.id/wallets.clientId are stored lowercase, like
+    // resolveClientId) — a valid uppercase UUID must not silently filter to zero wallets (C3a).
+    const clientId = scope.client_id.toLowerCase();
+    const filtered = picked.filter((r) => r.clientId === clientId);
+    if (filtered.length === 0) {
+      // Zero wallets is ambiguous on its own: an UNKNOWN client_id vs a KNOWN client with
+      // nothing tracked yet. A real existence check (mirroring resolveClientId) distinguishes
+      // them so the former is a loud UNKNOWN_SCOPE, not a misleading COVERAGE_EMPTY.
+      const known = await ctx.db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(sql`${clients.id}::text = ${clientId} and ${clients.tenantId} = ${ctx.tenantId}`)
+        .limit(1);
+      if (known.length === 0) throw new ToolError('UNKNOWN_SCOPE', `client_id not in tenant: ${scope.client_id}`);
+    }
+    picked = filtered;
   }
 
   if (scope?.wallet_ids !== undefined && scope.wallet_ids.length > 0) {
