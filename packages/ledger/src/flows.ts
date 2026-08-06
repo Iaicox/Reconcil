@@ -81,7 +81,7 @@ export async function computeFlows(db: Db, p: FlowsParams): Promise<FlowsResult>
 
   const runAgg = async (cond: SQL): Promise<Agg[]> => {
     const rows = await db.select(select).from(chainEvents).where(and(base, cond)).groupBy(...groupCols);
-    return rows as unknown as Agg[];
+    return rows;
   };
   const extAgg = await runAgg(externalCondition(addresses, direction));
   const intAgg = await runAgg(internalCondition(addresses));

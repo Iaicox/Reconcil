@@ -33,9 +33,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # build = tsc -b (project references): typecheck happens here, and
-      # depcruise needs dist entrypoints to resolve cross-package imports
+      # build = tsc -b (project references) over src only; depcruise needs the
+      # resulting dist entrypoints to resolve cross-package imports. typecheck
+      # additionally covers test/ (tsconfig.test.json, task-14) — build alone
+      # does not, so it must run as its own step for the gate to mean anything.
       - run: pnpm build
+      - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm depcruise
       # ADR-011 transitive guard: depcruise skips node_modules, so scan the full lockfile

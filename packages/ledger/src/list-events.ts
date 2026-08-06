@@ -31,7 +31,7 @@ export async function listEvents(db: Db, p: ListEventsParams): Promise<ListEvent
   }
 
   const scopeCond = or(inArray(chainEvents.fromAddr, addresses), inArray(chainEvents.toAddr, addresses));
-  const periodCond = p.period ? (() => { const { from, to } = periodRange(p.period!); return timeBetween(from, to); })() : undefined;
+  const periodCond = p.period ? (() => { const { from, to } = periodRange(p.period); return timeBetween(from, to); })() : undefined;
   const kindCond = p.kinds && p.kinds.length > 0 ? inArray(chainEvents.eventKind, p.kinds) : undefined;
   const cpCond = p.counterpartyAddress
     ? or(eq(chainEvents.fromAddr, p.counterpartyAddress.toLowerCase()), eq(chainEvents.toAddr, p.counterpartyAddress.toLowerCase()))
@@ -57,7 +57,7 @@ export async function listEvents(db: Db, p: ListEventsParams): Promise<ListEvent
 
   const cursorCond = p.cursor
     ? (() => {
-        const c = decodeCursor(p.cursor!);
+        const c = decodeCursor(p.cursor);
         return sql`(${chainEvents.chainId}, ${chainEvents.blockNumber}, ${chainEvents.logIndex}, ${chainEvents.id}) > (${c.chainId}, ${c.blockNumber}, ${c.logIndex}, ${c.id})`;
       })()
     : undefined;

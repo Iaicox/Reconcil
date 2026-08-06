@@ -53,7 +53,7 @@ describe('parseInvoiceCsv — mapping override and defaults', () => {
     const { drafts, errors } = parseInvoiceCsv(csv, { defaults: { direction: 'receivable' } });
     expect(drafts).toHaveLength(1);
     expect(drafts[0]).toMatchObject({ externalRef: 'INV-1', direction: 'payable' });
-    expect(errors).toEqual([{ row: 2, code: 'INVALID_DIRECTION', message: expect.stringContaining('sideways') }]);
+    expect(errors).toEqual([{ row: 2, code: 'INVALID_DIRECTION', message: expect.stringContaining('sideways') as unknown }]);
   });
 });
 
@@ -72,14 +72,14 @@ describe('parseInvoiceCsv — validation and honest row failures', () => {
     const csv = 'customer,amount,currency\nAcme,10.00,EUR';
     const { drafts, errors } = parseInvoiceCsv(csv);
     expect(drafts).toEqual([]);
-    expect(errors).toEqual([{ row: 0, code: 'NO_EXTERNAL_REF_COLUMN', message: expect.any(String) }]);
+    expect(errors).toEqual([{ row: 0, code: 'NO_EXTERNAL_REF_COLUMN', message: expect.any(String) as unknown }]);
   });
 
   it('reports a file-level error when a mapping targets a column not in the header', () => {
     const csv = 'invoice,total,currency\nINV-1,10.00,EUR';
     const { drafts, errors } = parseInvoiceCsv(csv, { mapping: { ghost: 'amount' } });
     expect(drafts).toEqual([]);
-    expect(errors).toEqual([{ row: 0, code: 'MAPPED_COLUMN_NOT_FOUND', message: expect.stringContaining('ghost') }]);
+    expect(errors).toEqual([{ row: 0, code: 'MAPPED_COLUMN_NOT_FOUND', message: expect.stringContaining('ghost') as unknown }]);
   });
 
   it('reports a file-level error on empty content', () => {
@@ -106,7 +106,7 @@ describe('parseInvoiceCsv — row cap (DoS guard)', () => {
   it('rejects the whole file with TOO_MANY_ROWS past maxRows', () => {
     const { drafts, errors } = parseInvoiceCsv(build(5), { maxRows: 3 });
     expect(drafts).toEqual([]);
-    expect(errors).toEqual([{ row: 0, code: 'TOO_MANY_ROWS', message: expect.any(String) }]);
+    expect(errors).toEqual([{ row: 0, code: 'TOO_MANY_ROWS', message: expect.any(String) as unknown }]);
   });
 
   it('accepts a file exactly at maxRows', () => {

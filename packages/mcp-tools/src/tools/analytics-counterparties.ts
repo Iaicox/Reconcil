@@ -94,8 +94,8 @@ export async function analyticsCounterparties(
       }
       return {
         token: toTokenView(pt.token),
-        inflow: pt.inflow as string,
-        outflow: pt.outflow as string,
+        inflow: pt.inflow,
+        outflow: pt.outflow,
         ...(fiat ? { fiat } : {}),
       };
     });
@@ -151,7 +151,7 @@ export async function analyticsCounterparties(
     throw new ToolError('INTERNAL', `analytics_counterparties produced an output that violates its contract: ${String(err)}`);
   }
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
+    toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });

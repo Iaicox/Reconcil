@@ -93,9 +93,9 @@ export async function analyticsFlows(
   // --- data -----------------------------------------------------------------
   const toView = (r: FlowRow, fiat: FlowRowView['fiat'] | undefined): FlowRowView => ({
     group: r.group,
-    inflow: r.inflow as string,
-    outflow: r.outflow as string,
-    net: r.net as string,
+    inflow: r.inflow,
+    outflow: r.outflow,
+    net: r.net,
     tx_count: r.txCount,
     ...(fiat ? { fiat } : {}),
   });
@@ -123,7 +123,7 @@ export async function analyticsFlows(
     throw new ToolError('INTERNAL', `analytics_flows produced an output that violates its contract: ${String(err)}`);
   }
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
+    toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });

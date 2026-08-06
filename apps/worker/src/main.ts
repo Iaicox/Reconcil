@@ -9,7 +9,8 @@ import { Queue, Worker } from 'bullmq';
 import { chains, createLogger, serializeError } from '@reconcil/core';
 import { createDb, runMigrations } from '@reconcil/db';
 import {
-  buildProviderBundle, realFetchJson, runAnchor, runBackfillPage, runProbe, runTailTick, type ProcessorDeps,
+  buildProviderBundle, realFetchJson, runAnchor, runBackfillPage, runProbe, runTailTick,
+  type AnchorTarget, type IngestTarget, type ProbeTarget, type ProcessorDeps,
 } from '@reconcil/ingestion';
 import {
   buildPriceProviderBundle, realFetchJson as realPriceFetchJson, throttled, runPriceFill,
@@ -67,7 +68,7 @@ async function main(): Promise<void> {
     { connection, concurrency: 1, settings: { backoffStrategy } },
   );
 
-  const backfillWorker = new Worker(
+  const backfillWorker = new Worker<IngestTarget>(
     BACKFILL_QUEUE,
     async (job) => {
       const res = await runBackfillPage(deps, job.data);
@@ -80,7 +81,7 @@ async function main(): Promise<void> {
     { connection, concurrency: 5, settings: { backoffStrategy } },
   );
 
-  const tailWorker = new Worker(
+  const tailWorker = new Worker<{ chainId: number }>(
     TAIL_QUEUE,
     async (job) => {
       // A live tick spanning a >PAGE_LIMIT gap (e.g. a large post-downtime
@@ -96,7 +97,7 @@ async function main(): Promise<void> {
   // Anchored-window baseline (ADR-008): write the opening_balance at the anchor,
   // then hand the stream to the backfill queue (now 'backfilling') so history
   // continues forward from the anchor — the same drain the tail worker uses.
-  const anchorWorker = new Worker(
+  const anchorWorker = new Worker<AnchorTarget>(
     ANCHOR_QUEUE,
     async (job) => {
       const res = await runAnchor(deps, job.data);
@@ -111,7 +112,7 @@ async function main(): Promise<void> {
 
   // >50k probe (ADR-008 Q5): a cheap tx-count estimate stored on the wallet's
   // native checkpoint; ledger_status reads it to surface suggests_anchored.
-  const probeWorker = new Worker(
+  const probeWorker = new Worker<ProbeTarget>(
     PROBE_QUEUE,
     async (job) => runProbe(deps, job.data),
     { connection, concurrency: 2, settings: { backoffStrategy } },

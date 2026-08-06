@@ -97,7 +97,7 @@ export async function analyticsListEvents(
     refs: listed.events.map((e) => ({ chainId: e.chainId, txHash: e.txHash, logIndex: e.logIndex })),
     totalCount: listed.totalCount ?? listed.events.length,
   };
-  const refsParts = selectRefs([backing], { tool: 'analytics_list_events', args: input as Record<string, unknown> });
+  const refsParts = selectRefs([backing], { tool: 'analytics_list_events', args: input });
 
   // --- validate the contract shape, THEN persist (C2), then respond --------
   try {
@@ -106,7 +106,7 @@ export async function analyticsListEvents(
     throw new ToolError('INTERNAL', `analytics_list_events produced an output that violates its contract: ${String(err)}`);
   }
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
+    toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, warnings });
@@ -121,7 +121,7 @@ function toWire(e: EventListItem, resolved: Map<string, ResolvedEntity>): EventL
     block_number: e.blockNumber,
     block_time: e.blockTime,
     token: toTokenView(e.token),
-    amount: e.amount as string,
+    amount: e.amount,
     amount_raw: e.amountRaw,
     from: addressView(e.fromAddr, e.chainId, resolved),
     to: addressView(e.toAddr, e.chainId, resolved),

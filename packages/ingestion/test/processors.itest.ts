@@ -44,38 +44,49 @@ type NativeFn = ChainDataProvider['getNativeTxs'];
 type Erc20Fn = ChainDataProvider['getErc20Transfers'];
 type ReceiptsFn = ProviderBundle['getReceipts'];
 
+// Anchoring capabilities are unused by the backfill/tail processors under test
+// here (that's anchor.itest.ts) — stub them to fail loudly if that ever changes,
+// rather than silently degrading.
+const unused = (label: string) => (): Promise<never> => {
+  throw new Error(`${label} unexpectedly called by a processors.itest.ts case`);
+};
+
 const bundleOf = (opts: { native?: NativeFn; erc20?: Erc20Fn; receipts?: ReceiptsFn }): ProviderBundle => ({
   indexer: {
     kind: 'etherscan-v2',
-    getHead: async () => 1_000_000n,
-    getNativeTxs: opts.native ?? (async () => ({ items: [] })),
-    getErc20Transfers: opts.erc20 ?? (async () => ({ items: [] })),
+    getHead: () => Promise.resolve(1_000_000n),
+    getNativeTxs: opts.native ?? (() => Promise.resolve({ items: [] })),
+    getErc20Transfers: opts.erc20 ?? (() => Promise.resolve({ items: [] })),
   },
-  getReceipts: opts.receipts ?? (async () => []),
+  getReceipts: opts.receipts ?? (() => Promise.resolve([])),
+  getBlockByTime: unused('getBlockByTime'),
+  getNativeBalanceAt: unused('getNativeBalanceAt'),
+  getErc20BalanceAt: unused('getErc20BalanceAt'),
+  estimateTxCount: unused('estimateTxCount'),
 });
 
 // safeHead for chain 1 = head(1_000_000) − finalityDepth(64) = 999_936.
 const SAFE = 999_936;
 
 // Short native page: 3 txs at 100–102, then empty ⇒ one page, straight to live.
-const nativeShort: NativeFn = async (q) => ({
+const nativeShort: NativeFn = (q) => Promise.resolve({
   items: Number(q.fromBlock) <= 100 ? [nativeTx(100), nativeTx(101), nativeTx(102)] : [],
 });
 // Full native page: exactly PAGE_LIMIT (1000) txs at blocks 1..1000.
 const bigTxs = Array.from({ length: 1000 }, (_, i) => nativeTx(i + 1));
-const nativeFull: NativeFn = async (q) => {
+const nativeFull: NativeFn = (q) => {
   const from = Number(q.fromBlock);
-  return { items: bigTxs.filter((t) => Number(t.blockNumber) >= from).slice(0, 1000) };
+  return Promise.resolve({ items: bigTxs.filter((t) => Number(t.blockNumber) >= from).slice(0, 1000) });
 };
 // A full page (PAGE_LIMIT) of relevant txs all in ONE block (500) — the
 // degenerate case block-granular overlap pagination cannot advance past.
 const spamBlock = Array.from({ length: 1000 }, (_, i) => ({ ...nativeTx(500), hash: `0xspam${i.toString(16)}` }));
-const nativeSpamBlock: NativeFn = async (q) => ({ items: Number(q.fromBlock) <= 500 ? spamBlock : [] });
+const nativeSpamBlock: NativeFn = (q) => Promise.resolve({ items: Number(q.fromBlock) <= 500 ? spamBlock : [] });
 // A single tx at block 500 (for the tail tick).
-const nativeAt500: NativeFn = async (q) => ({ items: Number(q.fromBlock) <= 500 ? [nativeTx(500)] : [] });
+const nativeAt500: NativeFn = (q) => Promise.resolve({ items: Number(q.fromBlock) <= 500 ? [nativeTx(500)] : [] });
 // One erc20 transfer at block 200, with matching receipts.
-const erc20At200: Erc20Fn = async (q) => ({ items: Number(q.fromBlock) <= 200 ? [erc20Row(200, '0xerc1')] : [] });
-const erc20Receipts: ReceiptsFn = async (hashes) => hashes.map((h) => erc20Receipt(h));
+const erc20At200: Erc20Fn = (q) => Promise.resolve({ items: Number(q.fromBlock) <= 200 ? [erc20Row(200, '0xerc1')] : [] });
+const erc20Receipts: ReceiptsFn = (hashes) => Promise.resolve(hashes.map((h) => erc20Receipt(h)));
 
 describe('processors', () => {
   let container: StartedPostgreSqlContainer;
@@ -107,12 +118,15 @@ describe('processors', () => {
     );
   };
   const kinds = async (): Promise<Record<string, number>> => {
-    const { rows } = await pool.query('SELECT event_kind, count(*)::int AS n FROM chain_events GROUP BY event_kind');
-    return Object.fromEntries(rows.map((r) => [r.event_kind as string, r.n as number]));
+    const { rows } = await pool.query<{ event_kind: string; n: number }>(
+      'SELECT event_kind, count(*)::int AS n FROM chain_events GROUP BY event_kind',
+    );
+    return Object.fromEntries(rows.map((r) => [r.event_kind, r.n]));
   };
   const snapshot = async (): Promise<string> =>
-    (await pool.query('SELECT tx_hash, log_index, amount_raw FROM chain_events ORDER BY tx_hash, log_index'))
-      .rows.map((r) => `${r.tx_hash}:${String(r.log_index)}:${r.amount_raw}`).join('|');
+    (await pool.query<{ tx_hash: string; log_index: number; amount_raw: string }>(
+      'SELECT tx_hash, log_index, amount_raw FROM chain_events ORDER BY tx_hash, log_index',
+    )).rows.map((r) => `${r.tx_hash}:${String(r.log_index)}:${r.amount_raw}`).join('|');
 
   it('ingests native + gas events and reaches live', async () => {
     await reset('native', 0, 'queued');
@@ -164,13 +178,17 @@ describe('processors', () => {
     expect(res.status).toBe('live');
     expect(res.inserted).toBe(1);
     expect(res.unseenContracts).toEqual([TOKEN]);
-    const ev = (await pool.query(
+    const ev = (await pool.query<{
+      event_kind: string; log_index: number; from_addr: string; to_addr: string; tx_from: string; tx_to: string;
+    }>(
       `SELECT event_kind, log_index, from_addr, to_addr, tx_from, tx_to FROM chain_events WHERE event_kind='erc20_transfer'`,
     )).rows[0];
     expect(ev).toMatchObject({
       event_kind: 'erc20_transfer', log_index: 5, from_addr: ADDR, to_addr: DEST, tx_from: ADDR, tx_to: TOKEN,
     });
-    const tok = (await pool.query(
+    const tok = (await pool.query<{
+      standard: string; verified: boolean; symbol_raw: string; name_raw: string; decimals: number;
+    }>(
       `SELECT standard, verified, symbol_raw, name_raw, decimals FROM tokens WHERE chain_id=1 AND address=$1`, [TOKEN],
     )).rows[0];
     expect(tok).toEqual({ standard: 'erc20', verified: false, symbol_raw: 'ACME', name_raw: 'Acme Token', decimals: 6 });
@@ -190,7 +208,7 @@ describe('processors', () => {
     // Cursor already at safeHead ⇒ fromBlock = safe + 1 > safe. The provider mock
     // throws if queried, so this test fails if the `fromBlock > safe` guard is removed.
     await reset('native', SAFE, 'live');
-    const throwIfQueried: NativeFn = async () => { throw new Error('provider queried past safeHead'); };
+    const throwIfQueried: NativeFn = () => { throw new Error('provider queried past safeHead'); };
     const res = await runBackfillPage(
       deps(() => bundleOf({ native: throwIfQueried })),
       { chainId: 1, address: ADDR, stream: 'native' },
@@ -198,8 +216,8 @@ describe('processors', () => {
     expect(res.status).toBe('live');
     expect(res.inserted).toBe(0);
     expect(res.lastProcessedBlock).toBe(SAFE);
-    const { rows } = await pool.query('SELECT count(*)::int AS n FROM chain_events');
-    expect(rows[0].n).toBe(0);
+    const { rows } = await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM chain_events');
+    expect(rows[0]?.n).toBe(0);
   });
 
   it('fails loudly when one block holds a full page of relevant txs (no forward progress)', async () => {
@@ -212,7 +230,7 @@ describe('processors', () => {
     ).rejects.toThrow(/stalled|cannot advance/i);
     // Nothing committed; the cursor did not move (the whole page is one transaction).
     expect((await getCheckpoint(db, 1, ADDR, 'native'))?.lastProcessedBlock).toBe(499);
-    expect((await pool.query('SELECT count(*)::int AS n FROM chain_events')).rows[0].n).toBe(0);
+    expect((await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM chain_events')).rows[0]?.n).toBe(0);
   });
 
   it('tail: a live stream over a >PAGE_LIMIT gap is handed back for backfill, then recovers', async () => {

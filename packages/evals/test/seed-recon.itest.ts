@@ -61,8 +61,8 @@ async function seed(): Promise<{ ctx: ToolContext } & Awaited<ReturnType<typeof 
 describe('recon-smb eval fixture', () => {
   it('seeds one client, five records with the expected statuses, and three confirmed legs', async () => {
     const { ctx } = await seed();
-    const clients = await pool.query('SELECT count(*)::int AS n FROM clients WHERE tenant_id = $1', [ctx.tenantId]);
-    expect(clients.rows[0].n).toBe(1);
+    const clients = await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM clients WHERE tenant_id = $1', [ctx.tenantId]);
+    expect(clients.rows[0]?.n).toBe(1);
 
     const recs = await pool.query<{ external_ref: string; status: string; direction: string }>(
       'SELECT external_ref, status, direction FROM external_records WHERE tenant_id = $1 ORDER BY external_ref',
@@ -70,12 +70,13 @@ describe('recon-smb eval fixture', () => {
     );
     const byRef = Object.fromEntries(recs.rows.map((r) => [r.external_ref, r]));
     expect(Object.keys(byRef).sort()).toEqual(['BILL-OPEN', 'INV-OPEN', 'INV-PAID', 'INV-PARTIAL', 'INV-VAT']);
-    expect(byRef['INV-PAID'].status).toBe('matched');
-    expect(byRef['INV-VAT'].status).toBe('matched');
-    expect(byRef['INV-PARTIAL'].status).toBe('partially_matched');
-    expect(byRef['INV-OPEN'].status).toBe('open');
-    expect(byRef['BILL-OPEN'].status).toBe('open');
-    expect(byRef['BILL-OPEN'].direction).toBe('payable');
+    // Non-null: presence of all five keys just asserted above.
+    expect(byRef['INV-PAID']!.status).toBe('matched');
+    expect(byRef['INV-VAT']!.status).toBe('matched');
+    expect(byRef['INV-PARTIAL']!.status).toBe('partially_matched');
+    expect(byRef['INV-OPEN']!.status).toBe('open');
+    expect(byRef['BILL-OPEN']!.status).toBe('open');
+    expect(byRef['BILL-OPEN']!.direction).toBe('payable');
 
     const legs = await pool.query<{ status: string }>('SELECT status FROM matches WHERE tenant_id = $1', [ctx.tenantId]);
     expect(legs.rows).toHaveLength(3);

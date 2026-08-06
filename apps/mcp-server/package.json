@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "lint": "eslint src test",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",

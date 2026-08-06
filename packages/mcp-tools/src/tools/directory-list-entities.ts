@@ -33,7 +33,7 @@ export async function directoryListEntities(
     throw new ToolError('INTERNAL', `directory_list_entities produced an output that violates its contract: ${String(err)}`);
   }
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: [], result: data,
+    toolName: TOOL_NAME, args: input, coverage: [], result: data,
   });
 
   return buildEnvelope(data, { toolCallId, coverage: [], warnings: [] });

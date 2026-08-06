@@ -12,6 +12,6 @@ export function repDate(group: Record<string, string>, periodTo: string): string
 
 export function lastDayOfMonth(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
-  const day = new Date(Date.UTC(y!, m!, 0)).getUTCDate(); // day 0 of next month = last day of this
+  const day = new Date(Date.UTC(y!, m, 0)).getUTCDate(); // day 0 of next month = last day of this
   return `${ym}-${String(day).padStart(2, '0')}`;
 }

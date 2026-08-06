@@ -86,7 +86,7 @@ export async function ledgerStatus(
     throw new ToolError('INTERNAL', `ledger_status produced an output that violates its contract: ${String(err)}`);
   }
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
+    toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, warnings: coverageWarnings });

@@ -90,9 +90,9 @@ export async function analyticsStablecoinMovements(
   // --- data (flows shape; row-level fiat omitted) ---------------------------
   const toView = (r: FlowRow): FlowRowView => ({
     group: r.group,
-    inflow: r.inflow as string,
-    outflow: r.outflow as string,
-    net: r.net as string,
+    inflow: r.inflow,
+    outflow: r.outflow,
+    net: r.net,
     tx_count: r.txCount,
   });
   const data: AnalyticsStablecoinOutput = {
@@ -119,7 +119,7 @@ export async function analyticsStablecoinMovements(
     throw new ToolError('INTERNAL', `analytics_stablecoin_movements produced an output that violates its contract: ${String(err)}`);
   }
   const toolCallId = await persistToolCall(ctx, {
-    toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
+    toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,
   });
 
   return buildEnvelope(data, { toolCallId, coverage: coverageRefs, ...refsParts, priceRefs, fxRefs, warnings });

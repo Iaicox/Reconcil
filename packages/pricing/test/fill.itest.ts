@@ -65,7 +65,7 @@ function stubBundle(prices: Record<string, string>): PriceBundle {
 }
 
 const need = (o: Partial<ValueNeed> & Pick<ValueNeed, 'tokenId' | 'amount' | 'date'>): ValueNeed =>
-  ({ isStablecoin: false, pegCurrency: null, ...o } as ValueNeed);
+  ({ isStablecoin: false, pegCurrency: null, ...o });
 
 describe('runPriceFill — gaps → fetch → append, then valuation reads it', () => {
   it('fills market snapshots + FX, is idempotent, and feeds valueQuantities end-to-end', async () => {

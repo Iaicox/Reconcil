@@ -64,7 +64,7 @@ export async function ledgerTrackWallet(
   // it also gains intra-tool atomicity: a partial track can no longer be left behind.
   return runWriteTool<LedgerTrackWalletOutput>(ctx, {
     toolName: TOOL_NAME,
-    args: input as Record<string, unknown>,
+    args: input,
     body: async (txCtx) => {
       // Idempotent wallet upsert; a re-track returns the existing id (never a duplicate).
       await txCtx.db
