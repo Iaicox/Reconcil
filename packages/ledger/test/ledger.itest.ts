@@ -10,6 +10,7 @@ import { computeFlows } from '../src/flows.js';
 import { foldBalances, foldCounterparties, foldFlows, foldGas } from '../src/fold.js';
 import { computeGas } from '../src/gas.js';
 import { listEvents } from '../src/list-events.js';
+import { periodRange } from '../src/scope-sql.js';
 import { computeStablecoinMovements } from '../src/stablecoins.js';
 import { getLedgerStatus } from '../src/status.js';
 import type { LedgerEvent, Period, TimeWindow } from '../src/types.js';
@@ -166,10 +167,16 @@ function fullPeriod(world: World): Period {
   return { from: isoDate(new Date(Math.min(...times))), to: isoDate(new Date(Math.max(...times))) };
 }
 
-const windowOf = (p: Period): TimeWindow => ({
-  from: new Date(`${p.from}T00:00:00.000Z`),
-  to: new Date(`${p.to}T23:59:59.999Z`),
-});
+// `periodRange` is half-open [from, toExclusive) (H10 minors); the in-memory
+// fold's `TimeWindow.to` is a CLOSED bound (`inWindow`: t <= w.to), so convert by
+// stepping back 1ms. Exactly equivalent to the pre-fix 'T23:59:59.999Z' literal
+// at millisecond precision (JS Date cannot represent finer), which is all the
+// fold ever compares against — deriving from `periodRange` keeps one source of
+// truth for the day-boundary math instead of duplicating it here.
+const windowOf = (p: Period): TimeWindow => {
+  const { from, to } = periodRange(p);
+  return { from, to: new Date(to.getTime() - 1) };
+};
 
 describe('computeFlows / computeGas — SQL ≡ fold', () => {
   const worlds = fc.sample(arbWorld, { numRuns: 6, seed: 424242 });
@@ -520,6 +527,47 @@ describe('listEvents — pagination and filters', () => {
     expect(second.totalCount).toBeUndefined();
     expect(second.events).toHaveLength(2);
   });
+
+  it('omits total_count on an empty-scope cursor page but includes it on the first page', async () => {
+    // The empty-scope path short-circuits before the DB round trip, but must still
+    // honour "first page only" (cursor absent) — a cursor page never carries totalCount,
+    // regardless of which branch produced the empty result (types.ts: "first page only").
+    const first = await listEvents(db, { scope: { addresses: [] } });
+    expect(first.totalCount).toBe(0);
+    expect(first.events).toEqual([]);
+
+    const cursored = await listEvents(db, { scope: { addresses: [] }, cursor: 'anything' });
+    expect(cursored.totalCount).toBeUndefined();
+    expect(cursored.events).toEqual([]);
+  });
+});
+
+describe('periodRange — half-open day boundary (H10 minors)', () => {
+  it('includes a microsecond-precision event just before midnight, excludes one exactly at next midnight', async () => {
+    // block_time is TIMESTAMPTZ (microsecond precision); the driver/Date path can't
+    // express sub-millisecond values, so insert via raw SQL to exercise the true
+    // boundary. Under the OLD closed '23:59:59.999Z' upper bound, the first event
+    // (…999500) would have been wrongly excluded (999500 > 999000 the old lte
+    // literal); under the new half-open [from, nextMidnight) range it lands inside.
+    await pool.query('TRUNCATE chain_events, tokens RESTART IDENTITY CASCADE');
+    await pool.query(
+      `INSERT INTO tokens (id, chain_id, address, standard, decimals, is_stablecoin, peg_currency, verified, symbol_display)
+       OVERRIDING SYSTEM VALUE VALUES (1,1,NULL,'native',18,false,NULL,true,'ETH')`,
+    );
+    await pool.query(
+      `INSERT INTO chain_events
+         (chain_id, tx_hash, log_index, event_kind, token_id, amount_raw, from_addr, to_addr,
+          block_number, block_time, tx_from, tx_to, provider, raw)
+       VALUES
+         (1, '0x01', -1, 'native_transfer', 1, 1, $1, $2, 1, '2026-01-01T23:59:59.999500Z', $1, $2, 'fixture', '{}'),
+         (1, '0x02', -1, 'native_transfer', 1, 1, $1, $2, 2, '2026-01-02T00:00:00.000000Z', $1, $2, 'fixture', '{}')`,
+      [EXT, OWNED],
+    );
+
+    const period: Period = { from: '2026-01-01', to: '2026-01-01' };
+    const res = await listEvents(db, { scope: { addresses: [OWNED] }, period });
+    expect(res.events.map((e) => e.blockNumber)).toEqual([1]);
+  });
 });
 
 describe('computeCounterparties — SQL ≡ fold', () => {
@@ -620,6 +668,118 @@ describe('computeCounterparties — ranking', () => {
   });
 });
 
+describe('dropped-token consistency (H10 minors)', () => {
+  // `chain_events.token_id` is FK-constrained to `tokens.id` (ADR-005), so a row
+  // whose token is genuinely absent from `tokens` cannot be seeded — the reachable
+  // analog is a token the default (verified-only) filter drops. Before this fix,
+  // counterparties.ts derived txCount/backing from an independently-issued query
+  // sharing only the same WHERE text as the turnover query; this proves they stay
+  // tied to one row set: a counterparty whose only token is unverified must not
+  // surface as a ghost row (txCount > 0, backing refs, empty perToken).
+  const period: Period = { from: '2026-01-01', to: '2026-12-31' };
+
+  it('computeCounterparties: a counterparty whose only token is dropped does not appear at all', async () => {
+    const e = events();
+    e.push({ eventKind: 'erc20_transfer', tokenId: SPAM.tokenId, amountRaw: 10n, fromAddr: EXT, toAddr: OWNED });
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT], tokens: [SPAM], chainIds: [1] }, new Set()); // SPAM unverified
+
+    const res = await computeCounterparties(db, { scope: { addresses: [OWNED] }, period });
+    expect(res.rows.find((r) => r.address === EXT)).toBeUndefined();
+    expect(res.totalCounterparties).toBe(0);
+
+    // With includeUnverified the same events resolve the token and the counterparty
+    // appears fully (perToken non-empty, txCount matches) — same code path, no drop.
+    const all = await computeCounterparties(db, { scope: { addresses: [OWNED] }, period, includeUnverified: true });
+    expect(all.rows.map((r) => r.address)).toEqual([EXT]);
+    expect(all.rows[0]?.perToken).toHaveLength(1);
+    expect(all.rows[0]?.txCount).toBe(1);
+  });
+
+  it('computeFlows: a dropped (unverified) token never contributes a row or orphaned backing to a surviving row', async () => {
+    const e = events();
+    e.push({ eventKind: 'erc20_transfer', tokenId: USDC.tokenId, amountRaw: 1_000_000n, fromAddr: EXT, toAddr: OWNED });
+    e.push({ eventKind: 'erc20_transfer', tokenId: SPAM.tokenId, amountRaw: 999n, fromAddr: EXT, toAddr: OWNED });
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT], tokens: [USDC, SPAM], chainIds: [1] }, new Set([USDC.tokenId]));
+
+    const res = await computeFlows(db, { scope: { addresses: [OWNED] }, period });
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0]).toMatchObject({ tokenId: USDC.tokenId, inflowRaw: '1000000' });
+    expect(res.rows[0]?.backing.totalCount).toBe(1); // only the surviving token's own event, not the dropped SPAM one
+  });
+});
+
+describe('scope.chainIds — single home (H10)', () => {
+  // Two chains, distinct native tokens, distinct external counterparties per chain —
+  // `scope.chainIds` (not a top-level param) must be the only spelling that filters
+  // flows/gas/counterparties/listEvents (types.ts no longer carries a duplicate).
+  const NATIVE_C1: TokenSpec = { tokenId: 10, chainId: 1, address: null, decimals: 18, standard: 'native' };
+  const NATIVE_C2: TokenSpec = { tokenId: 11, chainId: 8453, address: null, decimals: 18, standard: 'native' };
+  const EXT_C1 = '0x0000000000000000000000000000000000000c01';
+  const EXT_C2 = '0x0000000000000000000000000000000000000c02';
+  const ZERO = '0x0000000000000000000000000000000000000000';
+  const period: Period = { from: '2026-01-01', to: '2026-12-31' };
+
+  async function seedTwoChains(): Promise<void> {
+    const e = events();
+    e.push({ eventKind: 'native_transfer', chainId: 1, tokenId: NATIVE_C1.tokenId, amountRaw: 100n, fromAddr: EXT_C1, toAddr: OWNED });
+    e.push({ eventKind: 'gas_fee', chainId: 1, tokenId: NATIVE_C1.tokenId, amountRaw: 3n, fromAddr: OWNED, toAddr: ZERO });
+    e.push({ eventKind: 'native_transfer', chainId: 8453, tokenId: NATIVE_C2.tokenId, amountRaw: 50n, fromAddr: EXT_C2, toAddr: OWNED });
+    e.push({ eventKind: 'gas_fee', chainId: 8453, tokenId: NATIVE_C2.tokenId, amountRaw: 2n, fromAddr: OWNED, toAddr: ZERO });
+    await seedWorld({ events: e.list, owned: [OWNED], external: [EXT_C1, EXT_C2], tokens: [NATIVE_C1, NATIVE_C2], chainIds: [1, 8453] });
+  }
+
+  it('computeFlows filters via scope.chainIds (positive + negative)', async () => {
+    await seedTwoChains();
+    const c1 = await computeFlows(db, { scope: { addresses: [OWNED], chainIds: [1] }, period });
+    expect(c1.rows).toHaveLength(1);
+    expect(c1.rows[0]).toMatchObject({ inflowRaw: '100' });
+
+    const c2 = await computeFlows(db, { scope: { addresses: [OWNED], chainIds: [8453] }, period });
+    expect(c2.rows).toHaveLength(1);
+    expect(c2.rows[0]).toMatchObject({ inflowRaw: '50' });
+
+    const both = await computeFlows(db, { scope: { addresses: [OWNED] }, period });
+    expect(both.rows).toHaveLength(2);
+  });
+
+  it('computeGas filters via scope.chainIds (positive + negative)', async () => {
+    await seedTwoChains();
+    const c1 = await computeGas(db, { scope: { addresses: [OWNED], chainIds: [1] }, period });
+    expect(c1).toHaveLength(1);
+    expect(c1[0]).toMatchObject({ chainId: 1, nativeAmountRaw: '3' });
+
+    const c2 = await computeGas(db, { scope: { addresses: [OWNED], chainIds: [8453] }, period });
+    expect(c2).toHaveLength(1);
+    expect(c2[0]).toMatchObject({ chainId: 8453, nativeAmountRaw: '2' });
+  });
+
+  it('computeCounterparties filters via scope.chainIds (positive + negative)', async () => {
+    await seedTwoChains();
+    const c1 = await computeCounterparties(db, { scope: { addresses: [OWNED], chainIds: [1] }, period });
+    expect(c1.rows.map((r) => r.address)).toEqual([EXT_C1]);
+
+    const c2 = await computeCounterparties(db, { scope: { addresses: [OWNED], chainIds: [8453] }, period });
+    expect(c2.rows.map((r) => r.address)).toEqual([EXT_C2]);
+
+    const both = await computeCounterparties(db, { scope: { addresses: [OWNED] }, period });
+    expect(both.rows.map((r) => r.address).sort()).toEqual([EXT_C1, EXT_C2].sort());
+  });
+
+  it('listEvents filters via scope.chainIds (positive + negative)', async () => {
+    await seedTwoChains();
+    const c1 = await listEvents(db, { scope: { addresses: [OWNED], chainIds: [1] } });
+    expect(c1.events.every((x) => x.chainId === 1)).toBe(true);
+    expect(c1.events.length).toBeGreaterThan(0);
+
+    const c2 = await listEvents(db, { scope: { addresses: [OWNED], chainIds: [8453] } });
+    expect(c2.events.every((x) => x.chainId === 8453)).toBe(true);
+    expect(c2.events.length).toBeGreaterThan(0);
+
+    const neither = await listEvents(db, { scope: { addresses: [OWNED], chainIds: [999999] } });
+    expect(neither.events).toEqual([]);
+  });
+});
+
 describe('getLedgerStatus', () => {
   it('reports coverage, freshness, anchoring, and errors per (address, chain)', async () => {
     const e = events();
@@ -678,5 +838,43 @@ describe('getLedgerStatus', () => {
     const byChain = new Map(cov.map((c) => [c.chainId, c]));
     expect(byChain.get(1)!.streams[0]?.lastBlockTime).toBe('2026-02-01T00:00:00.000Z');
     expect(byChain.get(8453)!.streams[0]?.lastBlockTime).toBe('2026-04-01T00:00:00.000Z');
+  });
+
+  it('picks the wallet integrity result deterministically when both streams report one', async () => {
+    // Checkpoint row order from Postgres is otherwise unspecified; without the
+    // ORDER BY (chainId, address, stream) in getLedgerStatus this pick could flip
+    // between runs. 'erc20' < 'native' lexically, so ascending order visits erc20
+    // first — the documented winner (status.ts).
+    await pool.query('TRUNCATE chain_events, tokens RESTART IDENTITY CASCADE');
+    await pool.query('TRUNCATE ingestion_checkpoints');
+    const now = new Date().toISOString();
+    const nativeIntegrity = JSON.stringify({ checked_at: 'native-check', drifts: [] });
+    const erc20Integrity = JSON.stringify({ checked_at: 'erc20-check', drifts: [] });
+    await pool.query(
+      `INSERT INTO ingestion_checkpoints (chain_id, address, stream, status, last_processed_block, last_integrity, updated_at) VALUES
+        (1, $1, 'native', 'live', 100, $2, $4),
+        (1, $1, 'erc20', 'live', 100, $3, $4)`,
+      [OWNED, nativeIntegrity, erc20Integrity, now],
+    );
+
+    const cov = await getLedgerStatus(db, { addresses: [OWNED] });
+    expect(cov).toHaveLength(1);
+    expect(cov[0]?.integrity).toEqual({ checked_at: 'erc20-check', drifts: [] });
+  });
+
+  it('falls back to the native stream integrity when erc20 has none', async () => {
+    await pool.query('TRUNCATE chain_events, tokens RESTART IDENTITY CASCADE');
+    await pool.query('TRUNCATE ingestion_checkpoints');
+    const now = new Date().toISOString();
+    const nativeIntegrity = JSON.stringify({ checked_at: 'native-check', drifts: [] });
+    await pool.query(
+      `INSERT INTO ingestion_checkpoints (chain_id, address, stream, status, last_processed_block, last_integrity, updated_at) VALUES
+        (1, $1, 'native', 'live', 100, $2, $3),
+        (1, $1, 'erc20', 'live', 100, NULL, $3)`,
+      [OWNED, nativeIntegrity, now],
+    );
+
+    const cov = await getLedgerStatus(db, { addresses: [OWNED] });
+    expect(cov[0]?.integrity).toEqual({ checked_at: 'native-check', drifts: [] });
   });
 });

@@ -19,7 +19,9 @@ const MAX_LIMIT = 200;
 
 export async function listEvents(db: Db, p: ListEventsParams): Promise<ListEventsResult> {
   const addresses = p.scope.addresses.map((a) => a.toLowerCase());
-  if (addresses.length === 0) return { events: [], totalCount: 0 };
+  // totalCount is first-page-only (types.ts): the empty-scope short-circuit must
+  // honour that too, or a cursor page for an empty scope would carry a stale count.
+  if (addresses.length === 0) return p.cursor === undefined ? { events: [], totalCount: 0 } : { events: [] };
   const limit = Math.min(Math.max(1, p.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
 
   // Domain-error boundary: mcp-tools owns full input validation, but guard the one
@@ -52,7 +54,7 @@ export async function listEvents(db: Db, p: ListEventsParams): Promise<ListEvent
 
   const filters: (SQL | undefined)[] = [
     scopeCond, periodCond, kindCond, cpCond, tokenCond, verifiedCond, minCond,
-    chainFilter(p.chainIds),
+    chainFilter(p.scope.chainIds),
   ];
 
   const cursorCond = p.cursor

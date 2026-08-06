@@ -26,7 +26,13 @@ export async function getLedgerStatus(db: Db, p: StatusParams): Promise<WalletCo
         inArray(ingestionCheckpoints.address, addresses),
         p.chainIds && p.chainIds.length > 0 ? inArray(ingestionCheckpoints.chainId, p.chainIds) : undefined,
       ),
-    );
+    )
+    // Deterministic fold order (chainId, address, stream) — without it the
+    // first-wins `w.integrity` pick below depends on Postgres' unspecified row
+    // order and can flip between runs. 'erc20' < 'native' lexically, so within
+    // a (chainId, address) group the erc20 stream's own drift check wins when
+    // both streams have one; native's is used only when erc20's is absent.
+    .orderBy(ingestionCheckpoints.chainId, ingestionCheckpoints.address, ingestionCheckpoints.stream);
 
   // Last ingested block time per (chain, address): max(block_time) over events
   // where the wallet is sender OR recipient, powering the "as of" timestamp.
@@ -78,6 +84,8 @@ export async function getLedgerStatus(db: Db, p: StatusParams): Promise<WalletCo
     w.streams.push(s);
 
     if (c.stream === 'native' && c.txCountHint !== null) hintByKey.set(key, c.txCountHint);
+    // First-wins fold over the ORDER BY (chainId, address, stream) above: the
+    // erc20 stream's own drift check wins over native's when both are present.
     if (c.lastIntegrity !== null && w.integrity === undefined) w.integrity = c.lastIntegrity;
   }
 

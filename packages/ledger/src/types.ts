@@ -88,7 +88,6 @@ export type FlowGroupBy = 'token' | 'counterparty' | 'day' | 'month';
 export interface FlowsParams {
   scope: LedgerScope;
   period: Period;
-  chainIds?: number[];
   direction?: FlowDirection; // default 'both'
   includeUnverified?: boolean; // default false
   restrictTokenIds?: number[]; // internal: narrow to a token-id set (stablecoins)
@@ -133,7 +132,6 @@ export type GasGroupBy = 'wallet' | 'chain' | 'month';
 export interface GasParams {
   scope: LedgerScope;
   period: Period;
-  chainIds?: number[];
   groupBy?: GasGroupBy[]; // default ['chain']; 'chain' is always applied
 }
 
@@ -151,7 +149,6 @@ export interface GasRow {
 export interface ListEventsParams {
   scope: LedgerScope;
   period?: Period;
-  chainIds?: number[];
   tokens?: Array<{ chainId: number; address: string | null }>;
   counterpartyAddress?: string;
   kinds?: EventKind[];
@@ -189,7 +186,6 @@ export interface CounterpartiesParams {
   direction?: FlowDirection;
   topN?: number; // default 20
   includeUnverified?: boolean;
-  chainIds?: number[];
 }
 
 export interface CounterpartyTokenTurnover {
