@@ -477,8 +477,9 @@ input:  { month: string;                                         // '2026-06'
           out_dir?: string }                                     // default: exports volume
 output: { export_id: string;
           files: Array<{ name: string; path: string; sha256: string; rows?: number }>;
-          // balances_opening.csv, balances_closing.csv, transactions.csv, gas.csv,
-          // counterparty_summary.csv, journal_draft.csv, manifest.json
+          // balances_opening_<period>.csv, balances_closing_<period>.csv, transactions_<period>.csv,
+          // gas_<period>.csv, counterparty_summary_<period>.csv, journal_draft_<period>.csv, manifest.json
+          // <period> is `YYYY-MM` for a calendar-month period, else `<start>_<end>` (@reconcil/exporters periodSlug)
           warnings: Warning[] }
 ```
 
@@ -487,8 +488,10 @@ output: { export_id: string;
 **`export_journal_drafts`**
 ```ts
 input:  { period: Period; target: 'qbo' | 'xero'; client_id?: string;
-          account_mapping?: Record<string, string> }             // category -> account code
-output: { export_id: string; file: { name: string; path: string; sha256: string };
+          account_mapping?: Record<string, string> }             // crypto_asset | accounts_receivable |
+                                                                   // accounts_payable | vat_output | vat_input -> account code
+output: { export_id: string;
+          file: { name: string; path: string; sha256: string };  // journal_draft_<target>_<period>_DRAFT.csv
           lines: number; unmapped_categories: string[];
           balanced: true;                                        // by construction: no rounding line; a residue fails the export
           warnings: Warning[] }                                  // ROUNDING_RESIDUE is defensive only — unreachable today

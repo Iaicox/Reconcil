@@ -209,7 +209,7 @@ export async function computeCloseData(ctx: ToolContext, input: CloseDataInput):
   if (eventsTruncated) {
     warnings.push({
       code: 'COVERAGE_INCOMPLETE',
-      message: `transactions.csv was truncated at ${String(events.length)} events; use analytics_list_events to enumerate the full set`,
+      message: `transactions_<period>.csv was truncated at ${String(events.length)} events; use analytics_list_events to enumerate the full set`,
       context: { truncated_events: events.length },
     });
   }

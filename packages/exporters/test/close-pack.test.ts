@@ -44,22 +44,22 @@ describe('renderClosePack — the 7-file close bundle', () => {
   it('emits exactly the 7 contract files in a fixed order', () => {
     const out = renderClosePack(fixture());
     expect(out.files.map((f) => f.name)).toEqual([
-      'balances_opening.csv',
-      'balances_closing.csv',
-      'transactions.csv',
-      'gas.csv',
-      'counterparty_summary.csv',
-      'journal_draft.csv',
+      'balances_opening_2026-06.csv',
+      'balances_closing_2026-06.csv',
+      'transactions_2026-06.csv',
+      'gas_2026-06.csv',
+      'counterparty_summary_2026-06.csv',
+      'journal_draft_2026-06.csv',
       'manifest.json',
     ]);
   });
 
   it('serializes gas and transactions CSVs byte-for-byte', () => {
     const files = byName(renderClosePack(fixture()).files);
-    expect(text(files.get('gas.csv'))).toBe(
+    expect(text(files.get('gas_2026-06.csv'))).toBe(
       'chain_id,native_symbol,native_amount,tx_count,fiat_value,currency\n1,ETH,1,2,2000,USD\n',
     );
-    expect(text(files.get('transactions.csv'))).toBe(
+    expect(text(files.get('transactions_2026-06.csv'))).toBe(
       'chain_id,tx_hash,log_index,block_time,kind,token_symbol,amount,direction,from,to\n' +
         '1,0xtx1,-1,2026-06-10T12:00:00.000Z,native_transfer,ETH,3,out,0xaaa,0xext\n',
     );
@@ -67,7 +67,7 @@ describe('renderClosePack — the 7-file close bundle', () => {
 
   it('renders the expected balanced journal — amounts, signs, no gas double-count (invariant #8)', () => {
     const files = byName(renderClosePack(fixture()).files);
-    const journal = text(files.get('journal_draft.csv'));
+    const journal = text(files.get('journal_draft_2026-06.csv'));
     expect(journal).toContain('DRAFT — REVIEW REQUIRED');
 
     // [date, account, description, debit, credit, currency] — no field here contains a comma.
@@ -106,8 +106,8 @@ describe('renderClosePack — the 7-file close bundle', () => {
 
     // manifest.files lists the 6 CSVs, each hash matching the rendered file
     expect(manifest.files.map((f) => f.name)).toEqual([
-      'balances_opening.csv', 'balances_closing.csv', 'transactions.csv',
-      'gas.csv', 'counterparty_summary.csv', 'journal_draft.csv',
+      'balances_opening_2026-06.csv', 'balances_closing_2026-06.csv', 'transactions_2026-06.csv',
+      'gas_2026-06.csv', 'counterparty_summary_2026-06.csv', 'journal_draft_2026-06.csv',
     ]);
     for (const mf of manifest.files) {
       expect(mf.sha256).toBe(files.get(mf.name)?.sha256);
@@ -120,5 +120,23 @@ describe('renderClosePack — the 7-file close bundle', () => {
     for (const [name, fa] of a) {
       expect(b.get(name)?.sha256).toBe(fa.sha256);
     }
+  });
+
+  describe('filenames', () => {
+    it('are byte-identical (the same 7 names) across repeat renders of the same period', () => {
+      const a = renderClosePack(fixture()).files.map((f) => f.name);
+      const b = renderClosePack(fixture()).files.map((f) => f.name);
+      expect(a).toEqual(b);
+    });
+
+    it('differ between two different periods (manifest.json excepted — it lives under its own export_id dir)', () => {
+      const july = fixture();
+      july.period = { start: '2026-07-01', end: '2026-07-31' };
+      const juneNames = renderClosePack(fixture()).files.map((f) => f.name);
+      const julyNames = renderClosePack(july).files.map((f) => f.name);
+      expect(juneNames).not.toEqual(julyNames);
+      expect(juneNames).toContain('balances_opening_2026-06.csv');
+      expect(julyNames).toContain('balances_opening_2026-07.csv');
+    });
   });
 });

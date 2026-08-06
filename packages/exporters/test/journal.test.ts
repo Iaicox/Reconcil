@@ -32,6 +32,21 @@ describe('buildJournalDraft — Face A minimal draft', () => {
     expect(r.lines).toHaveLength(0);
     expect(r.residue).toBe('0.00');
   });
+
+  it('throws on a negative gasFiat instead of silently sign-flipping', () => {
+    expect(() =>
+      buildJournalDraft({ movements: [], gasFiat: '-50.00' }, 'USD', '2026-06-30'),
+    ).toThrow(/gasFiat/);
+  });
+
+  it('skips an effectively-zero (negative-rounds-to-zero) gasFiat instead of throwing', () => {
+    // roundHalfUp('-0.001', 2) === '-0.00', and isNegative('-0.00') is true — isZero
+    // MUST be checked before isNegative (matching entryLines) or this throws instead
+    // of being skipped like any other zero-valued gas.
+    const r = buildJournalDraft({ movements: [], gasFiat: '-0.001' }, 'USD', '2026-06-30');
+    expect(r.lines).toHaveLength(0);
+    expect(r.residue).toBe('0.00');
+  });
 });
 
 describe('balanceJournal — the balance guarantee (invariant #8)', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { compareDecimals, roundHalfUp } from '../src/index.js';
+import { compareDecimals, isZero, roundHalfUp } from '../src/index.js';
 
 describe('compareDecimals — float-free ordering', () => {
   it('orders decimal strings without a Number() round-trip', () => {
@@ -18,5 +18,21 @@ describe('roundHalfUp — export-boundary rounding', () => {
   it('rounds half-up to the given dp', () => {
     expect(roundHalfUp('500.005', 2)).toBe('500.01');
     expect(roundHalfUp('-6000', 2)).toBe('-6000.00');
+  });
+});
+
+describe('isZero — the export-edge zero test (never `Number(x) !== 0`, money is not `number`)', () => {
+  it('treats both "0.00" and "-0.00" as zero', () => {
+    // This is exactly the case a `Number()` coercion masked at the mcp-tools edge:
+    // `Number("-0.00") !== 0` is also `false`, so behavior did not change — but the
+    // point is the red line (money never through `number`), so both are asserted here.
+    expect(isZero('0.00')).toBe(true);
+    expect(isZero('-0.00')).toBe(true);
+    expect(isZero('0')).toBe(true);
+  });
+
+  it('is false for any non-zero decimal string', () => {
+    expect(isZero('0.01')).toBe(false);
+    expect(isZero('-0.01')).toBe(false);
   });
 });

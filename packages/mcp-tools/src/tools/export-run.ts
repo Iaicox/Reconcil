@@ -11,7 +11,7 @@ import { join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
-import type { RenderedExport } from '@reconcil/exporters';
+import { isZero, type RenderedExport } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
@@ -69,7 +69,7 @@ export async function runExport<T>(
   }
 
   const residueWarnings: Warning[] = rendered.roundingResidues
-    .filter((r) => Number(r.residue) !== 0)
+    .filter((r) => !isZero(r.residue))
     .map((r) => ({
       code: 'ROUNDING_RESIDUE',
       message: `journal rounding residue ${r.residue} ${r.currency}`,

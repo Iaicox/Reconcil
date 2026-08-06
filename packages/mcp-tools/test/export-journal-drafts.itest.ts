@@ -136,7 +136,7 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     expect(env.data.lines).toBe(6); // 3 + 3
     expect(env.data.unmapped_categories).toEqual([]);
     expect(env.data.export_id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(env.data.file.name).toBe('journal_draft_qbo_DRAFT.csv');
+    expect(env.data.file.name).toBe('journal_draft_qbo_2026-06_DRAFT.csv');
 
     // --- file on disk, hash matches, DRAFT + VAT split present, suggested excluded ---
     const buf = await readFile(env.data.file.path);
@@ -172,7 +172,7 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'xero', account_mapping: { crypto_asset: '1010' }, out_dir: outDir });
 
     expect(env.data.unmapped_categories).toEqual(['accounts_receivable', 'vat_output']);
-    expect(env.data.file.name).toBe('journal_draft_xero_DRAFT.csv');
+    expect(env.data.file.name).toBe('journal_draft_xero_2026-06_DRAFT.csv');
   });
 
   it('filters confirmed legs by the settlement block_time period', async () => {

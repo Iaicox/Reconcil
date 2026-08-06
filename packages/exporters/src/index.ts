@@ -14,8 +14,9 @@ export { renderJournalDrafts } from './journal-drafts.js';
 export { buildJournalDraft, balanceJournal, type JournalLine, type JournalResult } from './journal.js';
 export { toCsv, type CsvValue } from './csv.js';
 export { sha256 } from './sha256.js';
-export { roundHalfUp, compareDecimals } from './decimal.js';
+export { roundHalfUp, compareDecimals, isZero } from './decimal.js';
 export { buildManifest, serializeManifest, type ManifestArgs } from './manifest.js';
+export { periodSlug } from './period.js';
 
 export type {
   Currency,

@@ -66,6 +66,13 @@ export function balanceJournal(lines: JournalLine[], currency: string, date: str
   return { lines: out, residue: finalResidue };
 }
 
+/**
+ * Movements go through `absDecimal` + an `isNegative` branch to derive debit/credit
+ * *direction* from the sign of the net flow. Gas has no such direction (it is always
+ * an outflow), so a negative `gasFiat` throws instead: credit notes/reversals are not
+ * modelled yet; when they are, they must flip the entry's sides, not emit a negative
+ * amount.
+ */
 export function buildJournalDraft(input: JournalInput, currency: Currency, date: string): JournalResult {
   const lines: JournalLine[] = [];
 
@@ -87,7 +94,15 @@ export function buildJournalDraft(input: JournalInput, currency: Currency, date:
 
   if (input.gasFiat !== undefined) {
     const gas = roundHalfUp(input.gasFiat, 2);
+    // isZero is checked first, matching entryLines: `roundHalfUp` preserves the sign
+    // of a negative value that rounds to zero (e.g. '-0.001' -> '-0.00', and
+    // isNegative('-0.00') is true), so an effectively-zero gas must be skipped before
+    // the negative check runs, not thrown on. Gas has no direction to sign-flip (see
+    // the docstring above), so a genuinely negative gas throws.
     if (!isZero(gas)) {
+      if (isNegative(gas)) {
+        throw new Error(`journal: gasFiat ${gas} is negative; credit notes/reversals are not modelled yet — they must flip the entry's sides, not emit a negative amount`);
+      }
       lines.push(debitLine(date, ACCOUNT_GAS, 'Gas fees (DRAFT)', gas, currency));
       lines.push(creditLine(date, ACCOUNT_ASSETS, 'Gas fees (DRAFT)', gas, currency));
     }

@@ -72,8 +72,8 @@ describe('export_close_pack — materialization, manifest, tenancy', () => {
     expect(env.data.period).toEqual({ start: '2026-06-01', end: '2026-06-30' });
     expect(env.data.export_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(env.data.files.map((f) => f.name)).toEqual([
-      'balances_opening.csv', 'balances_closing.csv', 'transactions.csv',
-      'gas.csv', 'counterparty_summary.csv', 'journal_draft.csv', 'manifest.json',
+      'balances_opening_2026-06.csv', 'balances_closing_2026-06.csv', 'transactions_2026-06.csv',
+      'gas_2026-06.csv', 'counterparty_summary_2026-06.csv', 'journal_draft_2026-06.csv', 'manifest.json',
     ]);
 
     // --- files exist on disk with matching hashes ---
@@ -95,7 +95,7 @@ describe('export_close_pack — materialization, manifest, tenancy', () => {
     expect(manifest.rounding_residues).toEqual([{ currency: 'USD', residue: '0.00' }]);
 
     // --- journal balances per currency, with the expected amounts ---
-    const journalPath = env.data.files.find((f) => f.name === 'journal_draft.csv')!.path;
+    const journalPath = env.data.files.find((f) => f.name === 'journal_draft_2026-06.csv')!.path;
     const journal = await readFile(journalPath, 'utf8');
     expect(journal).toContain('DRAFT — REVIEW REQUIRED');
     const rows = journal.trimEnd().split('\n').slice(2).map((r) => r.split(',')); // [date,account,desc,debit,credit,ccy]
