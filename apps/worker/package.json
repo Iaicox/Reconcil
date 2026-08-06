@@ -9,7 +9,7 @@
     "build": "tsc -b",
     "typecheck": "tsc -b",
     "lint": "eslint src test",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "dev": "tsx src/main.ts"
   },
   "dependencies": {
