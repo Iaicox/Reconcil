@@ -94,6 +94,13 @@ describe('parseInvoiceCsv — validation and honest row failures', () => {
     expect(drafts).toEqual([]);
     expect(errors[0]).toMatchObject({ row: 1, code: 'INVALID_DATE' });
   });
+
+  it('rejects a format-valid but not-a-real-calendar-date issued_on (H6)', () => {
+    const csv = 'invoice,amount,currency,issued_on\nINV-1,10.00,EUR,2026-02-30';
+    const { drafts, errors } = parseInvoiceCsv(csv);
+    expect(drafts).toEqual([]);
+    expect(errors[0]).toMatchObject({ row: 1, code: 'INVALID_DATE' });
+  });
 });
 
 describe('parseInvoiceCsv — row cap (DoS guard)', () => {
