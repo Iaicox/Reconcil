@@ -9,17 +9,18 @@ import { Queue, Worker } from 'bullmq';
 import { chains, createLogger, serializeError } from '@reconcil/core';
 import { createDb, runMigrations } from '@reconcil/db';
 import {
-  buildProviderBundle, realFetchJson, runAnchor, runBackfillPage, runProbe, runTailTick, type ProcessorDeps,
+  getCheckpoint, realFetchJson, runAnchor, runBackfillPage, runProbe, runTailTick, type ProcessorDeps,
 } from '@reconcil/ingestion';
-import {
-  buildPriceProviderBundle, realFetchJson as realPriceFetchJson, throttled, runPriceFill,
-} from '@reconcil/pricing';
+import { realFetchJson as realPriceFetchJson, throttled, runPriceFill } from '@reconcil/pricing';
+import { runBackfillJob } from './backfill.js';
 import { loadConfig } from './config.js';
+import { registerShutdownHandlers } from './lifecycle.js';
 import { enqueueBackfills, runOnboardScan } from './onboard.js';
+import { buildChainBundle, buildPriceBundle } from './providers.js';
 import {
   ANCHOR_QUEUE, BACKFILL_QUEUE, ONBOARD_QUEUE, ONBOARD_TICK_EVERY_MS, PROBE_QUEUE,
   PRICES_QUEUE, PRICE_TICK_EVERY_MS, TAIL_QUEUE,
-  backoffStrategy, jobOptions, makeConnection,
+  backoffStrategy, dlqJobOptions, makeConnection, tickJobOptions,
 } from './queues.js';
 
 const logger = createLogger({ name: 'worker' });
@@ -43,8 +44,10 @@ async function main(): Promise<void> {
   connection.on('error', (err) => { logger.error('redis connection error', { err: serializeError(err) }); });
   const deps: ProcessorDeps = {
     db,
-    bundleFor: (chainId) =>
-      buildProviderBundle({ chainId, env: process.env, fetchJson: realFetchJson() }),
+    // cfg-derived env (H15 minor) — see providers.ts: buildChainBundle only
+    // reads ETHERSCAN_API_KEY/BASE_RPC_URL off the validated config, not
+    // process.env directly, so loadConfig()'s schema is load-bearing.
+    bundleFor: (chainId) => buildChainBundle(cfg, chainId, realFetchJson()),
     logger,
   };
 
@@ -57,10 +60,9 @@ async function main(): Promise<void> {
 
   // Prices (ADR-007): daily fill of every not-yet-priced (token, date) + ECB FX,
   // idempotent so a re-run/missed tick self-heals. Throttled so a large first fill
-  // doesn't burst public price endpoints into 429s.
-  const priceBundle = buildPriceProviderBundle({
-    env: process.env, fetchJson: throttled(realPriceFetchJson(), 250),
-  });
+  // doesn't burst public price endpoints into 429s. cfg-derived env (H15 minor,
+  // see providers.ts) — same fix as bundleFor above.
+  const priceBundle = buildPriceBundle(cfg, throttled(realPriceFetchJson(), 250));
   const pricesWorker = new Worker(
     PRICES_QUEUE,
     async () => runPriceFill({ db, bundle: priceBundle, logger }),
@@ -69,14 +71,19 @@ async function main(): Promise<void> {
 
   const backfillWorker = new Worker(
     BACKFILL_QUEUE,
-    async (job) => {
-      const res = await runBackfillPage(deps, job.data);
-      // Full page ⇒ enqueue the next window (ADR-008 §3). res.unseenContracts (the
-      // erc20 contracts this page referenced) is unused until the token-resolve
-      // queue lands — it will consume it then.
-      if (res.status === 'backfilling') await backfillQueue.add('page', job.data, jobOptions);
-      return res;
-    },
+    // Full page ⇒ enqueue the next window (ADR-008 §3) — but only when the
+    // checkpoint's last_processed_block actually advanced (H15b stall guard,
+    // see backfill.ts). res.unseenContracts (the erc20 contracts this page
+    // referenced) is unused until the token-resolve queue lands.
+    (job) => runBackfillJob(
+      {
+        runPage: (target) => runBackfillPage(deps, target),
+        getCheckpointBlock: async (target) =>
+          (await getCheckpoint(db, target.chainId, target.address, target.stream))?.lastProcessedBlock,
+      },
+      job.data,
+      backfillQueue,
+    ),
     { connection, concurrency: 5, settings: { backoffStrategy } },
   );
 
@@ -86,9 +93,11 @@ async function main(): Promise<void> {
       // A live tick spanning a >PAGE_LIMIT gap (e.g. a large post-downtime
       // window) flips a stream to 'backfilling'; the status='live' filter would
       // then exclude it from future ticks, so drain it via the backfill queue
-      // (ADR-008 §3). Without this the stream strands silently.
+      // (ADR-008 §3). Without this the stream strands silently. This is the
+      // one-shot handoff (page-1 for that target); the H15b stall guard lives
+      // in backfillWorker's own re-enqueue, above.
       const backfilling = await runTailTick(deps, job.data);
-      for (const target of backfilling) await backfillQueue.add('page', target, jobOptions);
+      for (const target of backfilling) await backfillQueue.add('page', target, dlqJobOptions);
     },
     { connection, concurrency: chains.length, settings: { backoffStrategy } },
   );
@@ -135,14 +144,17 @@ async function main(): Promise<void> {
   }
 
   // Repeatable tail tick per chain (Redis loss recovers on boot — ADR-008).
+  // tickJobOptions (H15a): a repeating tick that fails just re-runs next
+  // interval — no unique work is lost the way a backfill page's would be — so
+  // its retention is bounded rather than kept forever.
   for (const chain of chains) {
     await tailQueue.add('tick', { chainId: chain.chainId },
-      { ...jobOptions, repeat: { every: chain.pollIntervalSec * 1000 }, jobId: `tail-${String(chain.chainId)}` });
+      { ...tickJobOptions, repeat: { every: chain.pollIntervalSec * 1000 }, jobId: `tail-${String(chain.chainId)}` });
   }
   // Daily price fill (ADR-007) — one repeatable tick, idempotent per run.
-  await pricesQueue.add('fill', {}, { ...jobOptions, repeat: { every: PRICE_TICK_EVERY_MS }, jobId: 'prices-fill' });
+  await pricesQueue.add('fill', {}, { ...tickJobOptions, repeat: { every: PRICE_TICK_EVERY_MS }, jobId: 'prices-fill' });
   // Onboarding scan — one repeatable tick; idempotent (backfill jobId dedup).
-  await onboardQueue.add('scan', {}, { ...jobOptions, repeat: { every: ONBOARD_TICK_EVERY_MS }, jobId: 'onboard-scan' });
+  await onboardQueue.add('scan', {}, { ...tickJobOptions, repeat: { every: ONBOARD_TICK_EVERY_MS }, jobId: 'onboard-scan' });
   logger.info('worker up', { chains: chains.map((c) => c.chainId) });
 
   let shuttingDown = false;
@@ -175,9 +187,10 @@ async function main(): Promise<void> {
       process.exit(1);
     }
   };
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, () => { void shutdown(signal); });
-  }
+  // SIGINT/SIGTERM run the graceful shutdown above; an unhandled rejection
+  // outside the BullMQ/pg/Redis 'error' channels means unknown state, so it
+  // gets the same shutdown path, not just a log line (see lifecycle.ts).
+  registerShutdownHandlers(logger, shutdown);
 }
 
 main().catch((err: unknown) => {
