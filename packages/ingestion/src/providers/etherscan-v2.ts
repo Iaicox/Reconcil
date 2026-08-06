@@ -36,7 +36,10 @@ const txRow = z.object({
 // (the parent tx's fee already covers it). `to` is '' for internal contract creations.
 // The parent-tx hash key differs by provider — Etherscan V2 sends `hash`, Blockscout's
 // etherscan-compat shim sends `transactionHash` (verified at capture, spec §7) — so
-// accept either and coalesce in mapInternalRows.
+// accept either and coalesce in mapInternalRows. Same story for the trace's position
+// inside its parent tx: Etherscan `traceId` ("0_1"), Blockscout `index` ("67") — kept
+// as free-form text (not decQuantity: the dotted form is not a number) because it is
+// only ever an ordering key inside normalize(), never arithmetic and never wire-bound.
 const internalRow = z
   .object({
     blockNumber: decQuantity,
@@ -47,6 +50,8 @@ const internalRow = z
     to: z.string(),
     value: decQuantity,
     isError: z.enum(['0', '1']),
+    traceId: z.string().optional(),
+    index: z.string().optional(),
   })
   .refine((r) => r.hash !== undefined || r.transactionHash !== undefined, 'missing parent tx hash');
 
@@ -110,6 +115,8 @@ export function mapInternalRows(rows: z.infer<typeof internalRow>[]): RawInterna
     to: r.to === '' ? null : r.to,
     value: r.value,
     isError: r.isError,
+    // Whichever of the two the provider sent (see internalRow); '' counts as absent.
+    traceId: (r.traceId ?? r.index) || undefined,
   }));
 }
 

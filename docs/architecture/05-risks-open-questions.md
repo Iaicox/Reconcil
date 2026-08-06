@@ -27,17 +27,20 @@ tool set (restore in week 6) rather than compressing evals.
 
 ### R3 — Ledger completeness vs. reality (medium, critical for trust)
 
-Known MVP gaps: internal (trace-level) ETH transfers (e.g., withdrawals from contracts,
-DEX refunds) are invisible; Safe/multisig wallets and contract accounts are out; OP-stack
-L1 fees need the receipts strategy. An accountant who catches one wrong balance never
-returns.
+Known MVP gaps: Safe/multisig wallets and contract accounts are out; OP-stack L1 fees
+need the receipts strategy. An accountant who catches one wrong balance never returns.
+Internal (trace-level) ETH transfers (withdrawals from contracts, DEX refunds) were the
+headline gap and are now **ingested**: the worker's `native` stream pulls
+`txlistinternal` alongside `txlist` (ADR-005 d2, 03-ingestion.md §3), and the
+golden-wallet balance reconciles to `eth_get_balance` to the wei through the production
+processor.
 **Mitigations:** the integrity job diff-checks computed balances against provider
 balances and *tells the user* when they drift (`ledger_status`, warnings); coverage
 warnings are contractual (C5); a "supported wallet types" doc states EOA-only MVP;
-the `log_index` sentinel space already reserves room for internal transfers, and
-Etherscan's `txlistinternal` makes them a post-gate stream, not a redesign. The
-provider-vs-computed reconciliation test itself is specced in `04-testing.md` §2, deferred to the
-evals slice and gated on the erc20/receipts capture.
+the `log_index` sentinel space held room for internal transfers, and Etherscan's
+`txlistinternal` made them a stream rather than a redesign — as shipped. The
+provider-vs-computed reconciliation test itself is specced in `04-testing.md` §2, and is
+green for native+gas+internal on chain 1 (erc20 still gated on the receipts capture).
 **Positioning:** honesty-as-feature — the tool says when it cannot be trusted, unlike a
 spreadsheet.
 

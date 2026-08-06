@@ -81,7 +81,7 @@ balances, which write one event per token under a single synthetic
 | −1 | `native_transfer` | Top-level ETH value transfer of the tx |
 | −2 | `gas_fee` | Synthesized fee event (see below) |
 | −3 | `opening_balance` | Anchored-backfill baseline (synthetic `tx_hash = 'anchor:<addr>:<block>'`) |
-| −(1000+n) | *(reserved)* | Future internal (trace-level) transfers, n = trace ordinal |
+| −(1000+n) | `native_transfer` | Internal (trace-level) transfer from `txlistinternal`; n = the trace's stable rank within its parent tx (ADR-005 d2) |
 
 **Gas is an event, not a column.** For every tx where a tracked address is the sender, the
 normalizer emits `gas_fee` (`from = payer`, `to = 0x0`, `amount_raw = total fee in wei`).

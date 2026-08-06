@@ -61,11 +61,13 @@ describe('paging endpoints (shared etherscan-compatible shape)', () => {
     expect(new URL(calls[0] ?? '').searchParams.get('action')).toBe('tokentx');
   });
 
-  it('getInternalTxs uses action=txlistinternal and maps rows, reading Blockscout\'s transactionHash', async () => {
+  it('getInternalTxs uses action=txlistinternal and maps rows, reading Blockscout\'s transactionHash and `index`', async () => {
     // Real Blockscout etherscan-compat shape (verified at capture): the parent tx key
-    // is `transactionHash` (Etherscan uses `hash`), and `index`/`callType`/gas fields
-    // are dropped. `status:"2"` ("some internal txs not yet processed") still returns
-    // the result rows — treated like any non-"0" status by the shared envelope.
+    // is `transactionHash` (Etherscan uses `hash`), the trace's position is `index`
+    // (Etherscan uses `traceId`) and maps onto RawInternalTx.traceId, and `callType`/
+    // gas fields are dropped. `status:"2"` ("some internal txs not yet processed")
+    // still returns the result rows — treated like any non-"0" status by the shared
+    // envelope.
     const { transport, calls } = stub({
       status: '2',
       message: 'Some internal transactions within this block range have not yet been processed',
@@ -75,7 +77,7 @@ describe('paging endpoints (shared etherscan-compatible shape)', () => {
           transactionHash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
           from: '0xDEF0000000000000000000000000000000000002', to: Q.address,
           value: '3000000000000000000', contractAddress: '', input: '', type: 'call',
-          gas: '2300', gasUsed: '0', index: '0', callType: 'call', isError: '0', errCode: '',
+          gas: '2300', gasUsed: '0', index: '7', callType: 'call', isError: '0', errCode: '',
         },
       ],
     });
@@ -86,7 +88,7 @@ describe('paging endpoints (shared etherscan-compatible shape)', () => {
         blockNumber: '19000005', timeStamp: '1700000500',
         hash: '0xCCC3000000000000000000000000000000000000000000000000000000000003',
         from: '0xDEF0000000000000000000000000000000000002', to: Q.address,
-        value: '3000000000000000000', isError: '0',
+        value: '3000000000000000000', isError: '0', traceId: '7',
       },
     ]);
   });
