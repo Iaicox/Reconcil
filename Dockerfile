@@ -18,5 +18,17 @@ FROM node:22-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=builder /app /app
+# NOTE: still ships sources + devDependencies from the builder stage (see the
+# `pnpm prune --prod` note above) — a full prod-slim rebuild (`--prod` install
+# / dist-only copy) is a deliberately deferred separate slice; this is just the
+# non-root user fix.
+# node:22-slim ships a pre-created `node` user (uid 1000). `/app` is root-owned
+# from the COPY above (world-readable, so `node` can still read + exec it); the
+# one path either command writes to at runtime is the exports dir (close-pack /
+# PDF / journal-drafts tools, RECONCIL_EXPORT_DIR default `./exports` — gitignored,
+# so it does not exist in the builder stage), which must be pre-created and
+# owned by `node` so the bind/named volume mount inherits that ownership.
+RUN mkdir -p /app/exports && chown node:node /app/exports
+USER node
 EXPOSE 8484
 CMD ["node", "apps/mcp-server/dist/http.js"]
