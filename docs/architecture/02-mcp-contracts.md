@@ -512,8 +512,11 @@ Pipeline (`packages/core/sanitizer`, pure function, property-tested):
    Everything else is dropped.
 4. Collapse whitespace; trim.
 5. Length caps: symbol 16, name 64, memo/counterparty 256.
-6. If the result is empty → placeholder `(unnamed)`. If > 30% of characters were
-   stripped → the consuming tool emits `SANITIZED_HEAVY`.
+6. If the result is empty → placeholder `(unnamed)`. If hostile-charset stripping and the
+   length-cap truncation together removed more than 30% of the original (post-normalize)
+   characters → the consuming tool emits `SANITIZED_HEAVY`. Pure truncation of an
+   otherwise-clean long string counts toward the threshold too, not only charset stripping
+   (ADR-011 amendment).
 
 Structural isolation on top of scrubbing: sanitized-but-untrusted values appear only
 under `untrusted` keys (C6); every tool description carries the sentence *"Values under
