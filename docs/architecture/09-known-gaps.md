@@ -94,12 +94,18 @@ becomes load-bearing for some future audit surface. Where:
 `packages/ingestion/src/{processors/ingest.ts,providers/provider-factory.ts}`, on
 `feat/internal-transfers`. *(Task 7, `feat/internal-transfers`)*
 
-**No test for `status='live'` with zero net advance; `getCheckpointBlock`'s `undefined`
-branch is untested.** Why deferred: the early-return path is believed correct by code
+**No test for `status='live'` with zero net advance.** The early-return path (a stream
+that is already caught up and advances zero blocks this tick) is believed correct by code
 inspection but isn't pinned by a test. Trigger: pin it the next time `apps/worker/src/
 main.ts`'s checkpoint-status logic changes for an unrelated reason (cheap to add
 alongside any other edit there). Where: `apps/worker/src/main.ts`. *(Task 12,
 `fix/worker-queues`)*
+
+**`getCheckpointBlock`'s `undefined` branch is untested.** A second, separate coverage
+gap in the same status logic (checkpoint lookup returning nothing for a stream) noted
+alongside the `status='live'` gap above but exercising a different code path. Trigger:
+same as above — pin alongside the next unrelated edit to that logic. Where:
+`apps/worker/src/main.ts` (`getCheckpointBlock`). *(Task 12, `fix/worker-queues`)*
 
 ## Ledger
 
@@ -119,12 +125,18 @@ directly. Trigger: next edit to `packages/ledger/src/types.ts` or `scope-sql.ts`
 scope-sql.ts` (`periodRange`/`timeBetween`, the half-open conversion). *(Task 8,
 `fix/ledger-status-scope`)*
 
-**No named integration test for gas-only-wallet stream freshness; `as_of ≡ fold`
-oracle-parity has a pre-existing gap.** A wallet with only gas activity (no token/native
-transfers) exercises a freshness code path that isn't independently pinned, and the
-`as_of`-equals-full-fold parity check has always had this gap (not introduced by this
-arc). Trigger: add the missing case the next time `ledger_status` freshness logic changes.
-Where: `packages/ledger/test/ledger.itest.ts`. *(Task 8, `fix/ledger-status-scope`)*
+**No named integration test for gas-only-wallet stream freshness.** A wallet with only
+gas activity (no token/native transfers) exercises a freshness code path that isn't
+independently pinned by its own test case. Trigger: add the missing case the next time
+`ledger_status` freshness logic changes. Where: `packages/ledger/test/ledger.itest.ts`.
+*(Task 8, `fix/ledger-status-scope`)*
+
+**`as_of ≡ fold` oracle-parity check has a pre-existing gap.** A second, distinct
+coverage gap noted alongside the one above: the check that an `as_of`-scoped read equals
+a full fold of events up to that point has always had this gap — not introduced by this
+arc, just observed while working in the area. Trigger: close it as part of any future
+freshness/fold-correctness hardening pass. Where: `packages/ledger/test/ledger.itest.ts`.
+*(Task 8, `fix/ledger-status-scope`)*
 
 ## Pricing
 
@@ -208,10 +220,15 @@ general "no bare `in` on untrusted or dynamic objects" lint pass if one is ever 
 Where: `packages/mcp-tools/src/recon/status-repo.ts` (`mapStatusCounts`, on
 `fix/face-b-envelope`). *(Task 10, `fix/face-b-envelope`)*
 
-**No integration test for mixed volatile+stablecoin journal ref-coverage, shared-snapshot
-dedup, or a journal-path `fx_refs` cross-currency case.** Coverage gap, not a known bug.
-Trigger: add before journal drafts are extended to a currency mix beyond what's tested
-today. Where: `packages/mcp-tools/test/export-journal-drafts.itest.ts`. *(Task 10,
+**No integration test for mixed volatile+stablecoin journal ref-coverage or
+shared-snapshot dedup.** Coverage gap, not a known bug. Trigger: add before journal
+drafts are extended to a currency mix beyond what's tested today. Where:
+`packages/mcp-tools/test/export-journal-drafts.itest.ts`. *(Task 10, `fix/face-b-envelope`)*
+
+**No journal-path `fx_refs` cross-currency integration test.** A second, distinct
+coverage gap noted alongside the one above: a journal draft that actually needs FX
+conversion (not just price refs) across currencies has no dedicated itest. Trigger: same
+as above. Where: `packages/mcp-tools/test/export-journal-drafts.itest.ts`. *(Task 10,
 `fix/face-b-envelope`)*
 
 **`export-journal-drafts.ts`'s edit in the exporters-hardening slice slightly exceeds the
@@ -357,6 +374,23 @@ deployment concern; pin the base image tag whenever the next `node:22` → `node
 bump is planned rather than floating into it silently. Where: `Dockerfile`. *(Task 15,
 `chore/supply-chain-config`)*
 
+**`site`'s `next lint` script emits a deprecation warning on every run.** A second,
+unrelated fact bundled into the same ledger line as the Dockerfile item above (both were
+loose ends noticed during the supply-chain slice, not two aspects of one problem):
+`site/package.json`'s `lint` script (`next lint`, wrapping `eslint@^8.57.0` +
+`eslint-config-next@^15.1.0` via the legacy `site/.eslintrc.json` config) is deprecated by
+Next.js 15 in favor of running ESLint directly, and this slice's own change
+(`"test": "npm run lint && npm run build && playwright test"`) made that warning fire on
+every `site` test run instead of only on an explicit `lint` invocation. Why deferred:
+migrating off `next lint` means either bumping to ESLint 9's flat-config format (a
+`site`-wide dependency bump: `eslint`, `eslint-config-next`, and rewriting
+`.eslintrc.json` as `eslint.config.js`) or pulling in `@next/eslint-plugin-next` directly
+— both larger changes than this slice's supply-chain-guard scope. Trigger: the `site`
+dependency bump that this slice's own note anticipates, or when Next.js actually removes
+`next lint` (not just deprecates it) and the script starts failing outright. Where:
+`site/package.json` (`"lint": "next lint"`, `"test"`), `site/.eslintrc.json`. *(Task 15,
+`chore/supply-chain-config`)*
+
 **The root workspace keeps a `@reconcil/ingestion` devDependency, weakening
 dependency-cruiser's `not-to-unresolvable` rule.** `scripts/capture-internal-txs.ts` — a
 root-level script, not a package — genuinely imports `@reconcil/ingestion`, so the
@@ -372,27 +406,47 @@ explicitly carried to this slice)*
 
 ## Reconciling the count
 
-This register holds **40 entries**. The source ledger
+This register holds **44 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
-15–17) — 32 raw ledger lines in total. The reconciliation from 32 lines to 40 entries:
+15–17) — 32 raw ledger lines in total. The reconciliation from 32 lines to 44 entries:
 
 - **−1**: Task 17's variant-phrased line (`minor (deferred → fold into PR-18)`, the
   `SANITIZED_HEAVY` contract-doc drift) is not a register entry — it was a direct doc fix
-  under this same slice's requirement 1 (`02-mcp-contracts.md` §7,
-  `guide/05-operations.md`; the underlying rule change is instead recorded as an ADR-011
-  amendment).
+  under this same slice's requirement 1 (`02-mcp-contracts.md` §7 and its `WarningCode`
+  comment, `guide/05-operations.md`; the underlying rule change is instead recorded as an
+  ADR-011 amendment).
 - **+5**: Task 7's single ledger line bundles six technically unrelated items across at
   least four different files (`etherscan-v2.ts`, `normalize.ts` ×2, `03-ingestion.md`,
   `{paging,processors/ingest,providers/etherscan-v2,types}.ts`,
   `{processors/ingest,providers/provider-factory}.ts`) — split into six entries above so
   each has its own traceable file/symbol, per this document's own citation requirement.
   Net effect of unbundling one line into six: **+5**.
+- **+4**: four *separate-subject* bundled lines were each split into two entries after a
+  full re-audit of every ledger line against this document (see below) — Task 8's
+  gas-only-wallet-itest / `as_of≡fold` line, Task 10's journal-ref-coverage /
+  `fx_refs`-cross-currency line, Task 12's `status='live'` / `getCheckpointBlock` line,
+  and Task 15's Dockerfile / `next lint` line. Net effect of splitting four one-entry
+  lines into two entries each: **+4**.
 - **+4**: four entries are tagged *(sweep)* — not on the progress.md ledger at all.
   These are the items this slice's own brief called out by name (`unmatched_settlements`,
   API-key `last_used_at`, `numberToDecimalString` precision, the subset-search top-6
   pool) and confirmed by inspecting the shipped code and the ADR-010 amendment; they were
   judged in-arc but recorded in-code/in-ADR rather than on the task ledger.
 
-32 − 1 + 5 + 4 = **40**, matching this document.
+32 − 1 + 5 + 4 + 4 = **44**, matching this document.
+
+**Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
+unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation
+warning) under one Docker-image entry, dropping the second fact from the register
+entirely. Every one of the 32 raw ledger lines was then re-read against this register,
+clause by clause, checking whether each semicolon- or conjunction-joined clause names a
+genuinely separate fact (different file/symbol, independently actionable) versus mere
+elaboration of the same fact (a parenthetical reason, an impact statement, a
+"why deferred" aside). Four lines besides Task 7's were found to bundle two independently
+actionable facts and were split (listed above); the rest — including lines that read as
+borderline (e.g. Task 9's `score.ts` rescale-branch line, Task 11's `http.ts` shutdown /
+hijacked-SSE line) — were re-confirmed as one coherent finding each: their clauses share
+one file/symbol and one trigger, and in the `http.ts` case the arc's own brief bundles
+them as a single load-bearing item too. No further missing facts were found.

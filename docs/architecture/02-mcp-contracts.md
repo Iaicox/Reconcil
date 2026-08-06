@@ -76,7 +76,7 @@ type WarningCode =
   | 'UNVERIFIED_EXCLUDED'   // spam-filtered tokens were omitted (default)
   | 'PRICE_MISSING'         // no snapshot for (token, date); value omitted, not guessed
   | 'FX_DATE_SHIFTED'       // weekend/holiday: previous ECB rate used
-  | 'SANITIZED_HEAVY'       // >30% of an untrusted string was stripped
+  | 'SANITIZED_HEAVY'       // >30% of an untrusted string lost to charset-stripping and/or truncation
   | 'ROUNDING_RESIDUE';     // non-zero journal rounding residue recorded on an export (defensive — unreachable today)
 ```
 
