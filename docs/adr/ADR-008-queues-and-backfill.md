@@ -56,3 +56,26 @@ so the write tool cannot make a synchronous provider call. `suggests_anchored` t
 surfaces on **`ledger_status`** (the estimate is stored on the wallet's native checkpoint),
 not in the write tool's response — the HITL decision point is unchanged (02-mcp-contracts
 §6.2). Anchored seeding enters the `anchoring` state directly rather than via `queued`.
+
+*Amendment (2026-08-06, anchor-too-recent guard — H8):* `runAnchor` resolves `anchor_from`
+to a block via `getBlockByTime`, then previously clamped it to `safeHead` when the
+resolved block fell inside the reorg-unsafe tip (`resolved > safeHead`). That clamp fetched
+the provider-attested balance *at safeHead* but stamped the `opening_balance` event's
+`block_time` at midnight-of-anchor-date — a block/time pair that no longer describes the
+same instant, breaking the monotonicity `ledger/src/as-of.ts` assumes, and silently pulling
+every deposit between the requested date and safeHead into the "as of anchor date" balance.
+`runAnchor` now throws `AnchorTooRecentError` (`packages/ingestion/src/types.ts`) instead of
+clamping — `block_number`/`block_time` on `opening_balance` rows stay mutually consistent by
+construction (no clamped write is ever produced).
+
+This decision does **not** extend to a synchronous rejection in `ledger_track_wallet`: per
+the amendment above, the write tool cannot make a synchronous provider call, and anchor
+resolution (`getBlockByTime`) only happens later, worker-side, in the asynchronous `anchor`
+job — there is no request/response call stack connecting the two. `AnchorTooRecentError`
+therefore surfaces the same way every other `runAnchor`/`ingestOnce` processor failure does
+today: a failed BullMQ job (exponential backoff, DLQ after 8 attempts, `serializeError`d in
+the worker logs). Nothing yet writes the checkpoint to `status: 'error'` on a processor
+failure — that general error-surfacing gap is pre-existing and already tracked as a
+follow-up (see the failure-path note in `apps/worker/src/onboard.ts`); wiring `ledger_status`
+to reflect a stuck `anchoring` checkpoint (retried date resolving too recent every attempt)
+is deferred to that same slice rather than solved ad hoc for this one error.
