@@ -9,16 +9,17 @@ import { createDb, type Db } from '@reconcil/db';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
 
-import { hashKey, parseBearerToken, resolveTenantByBearer } from './auth.js';
+import { parseBearerToken, resolveTenantByBearer } from './auth.js';
 import { DEFAULT_PORT, loadConfig, resolveAllowedHosts } from './config.js';
 import { createServer } from './server.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
     /**
-     * Set by the /mcp preHandler once bearer auth succeeds (§3 restructure). The
-     * rate limiter's keyGenerator runs at the earlier `onRequest` hook and reads
-     * the raw Authorization header itself — it does not depend on this.
+     * Set by the /mcp preHandler once bearer auth succeeds (§3 restructure). Layer
+     * 1's IP-keyed rate limit runs at the earlier `onRequest` hook and never reads
+     * this; layer 2's tenant-keyed fairness bucket runs from inside the preHandler,
+     * immediately after this is set, and does depend on it (see `tenantRateLimitKey`).
      */
     tenantId?: string;
   }
@@ -32,28 +33,56 @@ async function bearerTenant(db: Db, header: string | undefined): Promise<string 
 }
 
 /**
- * Rate-limit bucket key (minor: per-IP behind an untrusted proxy shared every
- * tenant's bucket). Keyed by the presented bearer token's *hash* — not the raw
- * token (never bucket on secret material) and not the DB-resolved tenant (the
- * limiter's `onRequest` hook runs before the auth preHandler; resolving the
- * tenant here would mean a second DB round-trip ahead of auth, for every
- * request, valid or not). A missing/malformed Authorization header falls back
- * to the IP, so unauthenticated abuse — including the 401s it draws — still
- * lands in one bucket per source.
+ * Two-layer rate limiting (fix for a Critical review finding: keying the single
+ * former layer on the *presented* token's hash let an attacker rotate a fresh
+ * garbage `Authorization: Bearer <garbage-N>` per request and land in a brand-new
+ * bucket every time — the 429 never tripped, and every request still reached
+ * authPreHandler's live `resolveTenantByBearer` DB SELECT: unbounded 401 + DB-query
+ * amplification per IP, strictly weaker than the plain per-IP default this replaced).
+ *
+ * Layer 1 — IP backstop (`ipRateLimitKey`, below): the automatic per-route hook, at
+ * the plugin's default `onRequest` stage — before the auth preHandler runs, before
+ * any DB work. Keyed on `request.ip` alone, so no Authorization header value (valid,
+ * invalid, or absent) changes which bucket a request lands in. Generous ceiling
+ * (600/min default) so it doesn't punish a legitimately busy tenant; it exists only
+ * to cap the *worst case* per source, and nothing short of a new source IP escapes it.
+ *
+ * Layer 2 — tenant fairness bucket (`tenantRateLimitKey` + `checkTenantRateLimit`,
+ * used from `authPreHandler`): only reached once `authenticate()` has resolved a
+ * REAL tenant from a DB-verified key — an attacker with no valid key never occupies
+ * or exhausts this bucket, however many requests they send. Built via
+ * `@fastify/rate-limit`'s own `createRateLimit` escape hatch (its documented way to
+ * run a check outside the automatic per-route hook, so it can run mid-preHandler
+ * after auth instead of only at onRequest) with its own store/bucket namespace, kept
+ * at the original 120/min fairness policy.
  */
-function rateLimitKey(request: FastifyRequest): string {
-  const token = parseBearerToken(request.headers.authorization);
-  return token !== null ? `token:${hashKey(token)}` : `ip:${request.ip}`;
+function ipRateLimitKey(request: FastifyRequest): string {
+  return `ip:${request.ip}`;
 }
 
-const UNAUTHORIZED_BODY = { error: 'unauthorized' } as const;
+/** Only ever read after authPreHandler has just set `request.tenantId` from a
+ * DB-verified key — never from an unvalidated presented token. */
+function tenantRateLimitKey(request: FastifyRequest): string {
+  return `tenant:${request.tenantId ?? 'unresolved'}`;
+}
 
-/** Fastify preHandler: resolves the bearer tenant and stores it on `request`, or
- * answers 401 and short-circuits the route (Fastify does not call the handler
- * once a preHandler has sent a reply). Extracted from the route so the rate
- * limiter's keyGenerator (above) can run first without waiting on this. */
+/** Return type of `@fastify/rate-limit`'s `createRateLimit(options)` factory
+ * (types/index.d.ts) — a standalone checker callable outside the automatic
+ * per-route hook, used here from inside authPreHandler for layer 2. */
+type TenantRateLimiter = ReturnType<FastifyInstance['createRateLimit']>;
+
+const UNAUTHORIZED_BODY = { error: 'unauthorized' } as const;
+const RATE_LIMITED_BODY = { error: 'rate_limited' } as const;
+
+/** Fastify preHandler: resolves the bearer tenant and stores it on `request`, then
+ * applies the layer-2 tenant fairness bucket (only reachable with a resolved
+ * tenant — see the block comment above); answers 401/429 and short-circuits the
+ * route on failure (Fastify does not call the handler once a preHandler has sent a
+ * reply). Auth extracted from the route so layer 1's keyGenerator can run first
+ * without waiting on this. */
 function authPreHandler(
   authenticate: (authorization: string | undefined) => Promise<string | null>,
+  checkTenantRateLimit: TenantRateLimiter,
 ) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const tenantId = await authenticate(request.headers.authorization);
@@ -63,6 +92,24 @@ function authPreHandler(
       return;
     }
     request.tenantId = tenantId;
+
+    // `checkTenantRateLimit`'s `isAllowed` flag is misleading by itself: per the
+    // plugin's own applyRateLimit (index.js), it is `true` ONLY on the allowList
+    // bypass path (unused here) and unconditionally `false` on every normal
+    // counted call — the actual "is this request over budget" signal is
+    // `isExceeded` (current > max), which is only present on that `false` branch.
+    // This mirrors the plugin's own automatic-hook logic (rateLimitRequestHandler):
+    // isAllowed → let through; else look at isExceeded before deciding to block.
+    const limit = await checkTenantRateLimit(request);
+    if (!limit.isAllowed && limit.isExceeded) {
+      await reply
+        .code(429)
+        .header('x-ratelimit-limit', limit.max)
+        .header('x-ratelimit-remaining', limit.remaining)
+        .header('x-ratelimit-reset', limit.ttlInSeconds)
+        .header('retry-after', limit.ttlInSeconds)
+        .send(RATE_LIMITED_BODY);
+    }
   };
 }
 
@@ -108,9 +155,14 @@ export interface HttpDeps {
    * compose-service-name forms at DEFAULT_PORT — production always passes the
    * real one via config.ts `resolveAllowedHosts(cfg)`. */
   allowedHosts?: string[];
-  /** /mcp per-route rate-limit policy; defaults to the production 120/min.
-   * Overridable so tests can trip the limiter deterministically. */
-  rateLimit?: { max: number; timeWindow: string };
+  /** Layer 1: IP-keyed hard ceiling on every /mcp request (valid credential, invalid,
+   * or absent — see the block comment above `ipRateLimitKey`). Defaults to the
+   * production 600/min. Overridable so tests can trip it deterministically. */
+  ipRateLimit?: { max: number; timeWindow: string };
+  /** Layer 2: per-authenticated-tenant fairness bucket, only reachable with a
+   * DB-verified key (see `tenantRateLimitKey`). Defaults to the production 120/min
+   * (the original single-layer policy). Overridable for tests. */
+  tenantRateLimit?: { max: number; timeWindow: string };
 }
 
 /**
@@ -124,19 +176,32 @@ export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   const { db, logger } = deps;
   const authenticate = deps.authenticate ?? ((h) => bearerTenant(db, h));
   const allowedHosts = deps.allowedHosts ?? resolveAllowedHosts({ PORT: DEFAULT_PORT });
-  const rateLimitPolicy = deps.rateLimit ?? { max: 120, timeWindow: '1 minute' };
+  const ipRateLimitPolicy = deps.ipRateLimit ?? { max: 600, timeWindow: '1 minute' };
+  const tenantRateLimitPolicy = deps.tenantRateLimit ?? { max: 120, timeWindow: '1 minute' };
   const app = Fastify({ logger: true });
 
   // Rate-limit the authenticated /mcp route (in-memory; CodeQL js/missing-rate-limiting).
   // global:false → only opted-in routes are limited, so /healthz stays unlimited. Awaited
-  // before the route is defined so the plugin's onRoute hook sees its per-route config.
+  // before the route is defined so the plugin's onRoute hook sees its per-route config,
+  // and so createRateLimit (layer 2, below) is available to decorate off of.
   await app.register(rateLimit, { global: false });
+
+  // Layer 2's standalone checker (block comment above authPreHandler) — its own
+  // bucket namespace via createRateLimit's `.child(...)` store, independent of
+  // layer 1's per-route store below.
+  const checkTenantRateLimit = app.createRateLimit({
+    max: tenantRateLimitPolicy.max,
+    timeWindow: tenantRateLimitPolicy.timeWindow,
+    keyGenerator: tenantRateLimitKey,
+  });
 
   app.get('/healthz', () => ({ status: 'ok' }));
 
   app.all('/mcp', {
-    config: { rateLimit: { ...rateLimitPolicy, keyGenerator: rateLimitKey } },
-    preHandler: authPreHandler(authenticate),
+    // Layer 1 (IP backstop): the automatic per-route hook, at the plugin's default
+    // onRequest stage — runs before the preHandler below, before any DB work.
+    config: { rateLimit: { ...ipRateLimitPolicy, keyGenerator: ipRateLimitKey } },
+    preHandler: authPreHandler(authenticate, checkTenantRateLimit),
   }, async (request, reply) => {
     const { tenantId } = request;
     if (tenantId === undefined) {

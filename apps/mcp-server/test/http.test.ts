@@ -163,37 +163,39 @@ describe('buildHttpApp — DNS-rebinding Host validation (minor, defense-in-dept
   });
 });
 
-describe('buildHttpApp — rate-limit key = presented bearer token hash (minor)', () => {
-  it('two different bearer tokens from the same IP get independent buckets', async () => {
+describe('buildHttpApp — two-layer rate limit (Critical fix: IP backstop + tenant fairness bucket)', () => {
+  // Layer 1 — IP backstop. Keyed on request.ip alone: rotating the *presented*
+  // token (even to something that never authenticates) cannot land a request in a
+  // fresh bucket, unlike the pre-fix design this replaces (which keyed on the
+  // presented token's hash and let exactly this rotation escape rate limiting
+  // entirely while still hitting the DB per request via authPreHandler).
+  it('rotating distinct INVALID bearer tokens from one IP still hits the IP backstop (429)', async () => {
     const app = await buildHttpApp({
       db: {} as unknown as Db,
       logger: silentLogger,
-      authenticate: () => Promise.resolve(null), // irrelevant here: the limiter keys on the raw token, pre-auth
-      rateLimit: { max: 1, timeWindow: '1 minute' },
+      authenticate: () => Promise.resolve(null), // every presented token is invalid
+      ipRateLimit: { max: 1, timeWindow: '1 minute' },
     });
-    const withToken = (token: string) => app.inject({
+    const withGarbageToken = (token: string) => app.inject({
       method: 'POST',
       url: '/mcp',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
       payload: rpc,
     });
 
-    const a1 = await withToken('token-a');
-    expect(a1.statusCode).toBe(401); // consumes token-a's one-request allowance
-    const a2 = await withToken('token-a');
-    expect(a2.statusCode).toBe(429); // same key → limit exceeded
-
-    const b1 = await withToken('token-b');
-    expect(b1.statusCode).toBe(401); // independent bucket — not exhausted by token-a's traffic
+    const r1 = await withGarbageToken('garbage-1');
+    expect(r1.statusCode).toBe(401); // consumes the IP bucket's one-request allowance
+    const r2 = await withGarbageToken('garbage-2'); // a DIFFERENT token, same IP
+    expect(r2.statusCode).toBe(429); // IP backstop trips regardless — no bucket to escape into
     await app.close();
   });
 
-  it('unauthenticated requests are keyed by IP — the 401 they draw still counts against that bucket', async () => {
+  it('no-auth requests are keyed by IP — the 401 they draw still counts against that bucket', async () => {
     const app = await buildHttpApp({
       db: {} as unknown as Db,
       logger: silentLogger,
       authenticate: () => Promise.resolve(null),
-      rateLimit: { max: 1, timeWindow: '1 minute' },
+      ipRateLimit: { max: 1, timeWindow: '1 minute' },
     });
     const noAuth = () => app.inject({
       method: 'POST', url: '/mcp', headers: { 'content-type': 'application/json' }, payload: rpc,
@@ -203,6 +205,68 @@ describe('buildHttpApp — rate-limit key = presented bearer token hash (minor)'
     expect(r1.statusCode).toBe(401);
     const r2 = await noAuth();
     expect(r2.statusCode).toBe(429); // r1's 401 already consumed the IP bucket's allowance
+    await app.close();
+  });
+
+  // Layer 2 — tenant fairness bucket. Only reachable with a token that
+  // `authenticate` actually resolves to a tenant, so it is keyed on the resolved
+  // tenantId, not any presented token — an invalid credential can never occupy it.
+  it('two different VALID tenants from the same IP get independent fairness buckets', async () => {
+    const app = await buildHttpApp({
+      db: {} as unknown as Db,
+      logger: silentLogger,
+      authenticate: (h) => Promise.resolve(
+        h === 'Bearer valid-a' ? 'tenant-a' : h === 'Bearer valid-b' ? 'tenant-b' : null,
+      ),
+      // Generous IP backstop (default 600/min would already cover the 3 requests
+      // below; set explicitly so this test documents "both stay under it" rather
+      // than relying on the production default's exact value).
+      ipRateLimit: { max: 100, timeWindow: '1 minute' },
+      tenantRateLimit: { max: 1, timeWindow: '1 minute' },
+    });
+    const withToken = (token: string) => app.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        authorization: `Bearer ${token}`,
+      },
+      payload: rpc,
+    });
+
+    const a1 = await withToken('valid-a');
+    expect(a1.statusCode).not.toBe(429); // consumes tenant-a's one-request fairness allowance
+    const a2 = await withToken('valid-a');
+    expect(a2.statusCode).toBe(429); // tenant-a's own bucket is exhausted
+    expect(a2.json()).toEqual({ error: 'rate_limited' });
+
+    const b1 = await withToken('valid-b');
+    expect(b1.statusCode).not.toBe(429); // independent bucket — untouched by tenant-a's traffic
+    await app.close();
+  });
+
+  it('an invalid token never reaches (or exhausts) the tenant fairness bucket — only the 401 path runs', async () => {
+    const app = await buildHttpApp({
+      db: {} as unknown as Db,
+      logger: silentLogger,
+      authenticate: () => Promise.resolve(null),
+      ipRateLimit: { max: 100, timeWindow: '1 minute' }, // isolate this test to layer 2 behavior
+      tenantRateLimit: { max: 1, timeWindow: '1 minute' },
+    });
+    const withToken = (token: string) => app.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+      payload: rpc,
+    });
+
+    // Many rotated invalid tokens, well past the tenant bucket's max of 1 — none
+    // of them ever occupies that bucket, so all of them 401 (never 429) here.
+    for (const token of ['t1', 't2', 't3', 't4', 't5']) {
+      const res = await withToken(token);
+      expect(res.statusCode).toBe(401);
+    }
     await app.close();
   });
 });
