@@ -34,8 +34,27 @@ export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Pro
   const safe = head - chain.finalityDepth;
   const fromBlock = BigInt(cp.lastProcessedBlock) + 1n;
   if (fromBlock > safe) {
-    await commitPage(deps.db, target, [], { lastProcessedBlock: Number(safe), status: 'live' }, chain);
-    return { status: 'live', lastProcessedBlock: Number(safe), inserted: 0, unseenContracts: [] };
+    const safeNum = Number(safe);
+    // H7: a load-balanced provider node can return a slightly stale head (safe <
+    // cursor), and on a fresh/dev chain head < finalityDepth makes safe negative.
+    // Either way, committing here would regress or zero-out the cursor — "events
+    // complete <= last_processed_block" would be violated. Skip the commit
+    // entirely (nothing to insert on this path anyway) and report the checkpoint
+    // exactly as stored; only a genuine advance (safe > cursor) is legitimate.
+    if (safeNum <= cp.lastProcessedBlock) {
+      deps.logger.warn('ingest: safe head at or below the cursor — skipping commit to avoid regressing it', {
+        chainId: target.chainId, address: target.address, stream: target.stream,
+        safe: safeNum, lastProcessedBlock: cp.lastProcessedBlock,
+      });
+      return {
+        status: cp.status === 'backfilling' ? 'backfilling' : 'live',
+        lastProcessedBlock: cp.lastProcessedBlock,
+        inserted: 0,
+        unseenContracts: [],
+      };
+    }
+    await commitPage(deps.db, target, [], { lastProcessedBlock: safeNum, status: 'live' }, chain);
+    return { status: 'live', lastProcessedBlock: safeNum, inserted: 0, unseenContracts: [] };
   }
 
   const q: PageQuery = { chainId: target.chainId, address: target.address, fromBlock, toBlock: safe, limit: PAGE_LIMIT, sort: 'asc' };
