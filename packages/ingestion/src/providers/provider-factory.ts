@@ -36,12 +36,19 @@ export interface ProviderBundle {
 
 export function failoverProvider(providers: ChainDataProvider[]): ChainDataProvider {
   // `served` records which provider last answered so the caller can stamp the
-  // real provider onto each event row (ADR-009 audit). A processor runs one
-  // fetch per ingestOnce, then reads `.kind` — no interleaving to race.
+  // real provider onto each event row (ADR-009 audit). The native stream makes
+  // two sequential fetches per ingestOnce (txlist + txlistinternal) and reads
+  // `.kind` after both, so a failover between them stamps the whole page with
+  // the second provider — an audit-level imprecision on a rare path, not a
+  // correctness one (`provider` feeds nothing but the audit trail). Still no
+  // interleaving to race: the fetches are awaited in order.
   let served = providers[0]?.kind ?? 'etherscan-v2';
-  const attempt = async <T>(fn: (p: ChainDataProvider) => Promise<T>): Promise<T> => {
+  const attemptOn = async <T>(
+    candidates: ChainDataProvider[],
+    fn: (p: ChainDataProvider) => Promise<T>,
+  ): Promise<T> => {
     let last: unknown;
-    for (const p of providers) {
+    for (const p of candidates) {
       try {
         const out = await fn(p);
         served = p.kind;
@@ -53,12 +60,28 @@ export function failoverProvider(providers: ChainDataProvider[]): ChainDataProvi
     }
     throw last;
   };
-  return {
+  const attempt = <T>(fn: (p: ChainDataProvider) => Promise<T>): Promise<T> => attemptOn(providers, fn);
+
+  const wrapper: ChainDataProvider = {
     get kind() { return served; },
     getHead: (chainId) => attempt((p) => p.getHead(chainId)),
     getNativeTxs: (q: PageQuery) => attempt((p) => p.getNativeTxs(q)),
     getErc20Transfers: (q: PageQuery) => attempt((p) => p.getErc20Transfers(q)),
   };
+
+  // `getInternalTxs` is an optional capability (ADR-009), so the wrapper mirrors
+  // the optionality rather than flattening it: the method exists iff at least one
+  // provider serves it, and failover only walks the providers that do (the same
+  // skip-non-implementers rule buildProviderBundle's `requireCapability` uses).
+  // A caller can therefore keep testing `typeof indexer.getInternalTxs ===
+  // 'function'` and get the honest answer — on a chain whose providers offer no
+  // trace data, ingestion degrades to txlist-only (the pre-existing behaviour,
+  // whose drift the integrity job surfaces) instead of hard-failing every page.
+  const internalCapable = providers.filter((p) => typeof p.getInternalTxs === 'function');
+  if (internalCapable.length > 0) {
+    wrapper.getInternalTxs = (q: PageQuery) => attemptOn(internalCapable, (p) => p.getInternalTxs!(q));
+  }
+  return wrapper;
 }
 
 export function buildProviderBundle(opts: {
