@@ -8,7 +8,8 @@
 
 /** Match tolerances (contract §6.4). Defaults applied by the engine when omitted. */
 export interface Tolerances {
-  /** Amount band as a percent of the record's open amount. Default 1.0 (%). */
+  /** Amount band as a percent of the record's open amount. Default 1.0 (%). Resolved
+   *  to 4 decimal places (e.g. `0.0001`); finer precision rounds, never errors (A6). */
   amountPct?: number;
   /** Absolute amount band in the record's currency (decimal string). Added to the pct band. */
   amountAbs?: string;

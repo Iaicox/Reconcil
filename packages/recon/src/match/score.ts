@@ -40,15 +40,21 @@ export interface Band {
   bandMinor: bigint;
 }
 
-/** Tolerance band around the open amount, in minor units: pct·open + abs. */
+/**
+ * Tolerance band around the open amount, in minor units: pct·open + abs. `pct` is
+ * resolved to 4 decimal places (e4): `Math.round(pct * 10_000)` scaled units over a
+ * `1_000_000n` divisor (A6) — e.g. `0.004` (%) yields a real 40e-6-of-open band; the
+ * old e2 rounding (`pct * 100`) collapsed anything under 0.01% straight to 0. Precision
+ * finer than e4 still rounds — a documented contract, never an error.
+ */
 export function computeBand(openAmount: string, tol: Tolerances): Band {
   const openMinor = toMinor(openAmount);
   const abs = tol.amountAbs ?? '0';
   const absMinor = toMinor(abs);
   const pct = tol.amountPct ?? DEFAULT_AMOUNT_PCT;
-  // pct% → basis points on the tolerance knob (not money); band math stays in bigint.
-  const basisPoints = BigInt(Math.round(pct * 100));
-  const pctMinor = (openMinor * basisPoints) / 10_000n;
+  // pct% → e4 fixed-point on the tolerance knob (not money); band math stays in bigint.
+  const scaledPct = BigInt(Math.round(pct * 10_000));
+  const pctMinor = (openMinor * scaledPct) / 1_000_000n;
   return { openMinor, bandMinor: pctMinor + absMinor };
 }
 
@@ -101,7 +107,8 @@ export interface Scored {
 /**
  * Score a candidate (single event or subset) across all four rules. Confidence is
  * the sum of fired-rule contributions; only fired rules (contribution > 0) enter
- * the rationale, so `Σ rationale.weight === confidence` by construction.
+ * the rationale, so `Σ rationale.weight === confidence` EXACTLY by construction —
+ * including under the rare rescale below (A3), not merely approximately.
  */
 export function scoreCandidate(input: ScoreInput): Scored {
   const { record, events, band, refDay, windowDays } = input;
@@ -131,8 +138,18 @@ export function scoreCandidate(input: ScoreInput): Scored {
     fire('date', dateScoreFromDelta(maxDelta, windowDays), `within ${String(maxDelta)}d of the reference date`);
   }
 
-  // Clamp to [0,1]: the weights sum to exactly 1, but float rounding of the sum
-  // could otherwise land a hair above 1 and trip the DB CHECK (confidence 0..1).
-  const confidence = Math.min(1, rationale.reduce((acc, r) => acc + r.weight, 0));
-  return { confidence, rationale };
+  // The weights sum to exactly 1 and every score is ≤ 1, so this sum is near-unreachable
+  // above 1 — but float summation of the fired contributions could in principle land a
+  // hair over and trip the DB CHECK (confidence 0..1). A bare `Math.min(1, sum)` clamp
+  // would break `Σ rationale.weight === confidence` exactly when it fires (A3): the
+  // shipped rationale would no longer reproduce the shipped confidence. Instead, rescale
+  // every shipped weight by the same factor and recompute confidence FROM the rescaled
+  // rationale (not derived independently), so the invariant holds by construction even
+  // here. Weights stay non-negative — the rescale factor is always positive.
+  const rawSum = rationale.reduce((acc, r) => acc + r.weight, 0);
+  if (rawSum <= 1) return { confidence: rawSum, rationale };
+  const factor = 1 / rawSum;
+  const rescaled = rationale.map((r) => ({ ...r, weight: r.weight * factor }));
+  const confidence = rescaled.reduce((acc, r) => acc + r.weight, 0);
+  return { confidence, rationale: rescaled };
 }

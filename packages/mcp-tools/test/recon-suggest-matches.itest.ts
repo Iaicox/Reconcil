@@ -220,6 +220,25 @@ describe('recon_suggest_matches — engine run, persistence, audit', () => {
     expect(rows[0]!.n).toBe('1');
   });
 
+  it('never suggests a leg for a zero-amount record, even from the expected sender (A4/A5, SQL layer)', async () => {
+    // A freshly imported zero-amount invoice sits at status='open' (the DB default,
+    // independent of amount — recon_import_invoices never calls deriveRecordStatus).
+    // Without the SQL-level openAmount>0 filter it would still be selected as a
+    // candidate target and a payment from its expected sender would wrongly settle it.
+    const tokenId = await seedToken();
+    await seedEvent(tokenId, PAYER, WALLET, '500000000', '2026-06-14T10:00:00Z'); // 500.00 EURC
+    await seedInvoice('INV-ZERO', '0.00', PAYER);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toEqual([]);
+    // Excluded from scope entirely — not counted as "unmatched" either (it isn't a
+    // candidate at all, the same as an already-matched/void record wouldn't be).
+    expect(env.data.unmatched_records).toBe(0);
+    const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM matches`);
+    expect(rows[0]!.n).toBe('0'); // no leg persisted
+  });
+
   it('reports unmatched records and unmatched settlements', async () => {
     const tokenId = await seedToken();
     await seedEvent(tokenId, PAYER, WALLET, '1000000000', '2026-06-14T10:00:00Z'); // settles INV-100

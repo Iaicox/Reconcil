@@ -2,7 +2,9 @@
  * Matching persistence (recon_suggest_matches, §6.4/ADR-010). The pure engine
  * (@reconcil/recon) scores; this layer owns the I/O: it loads the tenant's open
  * records and the candidate settlement events, values each candidate in the record's
- * currency, runs the engine, and persists the suggested legs.
+ * currency, runs the engine, and persists the suggested legs. Records with nothing
+ * outstanding are excluded from the record SELECT itself (A4/A5) — not just left to
+ * the engine's own `openAmount <= 0` guard — so nothing is even valued against them.
  *
  * Valuation is hybrid (C4 "priced means pinned"): a same-currency **stablecoin** keeps
  * face value at peg (reproducible as amount × 1, no snapshot needed, P5); any other token
@@ -205,6 +207,13 @@ export async function suggestMatches(
           recordIds !== undefined ? inArray(externalRecords.id, recordIds) : undefined,
           period !== undefined ? gte(externalRecords.issuedOn, period.from) : undefined,
           period !== undefined ? lte(externalRecords.issuedOn, period.to) : undefined,
+          // A record with nothing outstanding is not a candidate target at all (A4/A5) —
+          // filtered here, at the SQL level, so it is excluded from scope entirely (not
+          // counted as "unmatched" either) and no candidate is even valued against it.
+          // A freshly imported zero-amount invoice sits at status='open' regardless of
+          // this fix (the DB default is amount-independent), so this is load-bearing on
+          // its own, not merely a mirror of the engine-layer guard in suggestForRecord.
+          sql`${externalRecords.amount} > coalesce((select sum(${matches.fiatValue}) from ${matches} where ${matches.externalRecordId} = ${externalRecords.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed'), 0)`,
         ),
       )
       .orderBy(externalRecords.id); // stable suggestion order across runs
