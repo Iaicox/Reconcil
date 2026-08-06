@@ -75,7 +75,11 @@ export interface NormalizeContext {
  * Cross-page dedup is the DB idempotency key's job (ADR-005) — not done here.
  */
 export function normalize(
-  input: { native?: Page<RawNativeTx>; internal?: Page<RawInternalTx>; erc20?: Page<Erc20WithMeta> },
+  input: {
+    native?: Page<RawNativeTx> | undefined;
+    internal?: Page<RawInternalTx> | undefined;
+    erc20?: Page<Erc20WithMeta> | undefined;
+  },
   ctx: NormalizeContext,
 ): NormalizedEvent[] {
   const tracked = ctx.trackedAddress.toLowerCase();

@@ -4,6 +4,12 @@
  * (ADR-005). Full page ⇒ overlap the boundary block (cursor = last − 1) and stay
  * backfilling; short page ⇒ cursor = safeHead, status live. Receipts feed gas
  * (opstack), erc20 logIndex, and tx-level from/to (spec §6).
+ *
+ * The `native` stream fetches TWO provider pages over the same window — txlist
+ * and txlistinternal (ADR-005 d2, the R3 gap: contract-initiated ETH that txlist
+ * simply does not report) — behind one checkpoint. Both feed `resolveCursor`,
+ * which takes the minimum of their candidates, so the shared cursor never
+ * advances past a block whose internal transfers were truncated.
  */
 import type { Logger } from '@reconcil/core';
 import { chainById } from '@reconcil/core';
@@ -29,6 +35,47 @@ export interface IngestResult { status: CheckpointStatus; lastProcessedBlock: nu
 const PAGE_LIMIT = 1000;
 const uniq = (xs: string[]): string[] => [...new Set(xs)];
 const byHash = (rs: RawReceipt[]): Map<string, RawReceipt> => new Map(rs.map((r) => [r.transactionHash, r]));
+
+/** One provider page this run fetched, reduced to what the cursor depends on. */
+interface FetchedPage {
+  label: 'native' | 'internal' | 'erc20';
+  itemCount: number;
+  /** blockNumber of the last item, provider-sorted ascending; undefined on an empty page. */
+  lastBlock: string | undefined;
+}
+const pageOf = (label: FetchedPage['label'], items: { blockNumber: string }[]): FetchedPage => ({
+  label, itemCount: items.length, lastBlock: items.at(-1)?.blockNumber,
+});
+
+/**
+ * Where the checkpoint may move given every page this stream fetched.
+ *
+ * Each page contributes a candidate: a FULL page means the window still holds
+ * rows the provider truncated, so the cursor stops one block short of that
+ * page's last block (overlap-by-one — the boundary block is re-fetched whole
+ * next run and dedupes on the append-only key); a short page means the window
+ * is exhausted, so the cursor may go all the way to safeHead.
+ *
+ * The stream's cursor is the MINIMUM of the candidates. With two pages behind
+ * one checkpoint, taking anything larger would step past a block whose other
+ * page was truncated — and nothing ever revisits a passed block (chain_events
+ * is append-only, there is no reorg/backfill second pass). The cost is
+ * re-fetching the non-truncated page's tail on the next run; ON CONFLICT DO
+ * NOTHING makes that free of side effects, just of provider calls.
+ */
+function resolveCursor(
+  pages: FetchedPage[], safe: bigint,
+): { full: boolean; newCursor: number; stalled: FetchedPage[] } {
+  const candidate = (p: FetchedPage): number =>
+    p.itemCount >= PAGE_LIMIT && p.lastBlock !== undefined ? Number(BigInt(p.lastBlock) - 1n) : Number(safe);
+  const newCursor = Math.min(...pages.map(candidate));
+  return {
+    full: pages.some((p) => p.itemCount >= PAGE_LIMIT),
+    newCursor,
+    // Whichever full page(s) pinned the cursor — named in the stall error below.
+    stalled: pages.filter((p) => p.itemCount >= PAGE_LIMIT && candidate(p) === newCursor),
+  };
+}
 
 export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Promise<IngestResult> {
   const chain = chainById(target.chainId);
@@ -74,26 +121,32 @@ export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Pro
   const q: PageQuery = { chainId: target.chainId, address: target.address, fromBlock, toBlock: safe, limit: PAGE_LIMIT, sort: 'asc' };
   let events: NormalizedEvent[];
   let unseenContracts: string[] = [];
-  let lastBlock: string | undefined;
-  let itemCount: number;
+  let pages: FetchedPage[];
 
   if (target.stream === 'native') {
     const page = await bundle.indexer.getNativeTxs(q);
-    itemCount = page.items.length;
-    lastBlock = page.items.at(-1)?.blockNumber;
+    // Trace-level ETH movements over the SAME window, on their own page budget
+    // (ADR-005 d2). Optional capability: a chain whose providers serve no trace
+    // data ingests txlist-only, exactly as before — the integrity job surfaces
+    // the resulting drift rather than ingestion failing every page.
+    const internal = bundle.indexer.getInternalTxs
+      ? await bundle.indexer.getInternalTxs({ ...q })
+      : undefined;
+    // Receipts stay driven by the NATIVE page alone. Gas is a tx-level fee already
+    // charged on the parent txlist row, so normalize() synthesizes no gas_fee for
+    // an internal transfer and never looks a receipt up for one.
     let receipts = new Map<string, RawReceipt>();
     if (chain.feeStrategy === 'receipts-opstack') {
       const outHashes = uniq(page.items.filter((t) => t.from.toLowerCase() === target.address).map((t) => t.hash.toLowerCase()));
       receipts = byHash(await bundle.getReceipts(outHashes));
     }
-    events = normalize({ native: page }, {
+    events = normalize({ native: page, internal }, {
       chainId: target.chainId, trackedAddress: target.address, feeStrategy: chain.feeStrategy,
       provider: bundle.indexer.kind, receipts,
     });
+    pages = [pageOf('native', page.items), ...(internal ? [pageOf('internal', internal.items)] : [])];
   } else {
     const page = await bundle.indexer.getErc20Transfers(q);
-    itemCount = page.items.length;
-    lastBlock = page.items.at(-1)?.blockNumber;
     const receipts = byHash(await bundle.getReceipts(uniq(page.items.map((t) => t.hash.toLowerCase()))));
     const enriched = assignErc20Metadata(page.items, receipts);
     events = normalize({ erc20: { items: enriched } }, {
@@ -103,21 +156,24 @@ export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Pro
     // contracts unknown to `tokens`. The deferred token-resolve queue does that
     // filtering; here we just surface the candidates it will consume.
     unseenContracts = uniq(page.items.map((t) => t.contractAddress.toLowerCase()));
+    pages = [pageOf('erc20', page.items)];
   }
 
-  const full = itemCount >= PAGE_LIMIT;
-  const newCursor = full && lastBlock !== undefined ? Number(BigInt(lastBlock) - 1n) : Number(safe);
+  const { full, newCursor, stalled } = resolveCursor(pages, safe);
   // Overlap-by-one pagination (cursor = last − 1) is block-granular: it cannot
   // split a single block. A full page whose cursor does not advance means one
   // block holds ≥ PAGE_LIMIT tracked-relevant items — re-fetching the same window
   // would loop forever, burning provider calls. Fail loudly instead (→ BullMQ
   // retry → DLQ, surfaced via the checkpoint status) rather than silently spin;
   // the eth_getLogs index-pagination that resolves this is deferred (03-ingestion
-  // §11 Risks, ADR-005).
+  // §11 Risks, ADR-005). Both native-stream pages are subject to this: a block
+  // with ≥ PAGE_LIMIT internal transfers stalls the stream exactly as a block
+  // with ≥ PAGE_LIMIT txlist rows does.
   if (full && newCursor <= cp.lastProcessedBlock) {
+    const where = stalled.map((p) => `${p.label} @ block ${p.lastBlock ?? '?'}`).join(', ');
     throw new Error(
       `ingest stalled: a single block holds >= ${String(PAGE_LIMIT)} relevant ${target.stream} ` +
-        `items (chain ${String(target.chainId)}, block ${lastBlock ?? '?'}); ` +
+        `items (chain ${String(target.chainId)}, ${where}); ` +
         `block-granular pagination cannot advance`,
     );
   }
