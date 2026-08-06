@@ -15,12 +15,20 @@ import { materializePegSnapshots, upsertFxRates, upsertSnapshots, type SnapshotI
 export interface FillDeps {
   db: Db;
   bundle: PriceBundle;
-  logger?: Logger;
+  // Required: a provider outage caught by the per-gap try/catch below must always be
+  // recorded somewhere. With this optional, a caller that omits it (as a bare unit test
+  // easily could) got a FillResult with pricesInserted: 0 and zero output — indistinguishable
+  // from "nothing to do". Pass a no-op Logger explicitly if you truly want to discard it.
+  logger: Logger;
 }
 
 export interface FillResult {
   gaps: number;
   pricesInserted: number;
+  // Gaps whose provider fetch threw (network/timeout/etc.) and were skipped. A silent
+  // outage must be visible in the job result itself, not only in logs — a worker/alerting
+  // consumer can page on `failedGaps > 0` without parsing log lines.
+  failedGaps: number;
   fxInserted: number;
   pegInserted: number;
 }
@@ -32,6 +40,7 @@ export async function runPriceFill(deps: FillDeps): Promise<FillResult> {
 
   const gaps = await priceGaps(db);
   const snapshots: SnapshotInsert[] = [];
+  let failedGaps = 0;
   for (const g of gaps) {
     const chainSlug = CHAIN_SLUG[g.chainId];
     if (chainSlug === undefined) continue; // chain not price-mapped yet
@@ -49,7 +58,8 @@ export async function runPriceFill(deps: FillDeps): Promise<FillResult> {
         });
       }
     } catch (err) {
-      logger?.warn('price fetch failed; skipping gap', { tokenId: g.tokenId, date: g.date, err: serializeError(err) });
+      failedGaps += 1;
+      logger.warn('price fetch failed; skipping gap', { tokenId: g.tokenId, date: g.date, err: serializeError(err) });
     }
   }
   const pricesInserted = await upsertSnapshots(db, snapshots);
@@ -66,10 +76,10 @@ export async function runPriceFill(deps: FillDeps): Promise<FillResult> {
       );
     }
   } catch (err) {
-    logger?.warn('FX fetch failed; prices already persisted', { err: serializeError(err) });
+    logger.warn('FX fetch failed; prices already persisted', { err: serializeError(err) });
   }
 
-  const result: FillResult = { gaps: gaps.length, pricesInserted, fxInserted, pegInserted };
-  logger?.info('price fill complete', { ...result });
+  const result: FillResult = { gaps: gaps.length, pricesInserted, failedGaps, fxInserted, pegInserted };
+  logger.info('price fill complete', { ...result });
   return result;
 }
