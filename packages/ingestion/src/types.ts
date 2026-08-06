@@ -44,6 +44,16 @@ export interface RawInternalTx {
   to: string | null;
   value: string;
   isError: '0' | '1';
+  /**
+   * Where this trace sits in its parent tx, as the provider labels it: Etherscan
+   * sends a dotted DFS path (`traceId`, e.g. "0_1_2"), Blockscout a plain ordinal
+   * (`index`, e.g. "67"). Both enumerate the call tree in execution order, so
+   * either one sorts a tx's traces identically. normalize() ranks on it before
+   * assigning the −(1000+n) sentinels, which keeps the append-only idempotency
+   * key a function of the row set rather than of the provider's array order.
+   * Optional (a provider that sends neither falls back to a tuple sort).
+   */
+  traceId?: string | undefined;
 }
 
 export interface RawErc20Transfer {

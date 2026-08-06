@@ -3,7 +3,7 @@ import { assignErc20Metadata } from '../src/logindex.js';
 import type { Erc20WithMeta } from '../src/logindex.js';
 import { ZERO_ADDRESS, normalize } from '../src/normalize.js';
 import type { NormalizeContext } from '../src/normalize.js';
-import type { RawInternalTx, RawNativeTx, RawReceipt } from '../src/types.js';
+import type { NormalizedEvent, RawInternalTx, RawNativeTx, RawReceipt } from '../src/types.js';
 
 const TRACKED = '0xAbCd000000000000000000000000000000000001';
 const OTHER = '0xdef0000000000000000000000000000000000002';
@@ -175,7 +175,7 @@ describe('internal transfers (txlistinternal): native inflows, no gas, sentinel 
     });
   });
 
-  it('several internal transfers in one tx ⇒ −1000, −1001, −1002 in provider order', () => {
+  it('several internal transfers in one tx ⇒ −1000, −1001, −1002', () => {
     const items = [internal({ value: '1' }), internal({ value: '2' }), internal({ value: '3' })];
     const events = normalize({ internal: { items } }, CTX);
     expect(events.map((e) => e.logIndex)).toEqual([-1000, -1001, -1002]);
@@ -218,6 +218,132 @@ describe('internal transfers (txlistinternal): native inflows, no gas, sentinel 
     const max = '115792089237316195423570985008687907853269984665640564039457584007913129639935';
     const events = normalize({ internal: { items: [internal({ value: max })] } }, CTX);
     expect(events[0]?.amountRaw).toBe(BigInt(max));
+  });
+});
+
+// The −(1000+n) sentinel is half of the append-only idempotency key
+// (chain_id, tx_hash, log_index, token_id). If `n` were arrival order, the same
+// tx re-fetched in a different array order (the overlap-by-one boundary block, or
+// the same window served by the other provider after a failover) would renumber
+// its traces into each other's slots: ON CONFLICT DO NOTHING then silently drops a
+// real value movement. So `n` is the trace's rank under a stable per-tx order.
+describe('internal transfers — stable sentinel numbering across re-fetches', () => {
+  const HASH = '0xDD10000000000000000000000000000000000000000000000000000000000010';
+  const trace = (over: Partial<RawInternalTx>): RawInternalTx => ({
+    blockNumber: '19000010',
+    timeStamp: '1700001000',
+    hash: HASH,
+    from: OTHER,
+    to: TRACKED,
+    value: '1',
+    isError: '0',
+    ...over,
+  });
+  const run = (items: RawInternalTx[]): NormalizedEvent[] => normalize({ internal: { items } }, CTX);
+  /** (tx_hash, log_index) — the part of the idempotency key normalize() controls. */
+  const keys = (events: NormalizedEvent[]): string[] =>
+    events.map((e) => `${e.txHash}:${String(e.logIndex)}`);
+  /** value → sentinel, i.e. "which slot did this specific trace get?" */
+  const slots = (events: NormalizedEvent[]): Record<string, number> =>
+    Object.fromEntries(events.map((e) => [e.amountRaw.toString(), e.logIndex]));
+
+  it('numbers by the provider trace id, not arrival order (emission stays in arrival order)', () => {
+    // Etherscan `traceId`: dotted DFS path. Trace order is 0 < 0_2 < 0_10.
+    const events = run([
+      trace({ traceId: '0_2', value: '30' }),
+      trace({ traceId: '0', value: '10' }),
+      trace({ traceId: '0_10', value: '20' }),
+    ]);
+    expect(events.map((e) => [e.amountRaw, e.logIndex])).toEqual([
+      [30n, -1001],
+      [10n, -1000],
+      [20n, -1002],
+    ]);
+  });
+
+  it('dotted trace ids compare numerically per component, not lexically (0_2 before 0_10)', () => {
+    const events = run([trace({ traceId: '0_10', value: '2' }), trace({ traceId: '0_2', value: '1' })]);
+    expect(slots(events)).toEqual({ '1': -1000, '2': -1001 });
+  });
+
+  it("Blockscout's plain numeric `index` orders numerically too (2 before 10)", () => {
+    const events = run([trace({ traceId: '10', value: '2' }), trace({ traceId: '2', value: '1' })]);
+    expect(slots(events)).toEqual({ '1': -1000, '2': -1001 });
+  });
+
+  it('falls back to a deterministic (from, to, value) tuple when the provider sends no trace id', () => {
+    const events = run([trace({ value: '30' }), trace({ value: '10' }), trace({ value: '20' })]);
+    expect(slots(events)).toEqual({ '10': -1000, '20': -1001, '30': -1002 });
+    // from wins over to wins over value
+    const byFrom = run([
+      trace({ from: '0xbb', to: '0xaa', value: '9' }),
+      trace({ from: '0xaa', to: '0xzz', value: '1' }),
+    ]);
+    expect(slots(byFrom)).toEqual({ '1': -1000, '9': -1001 });
+  });
+
+  it('a re-fetch that returns the same traces in a different order re-derives the SAME keys', () => {
+    const rows = [
+      trace({ traceId: '0', value: '10' }),
+      trace({ traceId: '0_1', value: '20' }),
+      trace({ traceId: '1', value: '30' }),
+    ];
+    const shuffled = [rows[2]!, rows[0]!, rows[1]!];
+    expect(slots(run(shuffled))).toEqual(slots(run(rows)));
+    // and the same holds for the tuple fallback (no trace ids at all)
+    const bare = rows.map((r) => ({ ...r, traceId: undefined }));
+    expect(slots(run([bare[1]!, bare[2]!, bare[0]!]))).toEqual(slots(run(bare)));
+  });
+
+  it('split page: a truncated page and the overlap re-fetch agree at every boundary', () => {
+    // A provider page that ends mid-tx carries a PREFIX of the tx's traces; the
+    // cursor overlaps that block (cursor = last − 1), so the next page re-fetches
+    // the tx whole. Union of the two calls' keys must equal the whole-tx keys —
+    // no collisions inside a page, no rows dropped by the overlap's ON CONFLICT.
+    const whole = [
+      trace({ traceId: '0', value: '10' }),
+      trace({ traceId: '0_1', value: '20' }),
+      trace({ traceId: '0_2', value: '30' }),
+      trace({ traceId: '1', value: '40' }),
+    ];
+    const wholeKeys = keys(run(whole));
+    expect(new Set(wholeKeys).size).toBe(whole.length);
+    for (let cut = 1; cut < whole.length; cut++) {
+      const truncated = run(whole.slice(0, cut));
+      expect(new Set(keys(truncated)).size).toBe(cut); // no self-collision
+      // every already-stored key comes back identical on the re-fetch
+      expect(keys(truncated).every((k) => wholeKeys.includes(k))).toBe(true);
+      expect(new Set([...keys(truncated), ...wholeKeys])).toEqual(new Set(wholeKeys));
+      // and each individual trace keeps its slot
+      for (const [value, slot] of Object.entries(slots(truncated))) {
+        expect(slots(run(whole))[value]).toBe(slot);
+      }
+    }
+  });
+
+  it('numbering is per parent tx and unaffected by interleaving of other txs', () => {
+    const other = '0xEE20000000000000000000000000000000000000000000000000000000000020';
+    const events = run([
+      trace({ traceId: '1', value: '20' }),
+      trace({ hash: other, traceId: '5', value: '50' }),
+      trace({ traceId: '0', value: '10' }),
+    ]);
+    expect(events.map((e) => [e.txHash, e.logIndex])).toEqual([
+      [HASH.toLowerCase(), -1001],
+      [other.toLowerCase(), -1000],
+      [HASH.toLowerCase(), -1000],
+    ]);
+  });
+
+  it('skipped rows (failed / zero-value / contract creation) consume no sentinel slot', () => {
+    const events = run([
+      trace({ traceId: '0', isError: '1', value: '99' }),
+      trace({ traceId: '1', value: '10' }),
+      trace({ traceId: '2', value: '0' }),
+      trace({ traceId: '3', to: null, value: '77' }),
+      trace({ traceId: '4', value: '20' }),
+    ]);
+    expect(slots(events)).toEqual({ '10': -1000, '20': -1001 });
   });
 });
 

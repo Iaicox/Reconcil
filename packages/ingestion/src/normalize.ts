@@ -10,6 +10,55 @@ import type { Erc20WithMeta } from './logindex.js';
 /** Trace-level internal transfer n → sentinel log_index (ADR-005 d2). */
 const INTERNAL_SENTINEL_BASE = -1000;
 
+/**
+ * Order two traces of the same parent tx by the provider's trace label. Etherscan
+ * sends a dotted DFS path ("0", "0_1", "0_10"), Blockscout a plain ordinal ("67");
+ * both compare component-wise and numerically, so "0_2" precedes "0_10" (a lexical
+ * sort would invert them) and a shorter path precedes its own extensions. A
+ * non-numeric component falls back to text order — an unknown labelling scheme
+ * still yields a total, deterministic order, which is all the caller needs.
+ */
+function compareTraceIds(a: string, b: string): number {
+  const pa = a.split('_');
+  const pb = b.split('_');
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const xa = pa[i];
+    const xb = pb[i];
+    if (xa === undefined) return -1;
+    if (xb === undefined) return 1;
+    if (xa === xb) continue;
+    const na = Number(xa);
+    const nb = Number(xb);
+    if (Number.isInteger(na) && Number.isInteger(nb) && na !== nb) return na < nb ? -1 : 1;
+    if (!Number.isInteger(na) || !Number.isInteger(nb)) return xa < xb ? -1 : 1;
+  }
+  return 0;
+}
+
+/** An internal row that actually moves value, tagged with its position in the page. */
+interface InternalValueMove {
+  it: RawInternalTx & { to: string };
+  arrival: number;
+}
+
+/**
+ * Trace-id-free fallback order: (from, to, value), lowercased so a provider's
+ * address casing cannot change the answer. Ties (two byte-identical traces in one
+ * tx) are broken by arrival order at the call site.
+ */
+function compareTraceTuple(a: RawInternalTx, b: RawInternalTx): number {
+  const fa = a.from.toLowerCase();
+  const fb = b.from.toLowerCase();
+  if (fa !== fb) return fa < fb ? -1 : 1;
+  const ta = (a.to ?? '').toLowerCase();
+  const tb = (b.to ?? '').toLowerCase();
+  if (ta !== tb) return ta < tb ? -1 : 1;
+  const va = BigInt(a.value);
+  const vb = BigInt(b.value);
+  if (va !== vb) return va < vb ? -1 : 1;
+  return 0;
+}
+
 export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 export interface NormalizeContext {
@@ -75,14 +124,60 @@ export function normalize(
 
   // Internal transfers (txlistinternal): contract-initiated native value moves that
   // txlist omits. No gas of their own (the parent tx's gas_fee covers it). Several can
-  // share one parent tx, so each gets sentinel −(1000+n), n = 0-based emit order per tx
-  // (ADR-005 d2). Failed / zero-value / contract-creation rows move no value → skipped.
-  const internalSeen = new Map<string, number>();
-  for (const it of input.internal?.items ?? []) {
-    if (it.isError !== '0' || it.to === null || BigInt(it.value) <= 0n) continue;
+  // share one parent tx, so each gets sentinel −(1000+n) (ADR-005 d2). Failed /
+  // zero-value / contract-creation rows move no value → skipped, and consume no slot.
+  //
+  // n is the trace's RANK inside its parent tx under a stable order — the provider's
+  // trace label when it sends one (Etherscan `traceId`, Blockscout `index`), else a
+  // (from, to, value) tuple — never arrival order. The append-only idempotency key
+  // (chain_id, tx_hash, log_index, token_id) therefore depends only on the row set, so
+  // the same tx re-fetched (the overlap-by-one boundary block, or the same window
+  // served by the other provider after a failover) re-derives the same keys and ON
+  // CONFLICT DO NOTHING dedupes it. Arrival-order numbering would renumber the traces
+  // into each other's slots and silently drop a real value movement.
+  //
+  // Two residual caveats, both accepted:
+  //  - two byte-identical traces in one tx (same from/to/value) with no trace label tie,
+  //    and fall back to the provider's response order among the ties;
+  //  - a provider page that ends mid-tx stores a PREFIX of that tx's traces. Their keys
+  //    match the whole-tx re-fetch only because the truncation is a prefix of the
+  //    provider's order and the trace label agrees with it; the tuple fallback trades
+  //    that for order-independence. Both shipping providers send a label, so the
+  //    fallback is defensive only — and the cursor always overlaps the boundary block
+  //    (processors/ingest.ts), so the tx is always re-fetched whole afterwards.
+  //
+  // Emission stays in arrival order; only the sentinel comes from the rank.
+  const internalRows: InternalValueMove[] = (input.internal?.items ?? [])
+    .map((it, arrival) => ({ it, arrival }))
+    .filter(
+      (r): r is InternalValueMove =>
+        r.it.isError === '0' && r.it.to !== null && BigInt(r.it.value) > 0n,
+    );
+  const byParentTx = new Map<string, InternalValueMove[]>();
+  for (const row of internalRows) {
+    const txHash = row.it.hash.toLowerCase();
+    const group = byParentTx.get(txHash);
+    if (group) group.push(row);
+    else byParentTx.set(txHash, [row]);
+  }
+  const sentinelRank = new Map<number, number>(); // arrival index → n
+  for (const group of byParentTx.values()) {
+    // Per group: label order iff every trace in it carries a label (one page comes
+    // from one provider, so a mixed group is not a real shape — but be explicit).
+    const labelled = group.every(({ it }) => (it.traceId ?? '') !== '');
+    [...group]
+      .sort((a, b) => {
+        const primary = labelled
+          ? compareTraceIds(a.it.traceId ?? '', b.it.traceId ?? '')
+          : compareTraceTuple(a.it, b.it);
+        return primary !== 0 ? primary : a.arrival - b.arrival;
+      })
+      .forEach((row, n) => sentinelRank.set(row.arrival, n));
+  }
+
+  for (const { it, arrival } of internalRows) {
     const txHash = it.hash.toLowerCase();
-    const n = internalSeen.get(txHash) ?? 0;
-    internalSeen.set(txHash, n + 1);
+    const n = sentinelRank.get(arrival) ?? 0;
     events.push({
       chainId: ctx.chainId,
       txHash,
