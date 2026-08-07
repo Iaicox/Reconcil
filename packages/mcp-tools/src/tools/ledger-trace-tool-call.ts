@@ -53,7 +53,7 @@ export async function ledgerTraceToolCall(
   try {
     ledgerTraceToolCallOutput.parse(data);
   } catch (err) {
-    throw new ToolError('INTERNAL', `ledger_trace_tool_call produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', 'ledger_trace_tool_call produced an output that violates its contract', undefined, err);
   }
   const toolCallId = await persistToolCall(ctx, {
     toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: [], result: data,

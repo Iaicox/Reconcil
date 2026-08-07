@@ -44,7 +44,7 @@ export async function reconRejectMatch(
       try {
         reconRejectMatchOutput.parse(data);
       } catch (err) {
-        throw new ToolError('INTERNAL', `recon_reject_match produced an output that violates its contract: ${String(err)}`);
+        throw new ToolError('INTERNAL', 'recon_reject_match produced an output that violates its contract', undefined, err);
       }
 
       return { data, envelope: { coverage: [] } };

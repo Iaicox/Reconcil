@@ -53,7 +53,9 @@ describe('parseInvoiceCsv — mapping override and defaults', () => {
     const { drafts, errors } = parseInvoiceCsv(csv, { defaults: { direction: 'receivable' } });
     expect(drafts).toHaveLength(1);
     expect(drafts[0]).toMatchObject({ externalRef: 'INV-1', direction: 'payable' });
-    expect(errors).toEqual([{ row: 2, code: 'INVALID_DIRECTION', message: expect.stringContaining('sideways') }]);
+    // The raw cell value is never echoed in the message (C6, ADR-011) — row + code are
+    // enough to drill down; the raw row survives only in the stored `payload`.
+    expect(errors).toEqual([{ row: 2, code: 'INVALID_DIRECTION', message: expect.not.stringContaining('sideways') }]);
   });
 });
 
@@ -135,5 +137,54 @@ describe('parseInvoiceCsv — hostile input stays raw here', () => {
     const csv = `invoice,amount,currency,wallet\nINV-1,10.00,EUR,${addr}`;
     const { drafts } = parseInvoiceCsv(csv);
     expect(drafts[0]?.expectedAddress).toBe(addr.toLowerCase());
+  });
+});
+
+describe('parseInvoiceCsv — row-error hygiene: no raw cell in the message (C6/ADR-011)', () => {
+  it('never echoes a hostile amount cell (formula-lead or bidi-override) in the error', () => {
+    const hostileValues = ["=cmd|' /C calc'!A0", '‮evil‬'];
+    for (const val of hostileValues) {
+      const csv = `invoice,amount,currency\nINV-1,${val},EUR`;
+      const { drafts, errors } = parseInvoiceCsv(csv);
+      expect(drafts).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({ row: 1, code: 'INVALID_AMOUNT' });
+      expect(errors[0]?.message).not.toContain(val);
+    }
+  });
+
+  it('rejects a vat_rate above 100 as INVALID_VAT without echoing the value', () => {
+    const csv = 'invoice,amount,currency,vat_rate\nINV-1,10.00,EUR,150';
+    const { drafts, errors } = parseInvoiceCsv(csv);
+    expect(drafts).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ row: 1, code: 'INVALID_VAT' });
+    expect(errors[0]?.message).not.toContain('150');
+  });
+
+  it('accepts a vat_rate of exactly 100', () => {
+    const csv = 'invoice,amount,currency,vat_rate\nINV-1,10.00,EUR,100';
+    const { drafts, errors } = parseInvoiceCsv(csv);
+    expect(errors).toEqual([]);
+    expect(drafts[0]?.vatRate).toBe('100');
+  });
+});
+
+describe('parseInvoiceCsv — external_ref sanitization at the parser edge (C6/ADR-011)', () => {
+  it('strips control chars and caps external_ref at 128 chars; the sanitized value is stored', () => {
+    const raw = `\u0000\u0001${'A'.repeat(200)}`;
+    const csv = `invoice,amount,currency\n${raw},10.00,EUR`;
+    const { drafts, errors } = parseInvoiceCsv(csv);
+    expect(errors).toEqual([]);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.externalRef).toBe('A'.repeat(128));
+    expect(drafts[0]?.externalRef).not.toContain('\u0000');
+  });
+
+  it('reports a row error when external_ref sanitizes to nothing', () => {
+    const csv = 'invoice,amount,currency\n‮‮‮,10.00,EUR';
+    const { drafts, errors } = parseInvoiceCsv(csv);
+    expect(drafts).toEqual([]);
+    expect(errors).toEqual([{ row: 1, code: 'MISSING_FIELD', message: expect.any(String) }]);
   });
 });

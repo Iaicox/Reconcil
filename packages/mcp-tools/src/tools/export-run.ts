@@ -82,7 +82,7 @@ export async function runExport<T>(
       files.push({ name: f.name, path, sha256: f.sha256 });
     }
   } catch (err) {
-    throw new ToolError('INTERNAL', `${opts.toolName} failed to write export files: ${String(err)}`);
+    throw new ToolError('INTERNAL', `${opts.toolName} failed to write export files`, undefined, err);
   }
 
   // Build + validate the output BEFORE any DB write, so a contract violation can't
@@ -92,7 +92,7 @@ export async function runExport<T>(
   try {
     validated = outputSchema.parse(outputData);
   } catch (err) {
-    throw new ToolError('INTERNAL', `${opts.toolName} produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', `${opts.toolName} produced an output that violates its contract`, undefined, err);
   }
 
   const residueWarnings: Warning[] = rendered.roundingResidues

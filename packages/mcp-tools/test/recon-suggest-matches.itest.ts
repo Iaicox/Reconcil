@@ -220,6 +220,26 @@ describe('recon_suggest_matches — engine run, persistence, audit', () => {
     expect(rows[0]!.n).toBe('1');
   });
 
+  it('rejects a non-UUID record_ids element with INVALID_INPUT (not a raw uuid-cast error)', async () => {
+    await expect(
+      reconSuggestMatches(ctx(), { record_ids: ['not-a-uuid'] }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  it('scopes the run to the given record_ids', async () => {
+    const tokenId = await seedToken();
+    await seedEvent(tokenId, PAYER, WALLET, '1000000000', '2026-06-14T10:00:00Z'); // settles INV-100
+    // A different counterparty and amount so it is not an address- or amount-candidate
+    // for INV-100 — the only way it could appear is if scoping failed to exclude INV-200.
+    await seedEvent(tokenId, STRANGER, WALLET, '500000000', '2026-06-14T11:00:00Z', 1); // settles INV-200
+    const recA = await seedInvoice('INV-100', '1000.00', PAYER);
+    await seedInvoice('INV-200', '500.00', STRANGER);
+
+    const env = await reconSuggestMatches(ctx(), { record_ids: [recA] });
+
+    expect(env.data.suggestions.map((s) => s.record.external_ref)).toEqual(['INV-100']);
+  });
+
   it('reports unmatched records and unmatched settlements', async () => {
     const tokenId = await seedToken();
     await seedEvent(tokenId, PAYER, WALLET, '1000000000', '2026-06-14T10:00:00Z'); // settles INV-100

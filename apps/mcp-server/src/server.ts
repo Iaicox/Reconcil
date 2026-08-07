@@ -66,6 +66,12 @@ export function createServer(makeContext: () => ToolContext, logger?: Logger): S
       };
     } catch (err) {
       if (err instanceof ToolError) {
+        // The client only ever sees `message`/`hint` (both caller-safe by construction);
+        // a `cause` (fs/driver error, ZodError, ...) is server-log-only, scrubbed the same
+        // way as the generic INTERNAL path below (ADR-011).
+        if (err.cause !== undefined) {
+          logger?.error('tool call failed', { tool: name, code: err.code, cause: serializeError(err.cause) });
+        }
         return errorResult({
           code: err.code,
           message: err.message,

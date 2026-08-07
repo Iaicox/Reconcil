@@ -118,7 +118,7 @@ export async function analyticsBalances(
   try {
     analyticsBalancesOutput.parse(data);
   } catch (err) {
-    throw new ToolError('INTERNAL', `analytics_balances produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', 'analytics_balances produced an output that violates its contract', undefined, err);
   }
   const toolCallId = await persistToolCall(ctx, {
     toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,
