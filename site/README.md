@@ -13,8 +13,20 @@ unaffected by anything here.
 
 ## Stack
 
-Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS v4. Configured for **static
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4. Configured for **static
 export** (`output: 'export'` in `next.config.mjs`) — `next build` emits a fully static `out/`.
+
+## Lint
+
+`next lint` was removed in Next 16. Linting runs via the ESLint CLI directly against a flat
+config (`npm run lint` → `eslint .`, config in `eslint.config.mjs`), using the flat-config
+array `eslint-config-next` exports at its package root as of v16 (same `next/core-web-vitals`
+rule surface as before).
+
+ESLint is pinned to `^9.0.0` here, deliberately *not* the root workspace catalog's `^10.0.0`
+— `eslint-config-next@16.x` bundles `eslint-plugin-react`, which still calls
+`context.getFilename()` (removed in ESLint 10) and crashes every run. Revisit once a newer
+`eslint-config-next`/`eslint-plugin-react` supports ESLint 10.
 
 ## Develop
 

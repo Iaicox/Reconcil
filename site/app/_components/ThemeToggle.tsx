@@ -32,6 +32,11 @@ export function ThemeToggle() {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const compute = () =>
       (document.documentElement.dataset.theme as Theme | undefined) ?? systemTheme();
+    // Reads `document`/matchMedia, which don't exist at SSR time — the value cannot be
+    // computed during render without a server/client mismatch, so this is the intentional
+    // "synchronize with an external system" case the rule doesn't distinguish from derived
+    // state; see the component doc comment above for why it lands post-mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEffective(compute());
     const onChange = () => setEffective(compute());
     mq.addEventListener('change', onChange);
