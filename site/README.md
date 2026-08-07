@@ -23,6 +23,11 @@ config (`npm run lint` → `eslint .`, config in `eslint.config.mjs`), using the
 array `eslint-config-next` exports at its package root as of v16 (same `next/core-web-vitals`
 rule surface as before).
 
+ESLint is pinned to `^9.0.0` here, deliberately *not* the root workspace catalog's `^10.0.0`
+— `eslint-config-next@16.x` bundles `eslint-plugin-react`, which still calls
+`context.getFilename()` (removed in ESLint 10) and crashes every run. Revisit once a newer
+`eslint-config-next`/`eslint-plugin-react` supports ESLint 10.
+
 ## Develop
 
 ```bash
