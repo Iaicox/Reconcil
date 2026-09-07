@@ -44,6 +44,16 @@ export interface RawInternalTx {
   to: string | null;
   value: string;
   isError: '0' | '1';
+  /**
+   * Where this trace sits in its parent tx, as the provider labels it: Etherscan
+   * sends a dotted DFS path (`traceId`, e.g. "0_1_2"), Blockscout a plain ordinal
+   * (`index`, e.g. "67"). Both enumerate the call tree in execution order, so
+   * either one sorts a tx's traces identically. normalize() ranks on it before
+   * assigning the −(1000+n) sentinels, which keeps the append-only idempotency
+   * key a function of the row set rather than of the provider's array order.
+   * Optional (a provider that sends neither falls back to a tuple sort).
+   */
+  traceId?: string | undefined;
 }
 
 export interface RawErc20Transfer {
@@ -91,9 +101,12 @@ export interface ChainDataProvider {
   readonly kind: 'etherscan-v2' | 'blockscout' | (string & {});
   getHead(chainId: number): Promise<bigint>;
   getNativeTxs(q: PageQuery): Promise<Page<RawNativeTx>>;
-  // Contract-initiated native inflows (`txlistinternal`). Optional capability
-  // (ADR-009): closes the R3 gap where txlist alone omits internal value moves, so a
-  // native balance reconciles to eth_get_balance (04-testing.md §2, ADR-005 d2).
+  // Contract-initiated native value moves (`txlistinternal`), fetched by the worker's
+  // `native` stream alongside txlist over the same window (processors/ingest.ts). Closes
+  // the R3 gap where txlist alone omits them, so a native balance reconciles to
+  // eth_get_balance to the wei (04-testing.md §2, ADR-005 d2). Optional capability
+  // (ADR-009): both shipping adapters implement it and failoverProvider forwards it, but
+  // a chain served by neither degrades to txlist-only rather than failing every page.
   getInternalTxs?(q: PageQuery): Promise<Page<RawInternalTx>>;
   getErc20Transfers(q: PageQuery): Promise<Page<RawErc20Transfer>>;
   getTokenMeta?(chainId: number, address: string): Promise<RawTokenMeta>;
@@ -141,5 +154,25 @@ export class ProviderError extends Error {
     super(message, options);
     this.name = 'ProviderError';
     this.kind = kind;
+  }
+}
+
+/**
+ * The requested `anchor_from` date resolves to a block inside the reorg-unsafe
+ * tip (`resolved > safeHead`, ADR-005 finality / ADR-008 amendment). Clamping to
+ * safeHead — the prior behavior — fetched the provider-attested balance there
+ * but stamped the `opening_balance` event's `block_time` at midnight-of-anchor-
+ * date, a block/time mismatch that breaks the monotonicity `ledger/src/as-of.ts`
+ * assumes and silently folds every deposit between the anchor date and safeHead
+ * into the "as of anchor date" balance. Rejected loudly instead (H8). Carries
+ * only the numeric finalityDepth — no provider text (ADR-011).
+ */
+export class AnchorTooRecentError extends Error {
+  readonly finalityDepth: number;
+
+  constructor(finalityDepth: number) {
+    super(`anchor date too recent: must be at least ${String(finalityDepth)} blocks old`);
+    this.name = 'AnchorTooRecentError';
+    this.finalityDepth = finalityDepth;
   }
 }

@@ -37,9 +37,13 @@ beforeAll(async () => {
   await runMigrations(pool);
   db = createDb(pool);
   outDir = await mkdtemp(join(tmpdir(), 'reconcil-seed-recon-'));
+  // The export root (`RECONCIL_EXPORT_DIR`) — `out_dir` is confined to a subpath *under*
+  // this root (H2), so point the root itself at the temp dir.
+  process.env.RECONCIL_EXPORT_DIR = outDir;
 }, 120_000);
 
 afterAll(async () => {
+  delete process.env.RECONCIL_EXPORT_DIR;
   await pool.end();
   await container.stop();
   await rm(outDir, { recursive: true, force: true });
@@ -98,7 +102,7 @@ describe('recon-smb eval fixture', () => {
 
   it('journalizes the confirmed legs into a balanced QBO draft with the VAT split', async () => {
     const { ctx } = await seed();
-    const env = await exportJournalDrafts(ctx, { period: PERIOD, target: 'qbo', account_mapping: MAPPING, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx, { period: PERIOD, target: 'qbo', account_mapping: MAPPING });
     expect(env.data.balanced).toBe(true);
     expect(env.data.lines).toBe(7); // INV-PAID (2) + INV-VAT (3) + INV-PARTIAL (2)
     const csv = (await readFile(env.data.file.path)).toString('utf8');

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { deriveRecordStatus, suggestForRecord } from '../src/index.js';
 import type { CandidateEvent, MatchRecord, Tolerances } from '../src/index.js';
+import { computeBand, toMinor } from '../src/match/score.js';
 
 const ADDR = `0x${'a'.repeat(40)}`;
 const OTHER = `0x${'b'.repeat(40)}`;
@@ -41,9 +42,10 @@ describe('suggestForRecord — single-event matching', () => {
     expect(legs[0]!.fiatValue).toBe('1000.00');
     expect(legs[0]!.confidence).toBeGreaterThan(0.85);
     expect(ruleSet(0, legs)).toEqual(['address', 'amount', 'date']);
-    // Confidence is reproducible from the rationale: Σ weights === confidence.
+    // Confidence is reproducible from the rationale: Σ weights === confidence, EXACTLY
+    // (A3) — not approximately, so the rescale-under-the-hood makes this equality real.
     const sum = legs[0]!.rationale.reduce((acc, r) => acc + r.weight, 0);
-    expect(sum).toBeCloseTo(legs[0]!.confidence, 10);
+    expect(sum).toBe(legs[0]!.confidence);
   });
 
   it('suggests a partial payment from the expected sender (amount rule does not fire)', () => {
@@ -82,6 +84,35 @@ describe('suggestForRecord — single-event matching', () => {
   });
 });
 
+describe('suggestForRecord — band-edge suggestions require an articulable reason (H18)', () => {
+  it('drops a candidate exactly on the tolerance-band edge when nothing else fired (no 0-confidence leg)', () => {
+    const rec = record({ issuedOn: null, dueOn: null, expectedAddress: null });
+    // 1010.00 is exactly openAmount(1000.00) + the default 1% band(10.00): withinBand is
+    // inclusive (<=) but amountScore treats the edge as 0 (score.ts diff >= bandMinor).
+    // With no dates/address/history to fire either, there is no articulable reason — the
+    // engine must emit NO leg, not one with confidence 0 and empty rationale (C1).
+    const edge = ev({ valuedAmount: '1010.00', amountRaw: 1_010_000_000n, counterpartyAddr: OTHER });
+    expect(suggestForRecord(rec, [edge])).toEqual([]);
+  });
+
+  it('the same edge event still suggests once a real signal (address) fires', () => {
+    const rec = record({ issuedOn: null, dueOn: null, expectedAddress: ADDR });
+    const edge = ev({ valuedAmount: '1010.00', amountRaw: 1_010_000_000n, counterpartyAddr: ADDR });
+    const legs = suggestForRecord(rec, [edge]);
+    expect(legs).toHaveLength(1);
+    expect(ruleSet(0, legs)).toEqual(['address']);
+    expect(legs[0]!.confidence).toBe(0.35);
+  });
+});
+
+describe('suggestForRecord — zero-open-amount records (A4/A5)', () => {
+  it('emits no legs for a record with nothing outstanding, even from the expected sender', () => {
+    // A5: without this guard, every payment from the expected sender would become a
+    // suggested leg on an invoice that has nothing left to settle.
+    expect(suggestForRecord(record({ amount: '0.00', openAmount: '0.00' }), [ev()])).toEqual([]);
+  });
+});
+
 describe('suggestForRecord — tolerance and window boundaries', () => {
   it('honors an absolute amount band (in, then out)', () => {
     const tol: Tolerances = { amountPct: 0, amountAbs: '5.00' };
@@ -116,7 +147,7 @@ describe('suggestForRecord — bounded subset (split) search', () => {
     const e2 = ev({ eventId: 2, valuedAmount: '400.00', amountRaw: 400_000_000n, counterpartyAddr: OTHER });
     const legs = suggestForRecord(record(), [e1, e2]);
     expect(legs.map((l) => l.eventId).sort()).toEqual([1, 2]);
-    expect(legs[0]!.confidence).toBeCloseTo(legs[1]!.confidence, 10); // shared subset confidence
+    expect(legs[0]!.confidence).toBe(legs[1]!.confidence); // shared subset confidence (same scoreCandidate call)
     expect(legs[0]!.rationale.map((r) => r.rule)).toContain('amount');
   });
 
@@ -125,6 +156,35 @@ describe('suggestForRecord — bounded subset (split) search', () => {
     const events = Array.from({ length: 7 }, (_unused, i) =>
       ev({ eventId: i + 1, valuedAmount: '100.00', amountRaw: 100_000_000n, counterpartyAddr: OTHER }));
     expect(suggestForRecord(rec, events)).toEqual([]);
+  });
+
+  it('also leaves a record open when the exact split needs a member outside the top-6-by-size pool (known limitation, req 5)', () => {
+    // The pool is the 6 LARGEST candidates, not "any 6". Here the true split is
+    // 650.00 + 50.00 = 700.00, but five 100.00 decoys crowd the 50.00 leg out of the
+    // top-6 pool (650 + five 100s already fill it), so the search never sees it. This
+    // is the honest, documented blind spot (engine.ts header) distinct from the
+    // "needs >6 events" case above — a characterization test, not a red one: it pins
+    // TODAY's behavior so a future widening of the pool selection flips it consciously.
+    const rec = record({ amount: '700.00', openAmount: '700.00' });
+    const big = ev({ eventId: 1, valuedAmount: '650.00', amountRaw: 650_000_000n, counterpartyAddr: OTHER });
+    const decoys = Array.from({ length: 5 }, (_unused, i) =>
+      ev({ eventId: i + 2, valuedAmount: '100.00', amountRaw: 100_000_000n, counterpartyAddr: OTHER }));
+    const small = ev({ eventId: 7, valuedAmount: '50.00', amountRaw: 50_000_000n, counterpartyAddr: OTHER });
+    expect(suggestForRecord(rec, [big, ...decoys, small])).toEqual([]);
+  });
+});
+
+describe('computeBand — amount_pct resolves to 4 decimal places (A6)', () => {
+  it('a 0.004% tolerance produces a real, non-zero band', () => {
+    const band = computeBand('1000000.00', { amountPct: 0.004 });
+    // 0.004% of 1,000,000.00 = 40.00. The old e2 rounding (Math.round(pct * 100)) rounded
+    // 0.004 to 0 basis points and collapsed this band to abs-only (0) — no signal at all.
+    expect(band.bandMinor).toBe(toMinor('40'));
+  });
+
+  it('precision finer than e4 still rounds — documented, not an error', () => {
+    const band = computeBand('1000000.00', { amountPct: 0.00004 });
+    expect(band.bandMinor).toBe(0n); // rounds to 0 scaled units → band = abs only
   });
 });
 
@@ -135,5 +195,14 @@ describe('deriveRecordStatus', () => {
     expect(deriveRecordStatus('1000.00', '1005.00')).toBe('matched'); // inside the 1% band
     expect(deriveRecordStatus('1000.00', '400.00')).toBe('partially_matched');
     expect(deriveRecordStatus('1000.00', '1200.00')).toBe('overpaid');
+  });
+
+  it('a genuinely zero-amount record with nothing applied is matched, not stuck open forever (A4)', () => {
+    expect(deriveRecordStatus('0', '0')).toBe('matched');
+    expect(deriveRecordStatus('0.00', '0.00')).toBe('matched');
+  });
+
+  it('any payment against a zero-amount record is an overpayment', () => {
+    expect(deriveRecordStatus('0.00', '10.00')).toBe('overpaid');
   });
 });

@@ -175,7 +175,7 @@ describe('getInternalTxs', () => {
     expect(u.searchParams.get('apikey')).toBe(KEY);
   });
 
-  it('maps rows to RawInternalTx, dropping gas/trace fields', async () => {
+  it('maps rows to RawInternalTx, dropping gas fields but KEEPING traceId (the sentinel order key)', async () => {
     const { transport } = stub({ status: '1', message: 'OK', result: [INTERNAL_ROW] });
     const page = await adapter(transport).getInternalTxs!(Q);
     expect(page.items).toEqual([
@@ -187,8 +187,23 @@ describe('getInternalTxs', () => {
         to: INTERNAL_ROW.to,
         value: '3000000000000000000',
         isError: '0',
+        traceId: '0',
       },
     ]);
+  });
+
+  it('keeps a dotted traceId verbatim and treats an absent/empty one as no label', async () => {
+    const { transport } = stub({
+      status: '1',
+      message: 'OK',
+      result: [
+        { ...INTERNAL_ROW, traceId: '0_1_2' },
+        { ...INTERNAL_ROW, traceId: '' },
+        { ...INTERNAL_ROW, traceId: undefined },
+      ],
+    });
+    const page = await adapter(transport).getInternalTxs!(Q);
+    expect(page.items.map((i) => i.traceId)).toEqual(['0_1_2', undefined, undefined]);
   });
 
   it('maps empty-string `to` (internal contract creation) to null', async () => {

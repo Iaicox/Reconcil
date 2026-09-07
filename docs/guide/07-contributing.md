@@ -6,7 +6,7 @@ rests on.
 ## Setup
 
 ```bash
-pnpm install     # Node >= 22.12, pnpm 11 (both pinned in package.json)
+pnpm install     # Node >= 22.13, pnpm 11 (both pinned in package.json)
 pnpm build       # turbo run build → tsc -b across project references
 ```
 

@@ -19,7 +19,9 @@ const WALLET = `0x${'1'.repeat(40)}`; // tenant's receiving wallet
 const PAYER = `0x${'2'.repeat(40)}`; // counterparty on a receivable
 
 const TOKEN_ADDR = `0x${'c'.repeat(40)}`; // EUR-pegged stablecoin
-const MISSING_MATCH = '00000000-0000-0000-0000-0000000000ff'; // well-formed but absent
+// Well-formed (passes the schema's `.uuid()` shape check) but absent from `matches`,
+// so this still exercises the repo's "not found" lookup, not schema-level rejection.
+const MISSING_MATCH = '00000000-0000-4000-8000-0000000000ff';
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:16').start();
@@ -192,6 +194,11 @@ describe('recon_confirm_match — HITL confirmation', () => {
 
   it('rejects an unknown match_id with INVALID_INPUT', async () => {
     await expect(reconConfirmMatch(ctx(), { match_id: MISSING_MATCH })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  it('rejects a non-UUID match_id with INVALID_INPUT at input validation (not a raw uuid-cast error)', async () => {
+    await expect(reconConfirmMatch(ctx(), { match_id: 'not-a-uuid' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(reconRejectMatch(ctx(), { match_id: 'not-a-uuid' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
   it('isolates tenants: a foreign tenant cannot confirm the leg (INVALID_INPUT), leaving it suggested', async () => {
