@@ -10,7 +10,7 @@ Every command and every output on this page was executed against a real stack.
 | | |
 |---|---|
 | **Docker** with Compose v2 | The only hard requirement. (v2.24+ if you also want to run `pnpm smoke:compose` — its override uses `ports: !reset`.) |
-| **Node ≥ 22.12 and pnpm 11** | Only if you want to build, test, or develop outside Docker. Running the stack does not need them. |
+| **Node ≥ 22.13 and pnpm 11** | Only if you want to build, test, or develop outside Docker. Running the stack does not need them. |
 | **Provider API keys** | Optional. Blockscout is keyless; an `ETHERSCAN_API_KEY` gets you higher rate limits. See [Operations](05-operations.md#chain-data-providers). |
 | **`ANTHROPIC_API_KEY`** | Only for the bundled demo REPL and the eval harness. The server and worker never call an LLM. |
 

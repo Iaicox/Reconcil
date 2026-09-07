@@ -117,6 +117,25 @@ describe('runAnchor — native stream', () => {
     const { rows } = await pool.query(`SELECT count(*)::int AS n FROM chain_events`);
     expect(rows[0].n).toBe(0);
   });
+
+  // H8: a requested anchor date recent enough to resolve inside the reorg-unsafe
+  // tip (resolved > safeHead) must be rejected, not clamped — clamping would fetch
+  // the balance at safeHead but stamp block_time at midnight-of-anchor-date,
+  // breaking block_number/block_time monotonicity (ledger/src/as-of.ts).
+  it('too-recent anchor date: throws instead of clamping to safeHead, writes nothing', async () => {
+    await seedAnchoring(1, 'native', '2024-01-01');
+    // head 1_000_000, finalityDepth 64 (chain 1) ⇒ safe = 999_936; resolved 999_990
+    // lands inside the unsafe tip.
+    await expect(
+      runAnchor(deps(db, { getBlockByTime: async () => 999_990n }), {
+        chainId: 1, address: ADDR, stream: 'native', anchorFrom: '2024-01-01',
+      }),
+    ).rejects.toMatchObject({ name: 'AnchorTooRecentError', finalityDepth: 64 });
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM chain_events`);
+    expect(rows[0].n).toBe(0);
+    const cp = await pool.query(`SELECT status, last_processed_block FROM ingestion_checkpoints WHERE stream='native'`);
+    expect(cp.rows[0]).toEqual({ status: 'anchoring', last_processed_block: '0' });
+  });
 });
 
 describe('runAnchor — erc20 stream', () => {

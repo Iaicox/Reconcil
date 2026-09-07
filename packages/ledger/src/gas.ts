@@ -54,7 +54,7 @@ export async function computeGas(db: Db, p: GasParams): Promise<GasRow[]> {
     eq(chainEvents.eventKind, 'gas_fee'),
     inArray(chainEvents.fromAddr, addresses),
     timeBetween(from, to),
-    chainFilter(p.chainIds),
+    chainFilter(p.scope.chainIds),
   );
 
   const monthExpr = sql<string>`to_char(${chainEvents.blockTime} AT TIME ZONE 'UTC', 'YYYY-MM')`;
@@ -77,21 +77,29 @@ export async function computeGas(db: Db, p: GasParams): Promise<GasRow[]> {
 
   const tokenIds = [...new Set(agg.map((r) => r.tokenId))];
   const metaById = await loadTokenMeta(db, tokenIds);
+  // Same restriction as flows.ts/counterparties.ts: tie backing to exactly the
+  // token set the rows below will resolve (metaById), not every token `base`
+  // touched — provably one row set instead of two independently-issued queries
+  // that only happen to agree (dropped-token minors). Gas applies no verified
+  // filter (natives always shown), so this is `[...metaById.keys()]` directly.
+  const survivingTokenIds = [...metaById.keys()];
 
   // Backing: one ordered fetch, bucketed by the same composite key (computed in JS
   // so it matches the SQL grouping exactly).
-  const refRows = await db
-    .select({
-      chainId: chainEvents.chainId,
-      txHash: chainEvents.txHash,
-      logIndex: chainEvents.logIndex,
-      tokenId: chainEvents.tokenId,
-      fromAddr: chainEvents.fromAddr,
-      blockTime: chainEvents.blockTime,
-    })
-    .from(chainEvents)
-    .where(base)
-    .orderBy(chainEvents.chainId, chainEvents.blockNumber, chainEvents.logIndex, chainEvents.id);
+  const refRows = survivingTokenIds.length > 0
+    ? await db
+        .select({
+          chainId: chainEvents.chainId,
+          txHash: chainEvents.txHash,
+          logIndex: chainEvents.logIndex,
+          tokenId: chainEvents.tokenId,
+          fromAddr: chainEvents.fromAddr,
+          blockTime: chainEvents.blockTime,
+        })
+        .from(chainEvents)
+        .where(and(base, inArray(chainEvents.tokenId, survivingTokenIds)))
+        .orderBy(chainEvents.chainId, chainEvents.blockNumber, chainEvents.logIndex, chainEvents.id)
+    : [];
   const backing = bucketBacking(refRows, (r) => [keyOf(dims, { tokenId: r.tokenId, wallet: r.fromAddr, month: monthOf(r.blockTime) })]);
 
   const rows: GasRow[] = [];

@@ -18,11 +18,13 @@ describe('deriveRecordStatus — invariant #2 (status is a monotone pure functio
   it('is open at zero, bounded to the four derivable states, and non-decreasing in applied fiat', () => {
     fc.assert(
       fc.property(
-        fc.integer({ min: 100, max: 1_000_000 }), // invoice amount in cents (≥ 1.00)
+        // Invoice amount in cents, including 0 (A4: a genuinely zero-amount record is
+        // 'matched' at zero applied, not 'open' — the band {0,0} already contains 0).
+        fc.integer({ min: 0, max: 1_000_000 }),
         fc.array(fc.integer({ min: 0, max: 2_000_000 }), { minLength: 1, maxLength: 8 }),
         (amountCents, appliedList) => {
           const amount = dec(amountCents);
-          expect(deriveRecordStatus(amount, '0.00')).toBe('open');
+          expect(deriveRecordStatus(amount, '0.00')).toBe(amountCents === 0 ? 'matched' : 'open');
 
           let prevRank = -1;
           for (const cents of [...appliedList].sort((a, b) => a - b)) {

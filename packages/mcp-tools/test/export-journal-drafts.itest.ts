@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ToolContext } from '../src/context.js';
+import { ToolError } from '../src/errors.js';
 import { exportJournalDrafts } from '../src/tools/export-journal-drafts.js';
 
 let container: StartedPostgreSqlContainer;
@@ -37,9 +38,13 @@ beforeAll(async () => {
   await runMigrations(pool);
   db = createDb(pool);
   outDir = await mkdtemp(join(tmpdir(), 'reconcil-journal-'));
+  // The export root (`RECONCIL_EXPORT_DIR`) — `out_dir` (below) is now confined to a
+  // subpath *under* this root, so tests point the root itself at the temp dir (H2).
+  process.env.RECONCIL_EXPORT_DIR = outDir;
 }, 120_000);
 
 afterAll(async () => {
+  delete process.env.RECONCIL_EXPORT_DIR;
   await pool.end();
   await container.stop();
   await rm(outDir, { recursive: true, force: true });
@@ -129,7 +134,7 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     const evSug = await seedEvent(token, '500000000', { logIndex: 3, to: WALLET });
     await seedLeg(draftRec, evSug, '500000000', '500.00', { status: 'suggested' });
 
-    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', account_mapping: MAPPING, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', account_mapping: MAPPING });
 
     // --- output shape ---
     expect(env.data.balanced).toBe(true);
@@ -169,7 +174,7 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     const ev = await seedEvent(token, '1000000000', { logIndex: 1 });
     await seedLeg(inv, ev, '1000000000', '1000.00');
 
-    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'xero', account_mapping: { crypto_asset: '1010' }, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'xero', account_mapping: { crypto_asset: '1010' } });
 
     expect(env.data.unmapped_categories).toEqual(['accounts_receivable', 'vat_output']);
     expect(env.data.file.name).toBe('journal_draft_xero_DRAFT.csv');
@@ -184,7 +189,7 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     await seedLeg(jun, evJun, '100000000', '100.00');
     await seedLeg(aug, evAug, '100000000', '100.00');
 
-    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', account_mapping: MAPPING, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', account_mapping: MAPPING });
 
     expect(env.data.lines).toBe(2); // only the June entry (no VAT → 2 lines)
     const csv = (await readFile(env.data.file.path)).toString('utf8');
@@ -205,7 +210,7 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
       [WALLET],
     );
 
-    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', client_id: CLIENT, account_mapping: MAPPING, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', client_id: CLIENT, account_mapping: MAPPING });
 
     expect(env.data.lines).toBe(2); // only CLIENT's receivable
     const csv = (await readFile(env.data.file.path)).toString('utf8');
@@ -217,14 +222,46 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
 
   it('rejects an unknown client_id with INVALID_INPUT', async () => {
     await expect(
-      exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', client_id: MISSING_CLIENT, out_dir: outDir }),
+      exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', client_id: MISSING_CLIENT }),
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
   it('produces an empty but balanced journal when nothing is confirmed in the period', async () => {
     await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'empty', 'empty')`, [TENANT2]);
-    const env = await exportJournalDrafts(ctx(TENANT2), { period: PERIOD, target: 'qbo', out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(TENANT2), { period: PERIOD, target: 'qbo' });
     expect(env.data.balanced).toBe(true);
     expect(env.data.lines).toBe(0);
+  });
+});
+
+// export-journal-drafts.ts calls `baseDir` directly (not through `runExport`, unlike
+// export_close_pack / export_pdf_summary) — this is a separate call site, so it gets its
+// own confinement smoke test (H2). Full coverage of `baseDir` itself lives in
+// export-run.test.ts (hermetic) and export.itest.ts's confinement describe block.
+describe('export_journal_drafts — out_dir confinement (security, H2)', () => {
+  it('rejects a traversal out_dir without leaking the export root path, and registers nothing', async () => {
+    let thrown: ToolError | undefined;
+    try {
+      await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: '../x' });
+    } catch (err) {
+      thrown = err as ToolError;
+    }
+    expect(thrown?.code).toBe('INVALID_INPUT');
+    expect(thrown?.message).not.toContain(outDir); // no internal-path leak (finding H2)
+    expect(thrown?.hint).toContain('RECONCIL_EXPORT_DIR');
+
+    const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM exports`);
+    expect(rows[0]?.n).toBe('0'); // truncated fresh by beforeEach — no orphan row
+  });
+
+  it('writes under a relative out_dir subpath inside the export root', async () => {
+    const token = await seedToken();
+    const inv = await seedRecord('INV-SUB', '100.00', { direction: 'receivable' });
+    const ev = await seedEvent(token, '100000000', { logIndex: 1, to: WALLET });
+    await seedLeg(inv, ev, '100000000', '100.00');
+
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: 'june/close' });
+    expect(env.data.file.path).toContain(join(outDir, 'june', 'close'));
+    await expect(readFile(env.data.file.path)).resolves.toBeTruthy();
   });
 });
