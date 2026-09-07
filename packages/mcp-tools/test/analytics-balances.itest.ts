@@ -161,6 +161,9 @@ describe('analytics_balances — envelope, citations, warnings, tenancy', () => 
     await expect(analyticsBalances(ctx(), { bogus: 1 })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     // as_of must be an ISO date, not an arbitrary string
     await expect(analyticsBalances(ctx(), { as_of: 'yesterday' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    // as_of must be a real calendar date — Feb 30 must not silently roll over to
+    // Mar 2 and get cited back as the effective date (H6)
+    await expect(analyticsBalances(ctx(), { as_of: '2026-02-30' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
   it('summarizes backing as event_ref_summary + drilldown past the ref cap (C3)', async () => {
