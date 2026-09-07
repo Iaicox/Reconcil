@@ -42,9 +42,8 @@ export async function analyticsGas(
 
   const [gasRows, coverage] = await Promise.all([
     computeGas(ctx.db, {
-      scope: { addresses },
+      scope: { addresses, ...chainScope },
       period: input.period,
-      ...chainScope,
       ...(input.group_by ? { groupBy: input.group_by } : {}),
     }),
     getLedgerStatus(ctx.db, { addresses, ...chainScope }),

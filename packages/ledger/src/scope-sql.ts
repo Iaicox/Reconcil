@@ -5,22 +5,41 @@
  * internal `from∈S ∧ to∈S`.
  */
 import { chainEvents } from '@reconcil/db';
-import { and, type SQL, gte, inArray, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, type SQL, gte, inArray, lt, notInArray, or, sql } from 'drizzle-orm';
 
 import type { FlowDirection, Period } from './types.js';
 
 export const TRANSFER_KINDS = ['native_transfer', 'erc20_transfer'] as const;
 
+/**
+ * Exclusive end of a UTC calendar day: the instant `date` ends and the next day
+ * begins. Shared by `periodRange` and the `as_of`/balances cutoff (balances.ts)
+ * so both day-boundary constructions stay in lockstep (H10 minors).
+ */
+export function dayEndExclusive(date: string): Date {
+  const d = new Date(`${date}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d;
+}
+
+/**
+ * Half-open day range `[from, toExclusive)`. A closed `T23:59:59.999Z` upper
+ * bound silently drops any event with sub-millisecond `block_time`
+ * (TIMESTAMPTZ is microsecond-precision) — unreachable with today's
+ * whole-second EVM timestamps, but wrong by construction. Pair with
+ * `timeBetween`, which expects this same exclusive convention.
+ */
 export function periodRange(p: Period): { from: Date; to: Date } {
-  return { from: new Date(`${p.from}T00:00:00.000Z`), to: new Date(`${p.to}T23:59:59.999Z`) };
+  return { from: new Date(`${p.from}T00:00:00.000Z`), to: dayEndExclusive(p.to) };
 }
 
 export function transferKinds(): SQL {
   return inArray(chainEvents.eventKind, TRANSFER_KINDS);
 }
 
-export function timeBetween(from: Date, to: Date): SQL {
-  return and(gte(chainEvents.blockTime, from), lte(chainEvents.blockTime, to))!;
+/** `[from, toExclusive)` — half-open, matching `periodRange`'s day-boundary convention. */
+export function timeBetween(from: Date, toExclusive: Date): SQL {
+  return and(gte(chainEvents.blockTime, from), lt(chainEvents.blockTime, toExclusive))!;
 }
 
 export function chainFilter(chainIds?: number[]): SQL | undefined {

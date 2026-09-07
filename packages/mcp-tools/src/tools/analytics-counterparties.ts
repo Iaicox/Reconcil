@@ -47,9 +47,8 @@ export async function analyticsCounterparties(
 
   const [cp, coverage] = await Promise.all([
     computeCounterparties(ctx.db, {
-      scope: { addresses },
+      scope: { addresses, ...chainScope },
       period: input.period,
-      ...chainScope,
       ...(input.direction ? { direction: input.direction } : {}),
       ...(input.top_n !== undefined ? { topN: input.top_n } : {}),
       includeUnverified,

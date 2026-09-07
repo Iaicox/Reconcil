@@ -38,9 +38,8 @@ export async function analyticsListEvents(
   const chainScope = input.chain_ids ? { chainIds: input.chain_ids } : {};
 
   const params: ListEventsParams = {
-    scope: { addresses },
+    scope: { addresses, ...chainScope },
     ...(input.period ? { period: input.period } : {}),
-    ...chainScope,
     ...(input.tokens ? { tokens: input.tokens.map((t) => ({ chainId: t.chain_id, address: t.address })) } : {}),
     ...(input.counterparty_address !== undefined ? { counterpartyAddress: input.counterparty_address } : {}),
     ...(input.kinds ? { kinds: input.kinds } : {}),
