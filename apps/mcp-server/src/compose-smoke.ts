@@ -85,7 +85,12 @@ async function waitForSchema(): Promise<void> {
     if (code === 0 && stdout.trim() === 'tenants') return;
     await delay(2000);
   }
-  throw new Error('timed out waiting for migrations — public.tenants never appeared (is the worker healthy?)');
+  // The worker migrates on boot, so a timeout almost always means it never got that far —
+  // and its own log says why in one line (a bad env var, an unreachable dependency). Dump
+  // it before failing: without this the smoke reports "is the worker healthy?" and leaves
+  // the answer in a container that the `finally` block is about to destroy.
+  await sh('docker', compose('logs', '--tail', '50', 'worker'));
+  throw new Error('timed out waiting for migrations — public.tenants never appeared; the worker log above should say why');
 }
 
 /** process.env with undefined values dropped (the SDK transport wants Record<string,string>). */
