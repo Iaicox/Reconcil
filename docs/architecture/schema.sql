@@ -85,7 +85,8 @@ CREATE TABLE chain_events (
     chain_id     INTEGER NOT NULL,
     tx_hash      TEXT NOT NULL,        -- lowercase 0x-hex(64); synthetic 'anchor:<addr>:<block>' for opening_balance
     log_index    INTEGER NOT NULL,     -- sentinels: -1 native transfer, -2 gas fee, -3 opening balance;
-                                       -- reserved: -(1000+n) for future internal (trace) transfers
+                                       -- -(1000+n): trace-level internal transfer n (txlistinternal,
+                                       -- ADR-005 d2); n = the trace's stable rank within its parent tx
     event_kind   TEXT NOT NULL CHECK (event_kind IN
                      ('native_transfer', 'erc20_transfer', 'gas_fee', 'opening_balance')),
     token_id     BIGINT NOT NULL REFERENCES tokens(id),
