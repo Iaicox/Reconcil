@@ -7,14 +7,29 @@ the positioning and recruits interview subjects (a `mailto:` CTA — no signup, 
 
 This directory is **deliberately outside the pnpm workspace** (the workspace globs only `apps/*`
 and `packages/*`). It has its own `package.json` and `package-lock.json` and uses **npm**, so
-Next.js and React never enter the product's root `pnpm-lock.yaml`, `turbo` task graph,
-`depcruise` boundaries, or the ADR-011 supply-chain scan. The backend build is completely
-unaffected by anything here.
+Next.js and React never enter the product's root `pnpm-lock.yaml`, `turbo` task graph, or
+`depcruise` boundaries. The backend build is completely unaffected by anything here.
+
+The one deliberate exception is the ADR-011 supply-chain scan: `pnpm check:supply-chain` reads
+`site/package-lock.json` too. The signing/key-material ban is about what this repository ships,
+not about which package manager installed it.
 
 ## Stack
 
-Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS v4. Configured for **static
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4. Configured for **static
 export** (`output: 'export'` in `next.config.mjs`) — `next build` emits a fully static `out/`.
+
+## Lint
+
+`next lint` was removed in Next 16. Linting runs via the ESLint CLI directly against a flat
+config (`npm run lint` → `eslint .`, config in `eslint.config.mjs`), using the flat-config
+array `eslint-config-next` exports at its package root as of v16 (same `next/core-web-vitals`
+rule surface as before).
+
+ESLint is pinned to `^9.0.0` here, deliberately *not* the root workspace catalog's `^10.0.0`
+— `eslint-config-next@16.x` bundles `eslint-plugin-react`, which still calls
+`context.getFilename()` (removed in ESLint 10) and crashes every run. Revisit once a newer
+`eslint-config-next`/`eslint-plugin-react` supports ESLint 10.
 
 ## Develop
 

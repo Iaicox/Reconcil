@@ -57,13 +57,13 @@ export async function exportJournalDrafts(
   });
 
   // Materialize the single CSV under out_dir/<export_id>/ (the subdir isolates runs).
-  const dir = join(baseDir(input.out_dir), exportId);
+  const dir = join(await baseDir(input.out_dir), exportId);
   const filePath = join(dir, rendered.file.name);
   try {
     await mkdir(dir, { recursive: true });
     await writeFile(filePath, rendered.file.content);
   } catch (err) {
-    throw new ToolError('INTERNAL', `${TOOL_NAME} failed to write the journal file: ${String(err)}`);
+    throw new ToolError('INTERNAL', `${TOOL_NAME} failed to write the journal file`, undefined, err);
   }
 
   // Validate the output BEFORE the DB write, so a contract violation can't leave an
@@ -79,7 +79,7 @@ export async function exportJournalDrafts(
   try {
     validated = exportJournalDraftsOutput.parse(outputData);
   } catch (err) {
-    throw new ToolError('INTERNAL', `${TOOL_NAME} produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', `${TOOL_NAME} produced an output that violates its contract`, undefined, err);
   }
 
   const residueWarnings: Warning[] = rendered.roundingResidues
