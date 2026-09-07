@@ -33,6 +33,11 @@ import type { ToolContext } from '../context.js';
 /** Records still carrying an outstanding balance (mutable array for drizzle inference). */
 const OPEN_STATES: ('open' | 'partially_matched')[] = ['open', 'partially_matched'];
 
+/** The contract's strict 5-key `records` shape (§6.4) — see `mapStatusCounts` (C7). */
+const ZERO_RECORD_COUNTS: ReconStatusResult['records'] = {
+  open: 0, partially_matched: 0, matched: 0, overpaid: 0, void: 0,
+};
+
 export interface ReconStatusParams {
   period?: { from: string; to: string };
   /** Resolved+validated client id to scope to; undefined = all of the tenant's data. */
@@ -70,10 +75,7 @@ export async function computeReconStatus(
         .from(externalRecords)
         .where(recordScope)
         .groupBy(externalRecords.status);
-      const records: ReconStatusResult['records'] = {
-        open: 0, partially_matched: 0, matched: 0, overpaid: 0, void: 0,
-      };
-      for (const r of statusRows) records[r.status] = r.count;
+      const records = mapStatusCounts(statusRows);
 
       // 2. Outstanding open amounts per currency (amount − confirmed) over open/partial
       //    records. Money math stays in SQL (exact numeric, ADR-004); `::text` on the edge.
@@ -155,9 +157,32 @@ export async function computeReconStatus(
 }
 
 /**
- * Correlated Σ of a record's confirmed-leg fiat (0 when none), tenant-scoped. Inlined
- * into the open-amount and overpayment expressions so the subtraction stays in numeric SQL.
+ * Correlated Σ of a record's confirmed-leg fiat (0 when none), tenant-scoped and
+ * currency-matched (C6): `match-repo.ts` always writes `fiat_currency` = the record's own
+ * currency, but nothing at the schema level enforces that, so a leg written any other way
+ * (a future writer, a manual correction) must not pollute a sum keyed by record currency.
+ * Inlined into the open-amount and overpayment expressions so the subtraction stays in
+ * numeric SQL.
  */
 function confirmedFiat(tenantId: string) {
-  return sql`coalesce((select sum(${matches.fiatValue}) from ${matches} where ${matches.externalRecordId} = ${externalRecords.id} and ${matches.tenantId} = ${tenantId} and ${matches.status} = 'confirmed'), 0)`;
+  return sql`coalesce((select sum(${matches.fiatValue}) from ${matches} where ${matches.externalRecordId} = ${externalRecords.id} and ${matches.tenantId} = ${tenantId} and ${matches.status} = 'confirmed' and ${matches.fiatCurrency} = ${externalRecords.currency}), 0)`;
+}
+
+/**
+ * Map raw per-status counts into the contract's strict 5-key `records` shape (C7): a
+ * status outside the current 5-value contract enum is skipped rather than injected as an
+ * extra key, which would fail `reconStatusOutput`'s `.strict()` parse and turn this read
+ * tool INTERNAL. The DB `CHECK` on `external_records.status` makes this unreachable
+ * today — the guard is forward-compatible with a migration widening the enum ahead of
+ * this mapping. No logger is wired into `ToolContext` yet; if one lands, warn here
+ * instead of silently skipping.
+ */
+export function mapStatusCounts(rows: { status: string; count: number }[]): ReconStatusResult['records'] {
+  const records: ReconStatusResult['records'] = { ...ZERO_RECORD_COUNTS };
+  for (const r of rows) {
+    if (r.status in records) {
+      (records as Record<string, number>)[r.status] = r.count;
+    }
+  }
+  return records;
 }

@@ -55,7 +55,7 @@ export async function computeFlows(db: Db, p: FlowsParams): Promise<FlowsResult>
   const restrict = p.restrictTokenIds && p.restrictTokenIds.length > 0
     ? inArray(chainEvents.tokenId, p.restrictTokenIds)
     : undefined;
-  const base = and(transferKinds(), timeBetween(from, to), chainFilter(p.chainIds), restrict);
+  const base = and(transferKinds(), timeBetween(from, to), chainFilter(p.scope.chainIds), restrict);
   const inflowExpr = sql<string>`coalesce(sum(case when ${inArray(chainEvents.toAddr, addresses)} then ${chainEvents.amountRaw} else 0 end),0)`;
   const outflowExpr = sql<string>`coalesce(sum(case when ${inArray(chainEvents.fromAddr, addresses)} then ${chainEvents.amountRaw} else 0 end),0)`;
   const txExpr = sql<number>`count(distinct ${chainEvents.txHash})::int`;
@@ -88,22 +88,39 @@ export async function computeFlows(db: Db, p: FlowsParams): Promise<FlowsResult>
 
   const tokenIds = [...new Set([...extAgg, ...intAgg].map((r) => r.tokenId))];
   const metaById = await loadTokenMeta(db, tokenIds);
+  // Restrict backing to the exact token set `buildRows` will actually emit rows for
+  // (resolved in metaById AND verified-per-policy) — not every token the raw SQL
+  // aggregate touched. `aggs`/backing already agree per-token (the bucket key always
+  // includes tokenId, so a dropped token's backing can never leak into a surviving
+  // row's citations), but this ties the fetch to the same filtered set explicitly
+  // rather than relying on that as an incidental property (dropped-token minors).
+  const includeUnverified = p.includeUnverified ?? false;
+  const survivingTokenIds = tokenIds.filter((id) => {
+    const t = metaById.get(id);
+    return t !== undefined && (includeUnverified || t.verified);
+  });
 
   // Backing: one ordered fetch of the same event set, bucketed by the composite
   // group key (computed in JS so it matches the SQL grouping exactly).
-  const refRows = await db
-    .select({
-      chainId: chainEvents.chainId,
-      txHash: chainEvents.txHash,
-      logIndex: chainEvents.logIndex,
-      tokenId: chainEvents.tokenId,
-      fromAddr: chainEvents.fromAddr,
-      toAddr: chainEvents.toAddr,
-      blockTime: chainEvents.blockTime,
-    })
-    .from(chainEvents)
-    .where(and(base, or(externalCondition(addresses, direction), internalCondition(addresses))))
-    .orderBy(chainEvents.chainId, chainEvents.blockNumber, chainEvents.logIndex, chainEvents.id);
+  const refRows = survivingTokenIds.length > 0
+    ? await db
+        .select({
+          chainId: chainEvents.chainId,
+          txHash: chainEvents.txHash,
+          logIndex: chainEvents.logIndex,
+          tokenId: chainEvents.tokenId,
+          fromAddr: chainEvents.fromAddr,
+          toAddr: chainEvents.toAddr,
+          blockTime: chainEvents.blockTime,
+        })
+        .from(chainEvents)
+        .where(and(
+          base,
+          or(externalCondition(addresses, direction), internalCondition(addresses)),
+          inArray(chainEvents.tokenId, survivingTokenIds),
+        ))
+        .orderBy(chainEvents.chainId, chainEvents.blockNumber, chainEvents.logIndex, chainEvents.id)
+    : [];
   const S = new Set(addresses);
   const isInternal = (r: { fromAddr: string; toAddr: string }): boolean => S.has(r.fromAddr) && S.has(r.toAddr);
   const refKey = (r: { tokenId: number; fromAddr: string; toAddr: string; blockTime: Date }): string[] => [

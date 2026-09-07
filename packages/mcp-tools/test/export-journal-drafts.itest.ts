@@ -9,6 +9,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ToolContext } from '../src/context.js';
+import { ToolError } from '../src/errors.js';
 import { exportJournalDrafts } from '../src/tools/export-journal-drafts.js';
 
 let container: StartedPostgreSqlContainer;
@@ -27,6 +28,7 @@ const WALLET2 = `0x${'3'.repeat(40)}`;
 const OUTSIDER = `0x${'9'.repeat(40)}`;
 const PAYER = `0x${'2'.repeat(40)}`;
 const EUR_TOKEN = `0x${'c'.repeat(40)}`;
+const WETH_TOKEN = `0x${'d'.repeat(40)}`; // a verified non-stablecoin (volatile) token
 
 const PERIOD = { from: '2026-06-01', to: '2026-06-30' };
 const MAPPING = { crypto_asset: '1010', accounts_receivable: '1100', accounts_payable: '2000', vat_output: '2200', vat_input: '1300' };
@@ -37,9 +39,13 @@ beforeAll(async () => {
   await runMigrations(pool);
   db = createDb(pool);
   outDir = await mkdtemp(join(tmpdir(), 'reconcil-journal-'));
+  // The export root (`RECONCIL_EXPORT_DIR`) — `out_dir` (below) is now confined to a
+  // subpath *under* this root, so tests point the root itself at the temp dir (H2).
+  process.env.RECONCIL_EXPORT_DIR = outDir;
 }, 120_000);
 
 afterAll(async () => {
+  delete process.env.RECONCIL_EXPORT_DIR;
   await pool.end();
   await container.stop();
   await rm(outDir, { recursive: true, force: true });
@@ -63,6 +69,25 @@ async function seedToken(): Promise<number> {
     `INSERT INTO tokens (chain_id, address, standard, symbol_display, decimals, is_stablecoin, peg_currency, verified)
      VALUES (1, $1, 'erc20', 'EURC', 6, true, 'EUR', true) RETURNING id`,
     [EUR_TOKEN],
+  );
+  return Number(rows[0]!.id);
+}
+
+/** A verified NON-stablecoin ERC-20 (WETH-like, 18 decimals). Returns its token id. */
+async function seedVolatileToken(): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO tokens (chain_id, address, standard, symbol_display, decimals, is_stablecoin, peg_currency, verified)
+     VALUES (1, $1, 'erc20', 'WETH', 18, false, null, true) RETURNING id`,
+    [WETH_TOKEN],
+  );
+  return Number(rows[0]!.id);
+}
+
+/** A daily price snapshot for a token. Returns its id. */
+async function seedSnapshot(tokenId: number, price: string, date: string, currency = 'EUR'): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO price_snapshots (token_id, price_date, currency, price, source) VALUES ($1,$2,$3,$4,'defillama') RETURNING id`,
+    [tokenId, date, currency, price],
   );
   return Number(rows[0]!.id);
 }
@@ -96,15 +121,18 @@ async function seedRecord(externalRef: string, amount: string, opts: RecordOpts 
 
 async function seedLeg(
   recordId: string, eventId: number, amountAppliedRaw: string, fiatValue: string,
-  opts: { status?: 'confirmed' | 'suggested' | 'rejected'; currency?: string } = {},
+  opts: {
+    status?: 'confirmed' | 'suggested' | 'rejected'; currency?: string;
+    priceSnapshotId?: number; fxRateId?: number;
+  } = {},
 ): Promise<string> {
-  const { status = 'confirmed', currency = 'EUR' } = opts;
+  const { status = 'confirmed', currency = 'EUR', priceSnapshotId = null, fxRateId = null } = opts;
   const confirmed = status === 'confirmed';
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO matches
-       (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'agent', $8, $9, 0.9, '{}'::jsonb) RETURNING id`,
-    [TENANT, recordId, eventId, amountAppliedRaw, fiatValue, currency, status, confirmed ? 'agent' : null, confirmed ? new Date() : null],
+       (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, price_snapshot_id, fx_rate_id, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'agent', $10, $11, 0.9, '{}'::jsonb) RETURNING id`,
+    [TENANT, recordId, eventId, amountAppliedRaw, fiatValue, currency, priceSnapshotId, fxRateId, status, confirmed ? 'agent' : null, confirmed ? new Date() : null],
   );
   return rows[0]!.id;
 }
@@ -129,14 +157,14 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     const evSug = await seedEvent(token, '500000000', { logIndex: 3, to: WALLET });
     await seedLeg(draftRec, evSug, '500000000', '500.00', { status: 'suggested' });
 
-    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', account_mapping: MAPPING, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', account_mapping: MAPPING });
 
     // --- output shape ---
     expect(env.data.balanced).toBe(true);
     expect(env.data.lines).toBe(6); // 3 + 3
     expect(env.data.unmapped_categories).toEqual([]);
     expect(env.data.export_id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(env.data.file.name).toBe('journal_draft_qbo_DRAFT.csv');
+    expect(env.data.file.name).toBe('journal_draft_qbo_2026-06_DRAFT.csv');
 
     // --- file on disk, hash matches, DRAFT + VAT split present, suggested excluded ---
     const buf = await readFile(env.data.file.path);
@@ -169,10 +197,10 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     const ev = await seedEvent(token, '1000000000', { logIndex: 1 });
     await seedLeg(inv, ev, '1000000000', '1000.00');
 
-    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'xero', account_mapping: { crypto_asset: '1010' }, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'xero', account_mapping: { crypto_asset: '1010' } });
 
     expect(env.data.unmapped_categories).toEqual(['accounts_receivable', 'vat_output']);
-    expect(env.data.file.name).toBe('journal_draft_xero_DRAFT.csv');
+    expect(env.data.file.name).toBe('journal_draft_xero_2026-06_DRAFT.csv');
   });
 
   it('filters confirmed legs by the settlement block_time period', async () => {
@@ -184,7 +212,7 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
     await seedLeg(jun, evJun, '100000000', '100.00');
     await seedLeg(aug, evAug, '100000000', '100.00');
 
-    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', account_mapping: MAPPING, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', account_mapping: MAPPING });
 
     expect(env.data.lines).toBe(2); // only the June entry (no VAT → 2 lines)
     const csv = (await readFile(env.data.file.path)).toString('utf8');
@@ -205,7 +233,7 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
       [WALLET],
     );
 
-    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', client_id: CLIENT, account_mapping: MAPPING, out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', client_id: CLIENT, account_mapping: MAPPING });
 
     expect(env.data.lines).toBe(2); // only CLIENT's receivable
     const csv = (await readFile(env.data.file.path)).toString('utf8');
@@ -217,14 +245,89 @@ describe('export_journal_drafts — recon-backed journal materialization (§6.5)
 
   it('rejects an unknown client_id with INVALID_INPUT', async () => {
     await expect(
-      exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', client_id: MISSING_CLIENT, out_dir: outDir }),
+      exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', client_id: MISSING_CLIENT }),
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
   it('produces an empty but balanced journal when nothing is confirmed in the period', async () => {
     await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'empty', 'empty')`, [TENANT2]);
-    const env = await exportJournalDrafts(ctx(TENANT2), { period: PERIOD, target: 'qbo', out_dir: outDir });
+    const env = await exportJournalDrafts(ctx(TENANT2), { period: PERIOD, target: 'qbo' });
     expect(env.data.balanced).toBe(true);
     expect(env.data.lines).toBe(0);
+  });
+});
+
+describe('export_journal_drafts — journal provenance (H11)', () => {
+  it('cites the pinned price snapshot and the settlement event for a volatile-token confirmed leg', async () => {
+    const weth = await seedVolatileToken();
+    const snapId = await seedSnapshot(weth, '2000.00', '2026-06-14', 'EUR');
+    const inv = await seedRecord('INV-ETH', '1000.00', { direction: 'receivable' });
+    // 0.5 WETH @ 2000.00 EUR/WETH = 1000.00 EUR, pinned at suggest time to `snapId`.
+    const ev = await seedEvent(weth, '500000000000000000', { logIndex: 1, to: WALLET, blockTime: '2026-06-14T10:00:00Z' });
+    await seedLeg(inv, ev, '500000000000000000', '1000.00', { priceSnapshotId: snapId });
+
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: outDir });
+
+    expect(env.data.lines).toBe(2); // no VAT: asset + receivable
+    expect(env.citations.price_refs).toHaveLength(1);
+    expect(env.citations.price_refs![0]!.snapshot_id).toBe(snapId);
+    expect(env.citations.price_refs![0]!.price).toBe('2000.00');
+    expect(env.citations.price_refs![0]!.currency).toBe('EUR');
+    expect(env.citations.fx_refs).toBeUndefined(); // same-currency valuation, no FX pinned
+
+    // The settlement event is cited too (C3), inline under the ref cap.
+    const { rows: evRow } = await pool.query<{ tx_hash: string; log_index: number }>(
+      `SELECT tx_hash, log_index FROM chain_events WHERE id = $1`, [ev],
+    );
+    expect(env.citations.event_refs).toContainEqual(
+      expect.objectContaining({ chain_id: 1, tx_hash: evRow[0]!.tx_hash, log_index: evRow[0]!.log_index }),
+    );
+  });
+
+  it('keeps price/fx refs empty for a stablecoin-only journal, while still citing the settlement event', async () => {
+    const token = await seedToken();
+    const inv = await seedRecord('INV-1', '1000.00', { direction: 'receivable' });
+    const ev = await seedEvent(token, '1000000000', { logIndex: 1, to: WALLET });
+    await seedLeg(inv, ev, '1000000000', '1000.00'); // face value: no priceSnapshotId/fxRateId
+
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: outDir });
+
+    expect(env.data.balanced).toBe(true);
+    expect(env.citations.price_refs).toBeUndefined();
+    expect(env.citations.fx_refs).toBeUndefined();
+    expect(env.citations.event_refs).toBeDefined();
+    expect(env.citations.event_refs!.length).toBeGreaterThan(0);
+  });
+});
+
+// export-journal-drafts.ts calls `baseDir` directly (not through `runExport`, unlike
+// export_close_pack / export_pdf_summary) — this is a separate call site, so it gets its
+// own confinement smoke test (H2). Full coverage of `baseDir` itself lives in
+// export-run.test.ts (hermetic) and export.itest.ts's confinement describe block.
+describe('export_journal_drafts — out_dir confinement (security, H2)', () => {
+  it('rejects a traversal out_dir without leaking the export root path, and registers nothing', async () => {
+    let thrown: ToolError | undefined;
+    try {
+      await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: '../x' });
+    } catch (err) {
+      thrown = err as ToolError;
+    }
+    expect(thrown?.code).toBe('INVALID_INPUT');
+    expect(thrown?.message).not.toContain(outDir); // no internal-path leak (finding H2)
+    expect(thrown?.hint).toContain('RECONCIL_EXPORT_DIR');
+
+    const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM exports`);
+    expect(rows[0]?.n).toBe('0'); // truncated fresh by beforeEach — no orphan row
+  });
+
+  it('writes under a relative out_dir subpath inside the export root', async () => {
+    const token = await seedToken();
+    const inv = await seedRecord('INV-SUB', '100.00', { direction: 'receivable' });
+    const ev = await seedEvent(token, '100000000', { logIndex: 1, to: WALLET });
+    await seedLeg(inv, ev, '100000000', '100.00');
+
+    const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: 'june/close' });
+    expect(env.data.file.path).toContain(join(outDir, 'june', 'close'));
+    await expect(readFile(env.data.file.path)).resolves.toBeTruthy();
   });
 });

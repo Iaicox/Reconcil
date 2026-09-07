@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { failoverProvider, buildProviderBundle } from '../src/providers/provider-factory.js';
-import { ProviderError, type ChainDataProvider, type FetchJson } from '../src/types.js';
+import {
+  ProviderError,
+  type ChainDataProvider,
+  type FetchJson,
+  type PageQuery,
+  type RawInternalTx,
+} from '../src/types.js';
 
 const stub = (over: Partial<ChainDataProvider>): ChainDataProvider => ({
   kind: 'etherscan-v2',
@@ -22,6 +28,62 @@ describe('failoverProvider', () => {
   it('rethrows when every provider fails', async () => {
     const boom = stub({ getHead: () => { throw new ProviderError('http', 'HTTP 500'); } });
     await expect(failoverProvider([boom, boom]).getHead(1)).rejects.toThrow(ProviderError);
+  });
+
+  // getInternalTxs is an optional capability (ADR-009): the wrapper mirrors the
+  // optionality instead of flattening it, so `typeof fp.getInternalTxs` stays an
+  // honest answer to "does anything serve trace-level transfers here?".
+  describe('getInternalTxs (optional capability)', () => {
+    const page = (value: string): { items: RawInternalTx[] } => ({
+      items: [{ blockNumber: '1', timeStamp: '1', hash: '0xa', from: '0xb', to: '0xc', value, isError: '0' }],
+    });
+    const Q: PageQuery = { chainId: 1, address: '0xa', fromBlock: 1n, toBlock: 2n, limit: 1000, sort: 'asc' };
+
+    it('falls over to the secondary and reports the served kind', async () => {
+      const primary = stub({
+        kind: 'etherscan-v2',
+        getInternalTxs: () => { throw new ProviderError('rate_limited', 'slow down'); },
+      });
+      const secondary = stub({ kind: 'blockscout', getInternalTxs: () => Promise.resolve(page('7')) });
+      const fp = failoverProvider([primary, secondary]);
+      expect(await fp.getInternalTxs!(Q)).toEqual(page('7'));
+      expect(fp.kind).toBe('blockscout');
+    });
+
+    it('skips a provider that does not implement it (no TypeError), serving from the one that does', async () => {
+      const noCapability = stub({ kind: 'etherscan-v2' });
+      const capable = stub({ kind: 'blockscout', getInternalTxs: () => Promise.resolve(page('9')) });
+      const fp = failoverProvider([noCapability, capable]);
+      expect(await fp.getInternalTxs!(Q)).toEqual(page('9'));
+      expect(fp.kind).toBe('blockscout');
+    });
+
+    it('is absent entirely when no provider serves it — callers degrade, they do not throw', () => {
+      const fp = failoverProvider([stub({}), stub({ kind: 'blockscout' })]);
+      // The assertion is that the property is ABSENT — it is never called, so the
+      // unbound-`this` hazard the rule guards against cannot arise here.
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(fp.getInternalTxs).toBeUndefined();
+    });
+
+    it('rethrows the last ProviderError when every capable provider fails', async () => {
+      const boom = stub({ getInternalTxs: () => { throw new ProviderError('http', 'HTTP 500'); } });
+      await expect(failoverProvider([boom, boom]).getInternalTxs!(Q)).rejects.toThrow(ProviderError);
+    });
+
+    it('the wrapper keeps reporting the live served kind after the capability call', async () => {
+      const primary = stub({
+        kind: 'etherscan-v2',
+        getNativeTxs: () => Promise.resolve({ items: [] }),
+        getInternalTxs: () => { throw new ProviderError('http', 'HTTP 500'); },
+      });
+      const secondary = stub({ kind: 'blockscout', getInternalTxs: () => Promise.resolve(page('1')) });
+      const fp = failoverProvider([primary, secondary]);
+      await fp.getNativeTxs(Q);
+      expect(fp.kind).toBe('etherscan-v2');
+      await fp.getInternalTxs!(Q);
+      expect(fp.kind).toBe('blockscout');
+    });
   });
 });
 

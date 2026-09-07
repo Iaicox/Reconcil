@@ -7,7 +7,7 @@
  * line up. Runs as a repeatable worker tick in main.ts; the first `commitPage`
  * flips a checkpoint off the queued set, so this self-empties.
  *
- * Failure-path caveat (known, tracked): `jobOptions.removeOnFail=false` (ADR-008
+ * Failure-path caveat (known, tracked): `dlqJobOptions.removeOnFail=false` (ADR-008
  * DLQ) means a page-1 backfill that exhausts all attempts is retained in Redis
  * under its deterministic id; `commitPage` never ran, so the checkpoint stays
  * `queued`, and the next scan's re-add is deduped against the retained failed job
@@ -25,7 +25,7 @@ import {
 } from '@reconcil/ingestion';
 import type { JobsOptions } from 'bullmq';
 
-import { jobOptions } from './queues.js';
+import { dlqJobOptions } from './queues.js';
 
 /** The slice of BullMQ's Queue the scanner needs — one add per backfill target. */
 export interface BackfillEnqueuer {
@@ -41,19 +41,19 @@ export interface ProbeEnqueuer {
 
 export async function enqueueBackfills(targets: BackfillTarget[], queue: BackfillEnqueuer): Promise<void> {
   for (const t of targets) {
-    await queue.add('page', t, { ...jobOptions, jobId: backfillJobId(t.chainId, t.address, t.stream) });
+    await queue.add('page', t, { ...dlqJobOptions, jobId: backfillJobId(t.chainId, t.address, t.stream) });
   }
 }
 
 export async function enqueueAnchors(targets: AnchorTarget[], queue: AnchorEnqueuer): Promise<void> {
   for (const t of targets) {
-    await queue.add('anchor', t, { ...jobOptions, jobId: anchorJobId(t.chainId, t.address, t.stream) });
+    await queue.add('anchor', t, { ...dlqJobOptions, jobId: anchorJobId(t.chainId, t.address, t.stream) });
   }
 }
 
 export async function enqueueProbes(targets: ProbeTargetData[], queue: ProbeEnqueuer): Promise<void> {
   for (const t of targets) {
-    await queue.add('probe', t, { ...jobOptions, jobId: probeJobId(t.chainId, t.address) });
+    await queue.add('probe', t, { ...dlqJobOptions, jobId: probeJobId(t.chainId, t.address) });
   }
 }
 

@@ -38,11 +38,32 @@ export function backoffStrategy(attemptsMade: number): number {
   return Math.min(60_000 * 2 ** Math.max(0, attemptsMade - 1), 3_600_000);
 }
 
-// Shared by both queues — identical today. Re-split into per-queue policies when
-// one needs to diverge (anchored windows, per-queue rate limits in later slices).
-export const jobOptions: JobsOptions = {
+// Two retention policies (H15a). Both share the retry ramp (8 attempts,
+// backoffStrategy above); they differ only in what happens to a job that
+// exhausts its retries.
+//
+// dlqJobOptions: one-shot jobs — a backfill page, an anchor bake, a >50k probe
+// — each represents real, non-repeating work for one (chain, address, stream);
+// losing a failed one silently would leave that wallet's history incomplete
+// with nothing pointing at it. Keep every failure for manual triage
+// (removeOnFail: false) — this is the DLQ ADR-008 §2 describes.
+export const dlqJobOptions: JobsOptions = {
   attempts: 8,
   backoff: { type: 'custom' },
   removeOnComplete: 1000,
   removeOnFail: false,
+};
+
+// tickJobOptions: repeatable ticks (tail per chain, the daily price fill, the
+// 15 s onboard scan — 5760/day) re-run forever regardless of one run's
+// outcome, so a failed tick carries no unique-work-lost risk the way a
+// backfill page does. Applying dlqJobOptions here means a sustained
+// DB/provider outage retains every failed tick forever — unbounded Redis
+// growth. Bounded to the most recent 100 failures per queue: enough to
+// diagnose a live incident without growing without bound.
+export const tickJobOptions: JobsOptions = {
+  attempts: 8,
+  backoff: { type: 'custom' },
+  removeOnComplete: 1000,
+  removeOnFail: { count: 100 },
 };

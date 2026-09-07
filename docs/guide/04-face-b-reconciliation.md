@@ -299,13 +299,13 @@ Note the period semantics: records are filtered by `issued_on`, settlements by `
     "client_id": "b642e288-…",
     "account_mapping": { "crypto_asset": "1010", "accounts_receivable": "1200",
                          "accounts_payable": "2000", "vat_output": "2200",
-                         "vat_input": "1400", "rounding": "9999" } } }
+                         "vat_input": "1400" } } }
 ```
 
 ```json
 { "data": { "export_id": "bfd25c08-…",
-            "file": { "name": "journal_draft_qbo_DRAFT.csv",
-                      "path": "/app/exports/bfd25c08-…/journal_draft_qbo_DRAFT.csv",
+            "file": { "name": "journal_draft_qbo_2026-06_DRAFT.csv",
+                      "path": "/app/exports/bfd25c08-…/journal_draft_qbo_2026-06_DRAFT.csv",
                       "sha256": "9f62c3a4828fe1debf1455b1b66028929048c32179d43df4ec088414631fb212" },
             "lines": 9, "unmapped_categories": [], "balanced": true } }
 ```
@@ -338,8 +338,9 @@ Payables mirror the receivable: credit crypto asset, debit payables, debit VAT i
 
 ### Account mapping
 
-Six categories need account codes: `crypto_asset`, `accounts_receivable`,
-`accounts_payable`, `vat_output`, `vat_input`, `rounding`. Anything you leave out is
+Five categories need account codes: `crypto_asset`, `accounts_receivable`,
+`accounts_payable`, `vat_output`, `vat_input`. There is no `rounding` category — see
+below for why a standalone rounding line is never emitted. Anything you leave out is
 reported rather than guessed:
 
 ```json

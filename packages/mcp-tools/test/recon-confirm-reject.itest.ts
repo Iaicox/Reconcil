@@ -19,7 +19,9 @@ const WALLET = `0x${'1'.repeat(40)}`; // tenant's receiving wallet
 const PAYER = `0x${'2'.repeat(40)}`; // counterparty on a receivable
 
 const TOKEN_ADDR = `0x${'c'.repeat(40)}`; // EUR-pegged stablecoin
-const MISSING_MATCH = '00000000-0000-0000-0000-0000000000ff'; // well-formed but absent
+// Well-formed (passes the schema's `.uuid()` shape check) but absent from `matches`,
+// so this still exercises the repo's "not found" lookup, not schema-level rejection.
+const MISSING_MATCH = '00000000-0000-4000-8000-0000000000ff';
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:16').start();
@@ -192,6 +194,36 @@ describe('recon_confirm_match — HITL confirmation', () => {
 
   it('rejects an unknown match_id with INVALID_INPUT', async () => {
     await expect(reconConfirmMatch(ctx(), { match_id: MISSING_MATCH })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  it('excludes a wrong-currency confirmed leg from the record-status sum (C6)', async () => {
+    const tokenId = await seedToken();
+    const recId = await seedInvoice('INV-100', '1000.00');
+
+    // A confirmed leg in the WRONG currency on the SAME record, inserted via raw SQL — the
+    // normal writer (match-repo.ts) always pins fiat_currency = record currency, so this
+    // bypasses it deliberately. Its huge amount would push the record to 'overpaid' if it
+    // (wrongly) counted toward the EUR sum.
+    const usdEvent = await seedEvent(tokenId, '999999000000', 9);
+    await pool.query(
+      `INSERT INTO matches
+         (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+       VALUES ($1,$2,$3,$4,$5,'USD','confirmed','agent','agent',now(),0.9,'{}'::jsonb)`,
+      [TENANT, recId, usdEvent, '999999000000', '999999.00'],
+    );
+
+    const eurEvent = await seedEvent(tokenId, '1000000000');
+    const matchId = await seedSuggestedLeg(recId, eurEvent, '1000000000', '1000.00');
+
+    const env = await reconConfirmMatch(ctx(), { match_id: matchId });
+
+    expect(env.data.record_status).toBe('matched'); // NOT 'overpaid' — the USD leg must not count
+    expect(await recordStatus(recId)).toBe('matched');
+  });
+
+  it('rejects a non-UUID match_id with INVALID_INPUT at input validation (not a raw uuid-cast error)', async () => {
+    await expect(reconConfirmMatch(ctx(), { match_id: 'not-a-uuid' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(reconRejectMatch(ctx(), { match_id: 'not-a-uuid' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
   it('isolates tenants: a foreign tenant cannot confirm the leg (INVALID_INPUT), leaving it suggested', async () => {

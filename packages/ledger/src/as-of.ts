@@ -1,12 +1,15 @@
 /**
  * Resolve an `as_of` date to the per-chain citable anchor echoed in
  * `as_of_effective` (contracts §6.1): the max block of *this wallet's own
- * activity* whose time ≤ end of that UTC day — not the ingestion head from
- * checkpoints. "Balance on May 31" is well-defined against that anchor; block
- * number and block time are maxed independently (monotonic on real chains).
+ * activity* strictly before the start of the day after that UTC day — not the
+ * ingestion head from checkpoints ("balance on May 31" is well-defined against
+ * that anchor, half-open so a microsecond-precision block_time at the tail of
+ * the day is not silently dropped, H10 minors). Block number and block time
+ * are maxed independently (monotonic on real chains). Citation semantics are
+ * unchanged: the caller still cites the requested `asOfDate`, not this cutoff.
  */
 import { chainEvents, type Db } from '@reconcil/db';
-import { and, inArray, lte, or, sql } from 'drizzle-orm';
+import { and, inArray, lt, or, sql } from 'drizzle-orm';
 
 import type { AsOfResolved } from './types.js';
 
@@ -31,7 +34,7 @@ export async function resolveAsOf(
     .where(
       and(
         or(inArray(chainEvents.fromAddr, addresses), inArray(chainEvents.toAddr, addresses)),
-        cutoff ? lte(chainEvents.blockTime, cutoff) : undefined,
+        cutoff ? lt(chainEvents.blockTime, cutoff) : undefined,
         chainIds && chainIds.length > 0 ? inArray(chainEvents.chainId, chainIds) : undefined,
       ),
     )

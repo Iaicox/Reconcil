@@ -139,6 +139,47 @@ describe('recon_import_invoices — import, sanitization, audit', () => {
       reconImportInvoices(ctx(), { format: 'csv', content: CSV, defaults: { vat_rate: -5 } }),
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
+
+  it('rejects a vat_rate default above 100 at input validation', async () => {
+    await expect(
+      reconImportInvoices(ctx(), { format: 'csv', content: CSV, defaults: { vat_rate: 150 } }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  it('never echoes a raw hostile amount cell in errors[].message (C6, ADR-011)', async () => {
+    const hostileCsv = [
+      'invoice,customer,amount,currency',
+      "INV-1,Acme,=cmd|' /C calc'!A0,EUR",
+    ].join('\n');
+    const env = await reconImportInvoices(ctx(), { format: 'csv', content: hostileCsv });
+    expect(env.data.errors).toHaveLength(1);
+    expect(env.data.errors[0]?.message).not.toContain('cmd');
+    expect(env.data.errors[0]?.message).not.toContain('calc');
+  });
+
+  it('applies a scientific-notation vat_rate default without exponent notation (0.0000001)', async () => {
+    const csv = 'invoice,amount,currency\nINV-TINY,10.00,EUR';
+    const env = await reconImportInvoices(ctx(), { format: 'csv', content: csv, defaults: { vat_rate: 1e-7 } });
+    expect(env.data.errors).toEqual([]);
+    expect(env.data.inserted).toBe(1);
+
+    const { rows } = await pool.query<{ vat_rate: string | null }>(
+      `SELECT vat_rate FROM external_records WHERE external_ref = 'INV-TINY'`,
+    );
+    expect(rows[0]?.vat_rate).toBe('0.0000001');
+  });
+
+  it('sanitizes and caps external_ref at 128 chars; the sanitized value is stored and echoed', async () => {
+    const longRef = `${' '.repeat(3)}${'B'.repeat(200)}`;
+    const csv = `invoice,amount,currency\n${longRef},10.00,EUR`;
+    const env = await reconImportInvoices(ctx(), { format: 'csv', content: csv });
+    expect(env.data.errors).toEqual([]);
+    expect(env.data.inserted).toBe(1);
+    expect(env.data.records[0]?.external_ref).toBe('B'.repeat(128));
+
+    const { rows } = await pool.query<{ external_ref: string }>(`SELECT external_ref FROM external_records`);
+    expect(rows[0]?.external_ref).toBe('B'.repeat(128));
+  });
 });
 
 describe('recon_import_invoices — file_path confinement & caps (security)', () => {

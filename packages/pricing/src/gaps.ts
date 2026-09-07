@@ -35,11 +35,18 @@ export async function priceGaps(db: Db, opts: { verifiedOnly?: boolean } = {}): 
     .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
     .where(and(
       verifiedOnly ? eq(tokens.verified, true) : undefined,
+      // A gap closes on ANY non-peg snapshot for (token, date), regardless of currency —
+      // not just USD. A stored snapshot in another currency is still a real market price;
+      // valuation converts via FX, and an unsupported pair degrades to PRICE_MISSING at
+      // the valuation layer, not here. Filtering on `currency = 'USD'` would leave a
+      // non-USD provider hit unrecognized forever: the (token, date) keeps re-emitting as
+      // a gap on every daily tick even though it was already priced (an unbounded refetch
+      // loop against a rate-limited provider — ON CONFLICT dedupes the re-insert, so
+      // `pricesInserted` silently stays 0 while the gap never closes).
       sql`NOT EXISTS (
         SELECT 1 FROM price_snapshots ps
         WHERE ps.token_id = ${chainEvents.tokenId}
           AND ps.price_date = ${utcDate}
-          AND ps.currency = 'USD'
           AND ps.source <> 'peg'
       )`,
     ));

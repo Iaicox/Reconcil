@@ -47,9 +47,8 @@ export async function analyticsCounterparties(
 
   const [cp, coverage] = await Promise.all([
     computeCounterparties(ctx.db, {
-      scope: { addresses },
+      scope: { addresses, ...chainScope },
       period: input.period,
-      ...chainScope,
       ...(input.direction ? { direction: input.direction } : {}),
       ...(input.top_n !== undefined ? { topN: input.top_n } : {}),
       includeUnverified,
@@ -148,7 +147,7 @@ export async function analyticsCounterparties(
   try {
     analyticsCounterpartiesOutput.parse(data);
   } catch (err) {
-    throw new ToolError('INTERNAL', `analytics_counterparties produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', 'analytics_counterparties produced an output that violates its contract', undefined, err);
   }
   const toolCallId = await persistToolCall(ctx, {
     toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,

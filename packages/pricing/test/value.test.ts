@@ -53,4 +53,10 @@ describe('valueOne — fiat = amount × price (± FX), with pinned refs (C4)', (
     expect(r.value).toBe('500');
     expect(r.priceRef).toMatchObject({ snapshotId: 9, source: 'peg', price: '1' });
   });
+
+  it('throws on a non-EUR/USD conversion pair (H5 — only EUR↔USD is supported)', () => {
+    // valueQuantities never reaches this (it routes unsupported pairs to PRICE_MISSING
+    // before calling valueOne); this documents the invariant for other callers.
+    expect(() => valueOne(need(), snap({ currency: 'GBP' }), 'EUR', { row: fxRow(), shifted: false })).toThrow();
+  });
 });

@@ -55,9 +55,8 @@ export async function analyticsFlows(
     noMatch
       ? Promise.resolve({ rows: [], internal: [] })
       : computeFlows(ctx.db, {
-          scope: { addresses },
+          scope: { addresses, ...chainScope },
           period: input.period,
-          ...chainScope, // computeFlows reads chainIds at the top level
           ...(input.direction ? { direction: input.direction } : {}),
           ...(input.group_by ? { groupBy: input.group_by } : {}),
           ...(restrictTokenIds ? { restrictTokenIds } : {}),
@@ -120,7 +119,7 @@ export async function analyticsFlows(
   try {
     analyticsFlowsOutput.parse(data);
   } catch (err) {
-    throw new ToolError('INTERNAL', `analytics_flows produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', 'analytics_flows produced an output that violates its contract', undefined, err);
   }
   const toolCallId = await persistToolCall(ctx, {
     toolName: TOOL_NAME, args: input, coverage: coverageRefs, result: data,

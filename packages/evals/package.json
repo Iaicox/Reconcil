@@ -28,11 +28,11 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^11.0.0",
+    "@testcontainers/postgresql": "catalog:",
     "@types/node": "catalog:",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "catalog:",
     "eslint": "catalog:",
-    "pg": "^8.22.0",
+    "pg": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

@@ -6,6 +6,15 @@
  * happen there, ADR-004) and returns the citation envelope. Non-read-only, never
  * destructive. The export/tool_call ids are minted up front so the manifest cites the same
  * id the envelope carries (C2).
+ *
+ * H11: `computeJournalData` collects each confirmed leg's pinned (nullable)
+ * `price_snapshot_id`/`fx_rate_id` and its settlement event ref; this handler hydrates the
+ * distinct pinned ids into real `price_refs`/`fx_refs` (reusing the hydration
+ * decision-repo.ts's confirm/reject envelope already uses, `pricing-refs.ts`) and cites the
+ * backing events (`event_refs`/`event_ref_summary`, drilldown = analytics_list_events over
+ * the journal's own period + client scope, mirroring recon_status). A same-currency
+ * stablecoin leg pins neither id (face value at peg, P5), so a stablecoin-only journal
+ * correctly ships empty price/fx refs — only a volatile-token leg contributes them.
  */
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -13,11 +22,13 @@ import { join } from 'node:path';
 
 import { exportJournalDraftsInput, exportJournalDraftsOutput, type ExportJournalDraftsOutput, type Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
-import { renderJournalDrafts } from '@reconcil/exporters';
+import { isZero, renderJournalDrafts } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { hydrateFxRefs, hydratePriceRefs } from '../pricing-refs.js';
+import { selectRefs } from '../refs.js';
 import { ulid } from '../ulid.js';
 import { runWriteTool } from '../write-tx.js';
 import { baseDir } from './export-run.js';
@@ -38,6 +49,29 @@ export async function exportJournalDrafts(
     ...(input.client_id !== undefined ? { clientId: input.client_id } : {}),
   });
 
+  // H11: hydrate the price/FX snapshots pinned on any volatile-token confirmed leg (C4).
+  // A stablecoin-only journal collects no ids, so both stay empty — correctly, not by omission.
+  const [priceRefMap, fxRefMap] = await Promise.all([
+    hydratePriceRefs(ctx.db, data.priceSnapshotIds),
+    hydrateFxRefs(ctx.db, data.fxRateIds),
+  ]);
+  const priceRefs = [...priceRefMap.values()];
+  const fxRefs = [...fxRefMap.values()];
+
+  // Cite the backing settlement events (C3): inline when ≤ cap, else a summary whose
+  // drilldown re-enumerates them via analytics_list_events over this journal's own period
+  // + the CANONICAL resolved client scope when present (mirrors recon_status's shape).
+  const refsParts = selectRefs(
+    [{ refs: data.eventRefs, totalCount: data.eventRefs.length }],
+    {
+      tool: 'analytics_list_events',
+      args: {
+        ...(data.scope.clientId != null ? { scope: { client_id: data.scope.clientId } } : {}),
+        period: input.period,
+      },
+    },
+  );
+
   const exportId = randomUUID();
   const toolCallId = ulid();
   const rendered = renderJournalDrafts({
@@ -51,39 +85,43 @@ export async function exportJournalDrafts(
       toolCallId,
       generatedAt: new Date().toISOString(),
       coverage: data.coverageRefs,
-      priceRefs: [],
-      fxRefs: [],
+      priceRefs,
+      fxRefs,
     },
   });
 
   // Materialize the single CSV under out_dir/<export_id>/ (the subdir isolates runs).
-  const dir = join(baseDir(input.out_dir), exportId);
+  const dir = join(await baseDir(input.out_dir), exportId);
   const filePath = join(dir, rendered.file.name);
   try {
     await mkdir(dir, { recursive: true });
     await writeFile(filePath, rendered.file.content);
   } catch (err) {
-    throw new ToolError('INTERNAL', `${TOOL_NAME} failed to write the journal file: ${String(err)}`);
+    throw new ToolError('INTERNAL', `${TOOL_NAME} failed to write the journal file`, undefined, err);
   }
 
   // Validate the output BEFORE the DB write, so a contract violation can't leave an
-  // orphan `done` exports row (the file already on disk is harmless).
+  // orphan `done` exports row (the file already on disk is harmless). `balanced` is
+  // derived from the actual residues, not hardcoded: renderJournalDrafts already threw
+  // on any per-currency imbalance, so this is always true today — but it is a real
+  // check, not an assumption.
+  const balanced = rendered.roundingResidues.every((r) => isZero(r.residue));
   const outputData = {
     export_id: exportId,
     file: { name: rendered.file.name, path: filePath, sha256: rendered.file.sha256 },
     lines: rendered.lines,
     unmapped_categories: rendered.unmappedCategories,
-    balanced: true as const,
+    balanced,
   };
   let validated: ExportJournalDraftsOutput;
   try {
     validated = exportJournalDraftsOutput.parse(outputData);
   } catch (err) {
-    throw new ToolError('INTERNAL', `${TOOL_NAME} produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', `${TOOL_NAME} produced an output that violates its contract`, undefined, err);
   }
 
   const residueWarnings: Warning[] = rendered.roundingResidues
-    .filter((r) => Number(r.residue) !== 0)
+    .filter((r) => !isZero(r.residue))
     .map((r) => ({
       code: 'ROUNDING_RESIDUE',
       message: `journal rounding residue ${r.residue} ${r.currency}`,
@@ -114,7 +152,7 @@ export async function exportJournalDrafts(
         completedAt: new Date(),
       });
 
-      return { data: validated, envelope: { coverage: data.coverageRefs, warnings } };
+      return { data: validated, envelope: { coverage: data.coverageRefs, ...refsParts, priceRefs, fxRefs, warnings } };
     },
   });
 }

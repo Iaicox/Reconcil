@@ -70,6 +70,33 @@ export async function upsertFxRates(db: Db, rows: FxInsert[]): Promise<number> {
  * Materialize a `source='peg'` snapshot (price 1.0 in the peg currency) for every
  * verified stablecoin on each date it appears in `chain_events`, so peg-policy
  * valuations cite a real, pinnable row even for 1.0 (ADR-007). Idempotent.
+ *
+ * Incrementality: the WHERE carries a `NOT EXISTS` anti-join against `price_snapshots`
+ * so only (token, date) pairs that don't already have a peg row are candidates for the
+ * `DISTINCT` + insert below — a steady-state daily run only does work proportional to
+ * events since the last run, not the full history.
+ *
+ * This is deliberately NOT a time-window predicate (e.g. "block_time >= last
+ * materialized date - N days"). `chain_events` is append-only, but insertion order is
+ * NOT block_time order: onboarding a new wallet, or widening an existing wallet's
+ * ingested window, backfills events whose `block_time` can be arbitrarily far in the
+ * past relative to rows already materialized. A predicate keyed on `block_time` (or any
+ * watermark derived from it) would permanently skip such a backfilled old event once the
+ * watermark had advanced past its date — silently wrong, and wrong forever (nothing
+ * re-triggers it). A `NOT EXISTS` per-row check has no such blind spot: it re-evaluates
+ * "does this (token, date) already have a peg row" on every run regardless of when the
+ * row was inserted, so a newly-backfilled old event is still covered.
+ *
+ * A separate watermark table (e.g. "max chain_events.id already scanned", which — unlike
+ * block_time — IS safely monotonic with insertion order since `id` is
+ * `generatedAlwaysAsIdentity()`) would avoid re-scanning `chain_events` itself and could
+ * cut cost further, but adds new persistent state and a migration for what the audit
+ * flagged as a minor/latent item. `NOT EXISTS` needs no new state, is correct for
+ * backfills by construction, and removes the actual O(all history) cost this was flagged
+ * for (the repeated `DISTINCT`-then-conflict-check over every historical row) — the
+ * cheaper-but-still-correct alternative called for when a safe zero-new-state predicate
+ * isn't available; a watermark table is a follow-up if `chain_events`'s own full scan
+ * ever becomes the bottleneck.
  */
 export async function materializePegSnapshots(db: Db): Promise<number> {
   const res = await db.execute(sql`
@@ -78,6 +105,13 @@ export async function materializePegSnapshots(db: Db): Promise<number> {
     FROM chain_events ce
     JOIN tokens t ON t.id = ce.token_id
     WHERE t.is_stablecoin = true AND t.verified = true AND t.peg_currency IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM price_snapshots ps
+        WHERE ps.token_id = ce.token_id
+          AND ps.price_date = (ce.block_time AT TIME ZONE 'UTC')::date
+          AND ps.currency = t.peg_currency
+          AND ps.source = 'peg'
+      )
     ON CONFLICT (token_id, price_date, currency, source) DO NOTHING
   `);
   return (res as { rowCount?: number }).rowCount ?? 0;
