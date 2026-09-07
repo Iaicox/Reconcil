@@ -34,6 +34,11 @@ minimumReleaseAgeExclude:
 # esbuild ~0.18 (GHSA-67mh-4wv8-2f99); the transform API it uses is stable in 0.25+.
 overrides:
   '@esbuild-kit/core-utils>esbuild': ^0.25.0
+  # vite pins postcss at 8.5.19, which is inside its own range but below the fix for
+  # GHSA (postcss <= 8.5.22). `pnpm update` will not move a transitive that already
+  # satisfies its parent, so the floor has to be stated here. postcss >= 8.5.23 also
+  # requires nanoid ^3.3.18, which closes that advisory in the same step.
+  postcss: ^8.5.23
 
 onlyBuiltDependencies:
   - esbuild
