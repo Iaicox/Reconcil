@@ -19,7 +19,8 @@
 import { sanitize } from '@reconcil/core';
 
 import { toCsv, type CsvValue } from './csv.js';
-import { isZero, netOfVat, roundHalfUp, subtract, sumDecimals } from './decimal.js';
+import { isNegative, isZero, netOfVat, roundHalfUp, subtract, sumDecimals } from './decimal.js';
+import { periodSlug } from './period.js';
 import { sha256 } from './sha256.js';
 import type {
   JournalCategory, JournalDraftsInput, JournalDraftsResult, JournalManifest, RoundingResidue,
@@ -31,7 +32,6 @@ const DEFAULT_ACCOUNTS: Record<JournalCategory, string> = {
   accounts_payable: 'Accounts Payable',
   vat_output: 'VAT Output',
   vat_input: 'VAT Input',
-  rounding: 'Rounding',
 };
 
 const QBO_HEADER = ['*JournalNo', '*JournalDate', '*AccountName', 'Debits', 'Credits', 'Description', 'Currency'];
@@ -72,10 +72,23 @@ function describe(externalRef: string, counterparty: string): string {
   return `${ref} — ${sanitize(counterparty).display}`;
 }
 
-/** Build the double-entry lines for one confirmed settlement (empty if zero-valued). */
+/**
+ * Build the double-entry lines for one confirmed settlement (empty if zero-valued).
+ *
+ * A negative `V` (after rounding) throws rather than emitting a negative debit/credit:
+ * `matches.fiat_value` and the confirm path are non-negative today, so this is an
+ * assertion on an invariant the pipeline cannot violate, not a behavior change. Credit
+ * notes/reversals are not modelled yet; when they are, they must flip the entry's
+ * sides, not emit a negative amount.
+ */
 function entryLines(entry: JournalDraftsInput['entries'][number], journalNo: string): TaggedLine[] {
   const V = roundHalfUp(entry.grossFiat, 2);
   if (isZero(V)) return [];
+  if (isNegative(V)) {
+    throw new Error(
+      `journal-drafts: entry ${entry.externalRef} (${entry.direction}, ${entry.currency}) has a negative gross ${V}; credit notes/reversals are not modelled yet — they must flip the entry's sides, not emit a negative amount`,
+    );
+  }
   const desc = describe(entry.externalRef, entry.counterparty);
   const { date, currency, direction } = entry;
   const control: JournalCategory = direction === 'receivable' ? 'accounts_receivable' : 'accounts_payable';
@@ -168,7 +181,9 @@ export function renderJournalDrafts(input: JournalDraftsInput): JournalDraftsRes
   ];
 
   const content = toCsv(header, body);
-  const name = `journal_draft_${target}_DRAFT.csv`;
+  // Identifying, byte-stable name (see period.ts for the scheme): a pure function of
+  // `target` + `input.period`, so two different periods never collide in one folder.
+  const name = `journal_draft_${target}_${periodSlug(input.period)}_DRAFT.csv`;
   const fileSha = sha256(content);
   const unmappedCategories = [...unmapped].sort();
 
