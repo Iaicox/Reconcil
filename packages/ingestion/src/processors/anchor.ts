@@ -13,6 +13,7 @@ import { tokens, type Db } from '@reconcil/db';
 import { and, eq, isNull } from 'drizzle-orm';
 
 import type { ProviderBundle } from '../providers/provider-factory.js';
+import { AnchorTooRecentError } from '../types.js';
 import { buildOpeningBalanceRows, type OpeningBalance } from '../write/anchor-writer.js';
 import { commitAnchor, type AnchorTarget } from '../write/checkpoint-repo.js';
 import type { ProcessorDeps } from './ingest.js';
@@ -32,7 +33,12 @@ export async function runAnchor(deps: ProcessorDeps, target: AnchorTarget): Prom
   if (Number.isNaN(anchorTs)) throw new Error(`invalid anchor_from: ${target.anchorFrom}`);
   const safe = (await bundle.indexer.getHead(target.chainId)) - chain.finalityDepth;
   const resolved = await bundle.getBlockByTime(anchorTs);
-  const block = Number(resolved > safe ? safe : resolved);
+  // H8: never clamp into the unsafe tip — that fetches the balance at safeHead
+  // while stamping block_time at midnight-of-anchor-date, an inconsistent row
+  // (see AnchorTooRecentError doc). Reject loudly instead; the caller decides
+  // whether to retry with an older date.
+  if (resolved > safe) throw new AnchorTooRecentError(Number(chain.finalityDepth));
+  const block = Number(resolved);
   const blockTime = new Date(anchorTs * 1000);
 
   const balances =
@@ -79,7 +85,13 @@ async function erc20Balances(
   return out;
 }
 
-/** The native pseudo-token (address NULL) — created lazily if no seed shipped it. */
+/**
+ * The native pseudo-token (address NULL) — created lazily if no seed shipped it.
+ * The native symbol is a trusted chains.config.ts constant, so it also fills
+ * symbol_display/name_display (ADR-011); verified stays false here — the curated
+ * seed migration (0002_seed_curated_tokens.sql) is the verified=true authority and
+ * wins this row's slot via ON CONFLICT DO NOTHING.
+ */
 async function ensureNativeTokenId(db: Db, chainId: number): Promise<number> {
   const chain = chainById(chainId);
   await db
@@ -90,6 +102,8 @@ async function ensureNativeTokenId(db: Db, chainId: number): Promise<number> {
       standard: 'native',
       symbolRaw: chain.native.symbol,
       nameRaw: chain.native.symbol,
+      symbolDisplay: chain.native.symbol,
+      nameDisplay: chain.native.symbol,
       decimals: chain.native.decimals,
       verified: false,
     })

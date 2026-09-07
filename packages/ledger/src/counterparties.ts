@@ -36,7 +36,7 @@ export async function computeCounterparties(db: Db, p: CounterpartiesParams): Pr
   const base = and(
     transferKinds(),
     timeBetween(from, to),
-    chainFilter(p.chainIds),
+    chainFilter(p.scope.chainIds),
     externalCondition(addresses, direction),
     p.includeUnverified ? undefined : eq(tokens.verified, true),
   );
@@ -66,25 +66,40 @@ export async function computeCounterparties(db: Db, p: CounterpartiesParams): Pr
     })
     .from(sub)
     .groupBy(sub.cp, sub.tokenId);
-  const perCp = await db
-    .select({ cp: sub.cp, tx: sql<number>`count(distinct ${sub.txHash})::int` })
-    .from(sub)
-    .groupBy(sub.cp);
 
   const metaById = await loadTokenMeta(db, [...new Set(perToken.map((r) => r.tokenId))]);
+  // txCount/backing must be computed over exactly the token set that produced the
+  // turnover above — not independently re-derived from `base` — or a counterparty
+  // whose only token drops out of `metaById` would still surface with txCount > 0
+  // and backing refs but an empty `perToken` (self-contradictory, uncitable; the
+  // dropped-token minors). `metaById` always resolves every id `perToken` reports
+  // today (chain_events.token_id is FK-constrained to tokens.id), so this is
+  // currently a no-op filter — it's here so the three aggregates are *provably*
+  // tied to one row set instead of three independently-issued queries that only
+  // happen to share a WHERE clause.
+  const survivingTokenIds = [...metaById.keys()];
 
-  const refRows = await db
-    .select({
-      chainId: chainEvents.chainId,
-      txHash: chainEvents.txHash,
-      logIndex: chainEvents.logIndex,
-      fromAddr: chainEvents.fromAddr,
-      toAddr: chainEvents.toAddr,
-    })
-    .from(chainEvents)
-    .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
-    .where(base)
-    .orderBy(chainEvents.chainId, chainEvents.blockNumber, chainEvents.logIndex, chainEvents.id);
+  let perCp: { cp: string; tx: number }[] = [];
+  let refRows: { chainId: number; txHash: string; logIndex: number; fromAddr: string; toAddr: string }[] = [];
+  if (survivingTokenIds.length > 0) {
+    perCp = await db
+      .select({ cp: sub.cp, tx: sql<number>`count(distinct ${sub.txHash})::int` })
+      .from(sub)
+      .where(inArray(sub.tokenId, survivingTokenIds))
+      .groupBy(sub.cp);
+    refRows = await db
+      .select({
+        chainId: chainEvents.chainId,
+        txHash: chainEvents.txHash,
+        logIndex: chainEvents.logIndex,
+        fromAddr: chainEvents.fromAddr,
+        toAddr: chainEvents.toAddr,
+      })
+      .from(chainEvents)
+      .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
+      .where(and(base, inArray(chainEvents.tokenId, survivingTokenIds)))
+      .orderBy(chainEvents.chainId, chainEvents.blockNumber, chainEvents.logIndex, chainEvents.id);
+  }
   const S = new Set(addresses);
   const backing = bucketBacking(refRows, (r) => [S.has(r.fromAddr) ? r.toAddr : r.fromAddr]);
 

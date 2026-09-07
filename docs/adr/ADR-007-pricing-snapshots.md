@@ -50,6 +50,22 @@ date. Stablecoins pose a policy question: book at peg (1.0) or at market (±0.3%
 - **FX direction:** ECB publishes EUR-based rates (`rate` = USD per 1 EUR). USD→EUR
   divides by the rate, EUR→USD multiplies. The rate row for a date is the latest with
   `rate_date ≤ date`; a shift emits `FX_DATE_SHIFTED`.
+
+  *Amendment (2026-08-05, determinism fix H4/H5):* `fx_rates`' unique key is
+  `(rate_date, base, quote, source)`, so a `manual` correction and the automated `ecb`
+  row can legitimately coexist for the same date — the same-date tie must be broken
+  deterministically or two runs of the same tool call can pin different `fx_rate_id`s
+  for the same figure (P5/C4). Preference order: `manual` beats `ecb` beats anything
+  else (unknown sources tied alphabetically), then highest `id` as the final total-order
+  tiebreak — a manual row exists specifically to override the automated feed, so it must
+  win regardless of scan order. Separately, conversion is restricted to the single
+  **supported pair, EUR↔USD** — ECB only publishes EUR-based rates, so that's the only
+  pair with a rate to pin. `valueQuantities` checks the (snapshot currency, target) pair
+  before attempting FX and routes anything else (e.g. a GBP-pegged stablecoin) to
+  `PRICE_MISSING`, same as any other missing input — never a throw, and never the wrong
+  number from applying the EUR/USD rate to an unrelated pair. `valueOne` keeps a
+  defensive throw on an unsupported pair to document the invariant for other callers;
+  `valueQuantities` never reaches it.
 - **Peg rows are materialized**, not virtual: the fill inserts a `source='peg'`, price 1.0
   row per verified stablecoin per activity date, so even 1.0 cites a real, pinnable snapshot.
 - **The fill worklist comes from `chain_events`** (only what the ledger could value): a gap

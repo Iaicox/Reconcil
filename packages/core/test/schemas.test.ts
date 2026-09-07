@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   analyticsBalancesInput, analyticsBalancesOutput, analyticsGasInput, analyticsGasOutput,
   analyticsListEventsInput, analyticsStablecoinInput, analyticsStablecoinOutput, decimalString,
+  isoDateString,
   ledgerStatusInput, ledgerStatusOutput, ledgerTraceToolCallInput, ledgerTraceToolCallOutput,
   ledgerTrackWalletInput, ledgerTrackWalletOutput,
 } from '../src/schemas.js';
@@ -63,6 +64,24 @@ describe('contract schemas', () => {
     expect(analyticsStablecoinOutput.safeParse({ ...base, peg_subtotals: [{ peg_currency: 'USD', inflow: '10', outflow: '2' }] }).success).toBe(true);
     expect(analyticsStablecoinOutput.safeParse({ ...base, peg_subtotals: [{ peg_currency: 'USD', inflow: 10, outflow: 2 }] }).success).toBe(false);
     expect(analyticsStablecoinOutput.safeParse(base).success).toBe(false); // peg_subtotals required
+  });
+
+  it('isoDateString validates the calendar, not just the format (H6)', () => {
+    // format-valid but not a real calendar date — rejected, not rolled over
+    expect(isoDateString.safeParse('2026-02-30').success).toBe(false); // Feb has 28 days in 2026
+    expect(isoDateString.safeParse('2026-13-01').success).toBe(false); // month 13
+    expect(isoDateString.safeParse('2026-00-10').success).toBe(false); // month 0
+    expect(isoDateString.safeParse('2026-01-00').success).toBe(false); // day 0
+    expect(isoDateString.safeParse('2026-01-32').success).toBe(false); // day 32
+    // real calendar dates accepted, including a real leap day
+    expect(isoDateString.safeParse('2024-02-29').success).toBe(true);
+    expect(isoDateString.safeParse('2026-02-28').success).toBe(true);
+    expect(isoDateString.safeParse('2026-12-31').success).toBe(true);
+  });
+
+  it('analyticsBalancesInput.as_of validates the calendar too (inherits isoDateString, H6)', () => {
+    expect(analyticsBalancesInput.safeParse({ as_of: '2026-02-30' }).success).toBe(false);
+    expect(analyticsBalancesInput.safeParse({ as_of: '2026-02-28' }).success).toBe(true);
   });
 
   it('analyticsListEventsInput bounds limit to ≤200 and rejects unknown keys', () => {

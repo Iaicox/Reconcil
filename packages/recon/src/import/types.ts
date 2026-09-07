@@ -27,7 +27,7 @@ export interface ExternalRecordDraft {
   kind: string; // 'invoice' for now (Option C seam: future kinds reuse the engine)
   direction: Direction;
   source: 'csv';
-  externalRef: string;
+  externalRef: string; // sanitized at the parser edge (hostile import text, C6/ADR-011) — the DEDUPE KEY, so the scrubbed value is what's stored
   counterpartyName: string | null; // RAW (hostile) — audit only, sanitized at the edge
   amount: string; // non-negative decimal string, gross in `currency`
   currency: string; // ISO-ish upper (EUR/USD/...)

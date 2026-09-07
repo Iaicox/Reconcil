@@ -2,7 +2,9 @@
  * Matching persistence (recon_suggest_matches, §6.4/ADR-010). The pure engine
  * (@reconcil/recon) scores; this layer owns the I/O: it loads the tenant's open
  * records and the candidate settlement events, values each candidate in the record's
- * currency, runs the engine, and persists the suggested legs.
+ * currency, runs the engine, and persists the suggested legs. Records with nothing
+ * outstanding are excluded from the record SELECT itself (A4/A5) — not just left to
+ * the engine's own `openAmount <= 0` guard — so nothing is even valued against them.
  *
  * Valuation is hybrid (C4 "priced means pinned"): a same-currency **stablecoin** keeps
  * face value at peg (reproducible as amount × 1, no snapshot needed, P5); any other token
@@ -25,7 +27,7 @@ import {
 } from '@reconcil/db';
 import type { TokenMeta } from '@reconcil/ledger';
 import {
-  priceKey, resolveFxRates, resolvePrices, valueOne,
+  isSupportedFxPair, priceKey, resolveFxRates, resolvePrices, valueOne,
   type Currency, type FxResolved,
   type FxRef as PricingFxRef, type PriceRef as PricingPriceRef, type ValueNeed,
 } from '@reconcil/pricing';
@@ -120,9 +122,11 @@ interface ValuedCandidate {
 /**
  * Value every candidate event into `target` via pinned market snapshots (+ ECB FX), keyed
  * by event id. Same-currency stablecoins are excluded here — the caller uses their face value
- * (P5). A token with no usable snapshot (or no FX for a required conversion) is simply absent
- * from the map: the caller drops that candidate and raises PRICE_MISSING (ADR-007, never
- * interpolate). Batched: one `resolvePrices` + at most one `resolveFxRates` for the whole set.
+ * (P5). A token with no usable snapshot, no FX for a required conversion, or a snapshot
+ * currency that isn't EUR↔USD-convertible to `target` (H5, e.g. a GBP-pegged stablecoin) is
+ * simply absent from the map: the caller drops that candidate and raises PRICE_MISSING
+ * (ADR-007, never interpolate — and never a wrong number, never a batch-failing throw).
+ * Batched: one `resolvePrices` + at most one `resolveFxRates` for the whole set.
  */
 async function valueEventsInto(
   tx: Tx,
@@ -147,7 +151,7 @@ async function valueEventsInto(
   const fxDates = new Set<string>();
   for (const n of needs) {
     const snap = prices.get(priceKey(n.tokenId, n.date));
-    if (snap && snap.currency !== target) fxDates.add(n.date);
+    if (snap && snap.currency !== target && isSupportedFxPair(snap.currency, target)) fxDates.add(n.date);
   }
   const fx = fxDates.size > 0
     ? await resolveFxRates(tx, [...fxDates], { base: 'EUR', quote: 'USD' })
@@ -158,6 +162,7 @@ async function valueEventsInto(
     if (!snap) continue;
     let fxResolved: FxResolved | undefined;
     if (snap.currency !== target) {
+      if (!isSupportedFxPair(snap.currency, target)) continue; // unsupported pair → PRICE_MISSING at the caller
       fxResolved = fx.get(n.date);
       if (!fxResolved) continue; // required conversion has no rate → PRICE_MISSING at the caller
     }
@@ -205,6 +210,13 @@ export async function suggestMatches(
           recordIds !== undefined ? inArray(externalRecords.id, recordIds) : undefined,
           period !== undefined ? gte(externalRecords.issuedOn, period.from) : undefined,
           period !== undefined ? lte(externalRecords.issuedOn, period.to) : undefined,
+          // A record with nothing outstanding is not a candidate target at all (A4/A5) —
+          // filtered here, at the SQL level, so it is excluded from scope entirely (not
+          // counted as "unmatched" either) and no candidate is even valued against it.
+          // A freshly imported zero-amount invoice sits at status='open' regardless of
+          // this fix (the DB default is amount-independent), so this is load-bearing on
+          // its own, not merely a mirror of the engine-layer guard in suggestForRecord.
+          sql`${externalRecords.amount} > coalesce((select sum(${matches.fiatValue}) from ${matches} where ${matches.externalRecordId} = ${externalRecords.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed'), 0)`,
         ),
       )
       .orderBy(externalRecords.id); // stable suggestion order across runs
