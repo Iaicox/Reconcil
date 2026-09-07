@@ -125,4 +125,10 @@ describe('directory_upsert_entity / directory_list_entities — address book (§
     await expect(directoryUpsertEntity(ctx(), { kind: 'vendor' })).rejects.toMatchObject({ code: 'INVALID_INPUT' }); // name required
     await expect(directoryUpsertEntity(ctx(), { name: 'X', kind: 'not-a-kind' })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
+
+  it('rejects a non-UUID entity_id with INVALID_INPUT at input validation (not a raw uuid-cast error)', async () => {
+    await expect(
+      directoryUpsertEntity(ctx(), { entity_id: 'not-a-uuid', name: 'X', kind: 'vendor' }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
 });

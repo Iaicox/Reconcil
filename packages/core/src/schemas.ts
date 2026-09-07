@@ -402,7 +402,9 @@ export type DirectoryListEntitiesOutput = z.infer<typeof directoryListEntitiesOu
 
 export const directoryUpsertEntityInput = z
   .object({
-    entity_id: z.string().optional(), // present = update
+    // `entities` row id (UUID); present = update. A non-UUID value is INVALID_INPUT at
+    // validation, never a raw Postgres uuid-cast error (directory/repo.ts).
+    entity_id: z.string().uuid().optional(),
     name: z.string(),
     kind: directoryEntityKind,
     client_id: z.string().optional(),
@@ -642,9 +644,11 @@ export const reconImportInvoicesInput = z
       .object({
         currency: z.string().optional(),
         direction: externalRecordDirection.optional(),
-        // Non-negative: a negative default would poison every row that relies on it
-        // (INVALID_VAT), so fail fast at input validation instead.
-        vat_rate: z.number().nonnegative().optional(),
+        // Non-negative and capped at 100 (it is a percent, not a rate): an out-of-range
+        // default would poison every row that relies on it (INVALID_VAT), so fail fast
+        // at input validation instead — mirrors the same bound the parser applies to a
+        // per-row `vat_rate` cell.
+        vat_rate: z.number().nonnegative().max(100).optional(),
       })
       .strict()
       .optional(),
@@ -678,7 +682,14 @@ export const reconImportInvoicesOutput = z
   .object({
     inserted: z.number().int().nonnegative(),
     skipped_duplicates: z.number().int().nonnegative(),
-    errors: z.array(z.object({ row: z.number().int(), code: z.string(), message: z.string() })),
+    errors: z.array(z.object({
+      row: z.number().int(),
+      code: z.string(),
+      // Never a raw CSV cell value (C6, ADR-011) — row + code + field name are enough
+      // to drill down via the row number; the raw cell survives only server-side, in
+      // the record's stored `payload`.
+      message: z.string(),
+    })),
     records: z.array(reconImportedRecordSchema),
   })
   .strict();
@@ -704,7 +715,9 @@ export const reconSuggestMatchesInput = z
   .object({
     period: periodSchema.optional(),
     client_id: z.string().optional(),
-    record_ids: z.array(z.string()).optional(),
+    // `external_records.id` (UUID): a non-UUID value is INVALID_INPUT at validation,
+    // never a raw Postgres uuid-cast error (mirrors resolveClientId).
+    record_ids: z.array(z.string().uuid()).optional(),
     tolerances: reconTolerancesSchema.optional(),
   })
   .strict();
@@ -765,7 +778,11 @@ export type ReconSuggestMatchesOutput = z.infer<typeof reconSuggestMatchesOutput
  * free-text note (audited via the tool_call, not stored on the row). Exported under
  * both tool names so the registry references a schema per tool.
  */
-const matchDecisionInput = z.object({ match_id: z.string(), note: z.string().optional() }).strict();
+// `match_id` is the `matches` row id (UUID): a non-UUID value is INVALID_INPUT at
+// validation, never a raw Postgres uuid-cast error (decision-repo.ts, mirrors
+// resolveClientId). `note` is caller-supplied free text, not a hostile import/chain
+// string — it is audited via the tool_call, never stored/echoed (C6 does not apply).
+const matchDecisionInput = z.object({ match_id: z.string().uuid(), note: z.string().optional() }).strict();
 export const reconConfirmMatchInput = matchDecisionInput;
 export const reconRejectMatchInput = matchDecisionInput;
 export type ReconMatchDecisionInput = z.infer<typeof matchDecisionInput>;
