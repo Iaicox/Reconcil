@@ -93,7 +93,7 @@ export async function reconSuggestMatches(
       try {
         reconSuggestMatchesOutput.parse(data);
       } catch (err) {
-        throw new ToolError('INTERNAL', `recon_suggest_matches produced an output that violates its contract: ${String(err)}`);
+        throw new ToolError('INTERNAL', 'recon_suggest_matches produced an output that violates its contract', undefined, err);
       }
 
       // Each suggestion cites its backing settlement event (C1/C3): inline when ≤ cap,

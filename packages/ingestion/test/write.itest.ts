@@ -121,4 +121,54 @@ describe('write layer', () => {
     const a = await chunkInsert(10); const b = await chunkInsert(100); const c = await chunkInsert(1000);
     expect(a).toEqual(b); expect(b).toEqual(c); expect(a.length).toBe(250);
   });
+
+  // Requirement 2 (belt-and-braces): the UPDATE itself must never move the cursor
+  // backwards, and must never silently overwrite a manually-`paused` checkpoint.
+  // Distinct addresses per test — this file has no beforeEach truncation, tests
+  // accumulate state, so isolation is by (chain, address, stream) key alone.
+  describe('commitPage — cursor & status guards', () => {
+    const GREATEST_ADDR = '0xaaa0000000000000000000000000000000000010';
+    const PAUSED_ADDR = '0xaaa0000000000000000000000000000000000011';
+    const ERROR_ADDR = '0xaaa0000000000000000000000000000000000012';
+
+    it('GREATEST guard: a direct commitPage call with a lower cursor never regresses the stored one', async () => {
+      await seedCheckpoint(db, 1, GREATEST_ADDR, 'native');
+      await commitPage(db, { chainId: 1, address: GREATEST_ADDR, stream: 'native' },
+        [], { lastProcessedBlock: 500, status: 'live' }, chain);
+      // A stray/duplicate call with a lower next.lastProcessedBlock (e.g. a retried
+      // job racing a newer one) must not move the cursor back down to 100.
+      await commitPage(db, { chainId: 1, address: GREATEST_ADDR, stream: 'native' },
+        [], { lastProcessedBlock: 100, status: 'live' }, chain);
+      const cp = await getCheckpoint(db, 1, GREATEST_ADDR, 'native');
+      expect(cp).toMatchObject({ lastProcessedBlock: 500, status: 'live' });
+    });
+
+    it('paused preservation: a paused checkpoint is not touched by commitPage at all (status or cursor)', async () => {
+      await seedCheckpoint(db, 1, PAUSED_ADDR, 'native');
+      await commitPage(db, { chainId: 1, address: PAUSED_ADDR, stream: 'native' },
+        [], { lastProcessedBlock: 300, status: 'live' }, chain);
+      await pool.query(
+        `UPDATE ingestion_checkpoints SET status='paused' WHERE chain_id=1 AND address=$1 AND stream='native'`,
+        [PAUSED_ADDR],
+      );
+      // A stray job commits a page as if the run continued; paused must win — both
+      // the cursor and the status stay exactly as an operator left them.
+      await commitPage(db, { chainId: 1, address: PAUSED_ADDR, stream: 'native' },
+        [nativeEvent(9999, -1)], { lastProcessedBlock: 9999, status: 'backfilling' }, chain);
+      const cp = await getCheckpoint(db, 1, PAUSED_ADDR, 'native');
+      expect(cp).toMatchObject({ status: 'paused', lastProcessedBlock: 300 });
+    });
+
+    it('a sticky error status is correctly overwritten by a later successful run (not guarded, by design)', async () => {
+      await seedCheckpoint(db, 1, ERROR_ADDR, 'native');
+      await pool.query(
+        `UPDATE ingestion_checkpoints SET status='error' WHERE chain_id=1 AND address=$1 AND stream='native'`,
+        [ERROR_ADDR],
+      );
+      await commitPage(db, { chainId: 1, address: ERROR_ADDR, stream: 'native' },
+        [], { lastProcessedBlock: 50, status: 'live' }, chain);
+      const cp = await getCheckpoint(db, 1, ERROR_ADDR, 'native');
+      expect(cp).toMatchObject({ status: 'live', lastProcessedBlock: 50 });
+    });
+  });
 });
