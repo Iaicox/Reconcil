@@ -29,6 +29,13 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    no server process in the eval loop, deterministic and fast.
 5. **Tool naming**: wire names use underscores (`analytics_balances`); dots break the
    Claude API's tool-name constraint (`^[a-zA-Z0-9_-]+$`). Namespaces are conventions.
+6. **Model-controlled paths never choose an arbitrary write root.** A tool argument is
+   agent-supplied and therefore hostile — `export_*`'s `out_dir` is confined to the export
+   root (`RECONCIL_EXPORT_DIR`, default `<cwd>/exports`): resolved as a subpath under it,
+   prefix-checked, then `realpath`-rechecked past symlinks (`fs-confine.ts`, shared with
+   `recon_import_invoices`' `file_path` confinement against `RECONCIL_IMPORT_DIR`). An
+   escape (`..` traversal, an absolute path outside the root) is `INVALID_INPUT`, never a
+   write outside the configured base (H2 audit finding).
 
 ## Alternatives considered
 

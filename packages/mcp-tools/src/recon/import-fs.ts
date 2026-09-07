@@ -1,18 +1,19 @@
 /**
  * Filesystem edge for `recon_import_invoices`' `file_path` input. `file_path` is a
  * hostile, agent-supplied string, so reads are confined to an operator-configured
- * import directory (`RECONCIL_IMPORT_DIR`) — mirroring the exports base-dir pattern
- * (`export-run.ts`). Reads are riskier than the exports *write* path, so this is
- * FAIL-CLOSED: with no `RECONCIL_IMPORT_DIR` set, `file_path` is rejected outright.
- * Containment is enforced twice — a pure `resolve`+prefix check (rejects absolute
- * paths and `..` traversal) and a post-`realpath` re-check (defeats symlink escape) —
- * plus a byte-size cap. Every failure returns a GENERIC message: the path and the
- * underlying fs error never leak back to the caller.
+ * import directory (`RECONCIL_IMPORT_DIR`) — using the same confinement math the
+ * exports write path uses (`../fs-confine.ts`). Reads are riskier than the exports
+ * *write* path, so this is FAIL-CLOSED: with no `RECONCIL_IMPORT_DIR` set, `file_path`
+ * is rejected outright. Containment is enforced twice — a pure `resolve`+prefix check
+ * (rejects absolute paths and `..` traversal) and a post-`realpath` re-check (defeats
+ * symlink escape) — plus a byte-size cap. Every failure returns a GENERIC message: the
+ * path and the underlying fs error never leak back to the caller.
  */
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 import { ToolError } from '../errors.js';
+import { realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
 
 /** Max bytes for a `file_path` import (operator knob; read at call time so it is
  *  configurable at runtime and testable). */
@@ -34,8 +35,8 @@ export function importBaseDir(): string | null {
  * (`base` = `/srv/imports`, target `/srv/imports-evil`).
  */
 export function resolveConfinedPath(base: string, filePath: string): string {
-  const target = resolve(base, filePath);
-  if (target !== base && !target.startsWith(base + sep)) {
+  const target = resolveWithinBase(base, filePath);
+  if (target === null) {
     throw new ToolError('INVALID_INPUT', 'file_path resolves outside the permitted import directory');
   }
   return target;
@@ -49,17 +50,16 @@ export async function readImportFile(filePath: string): Promise<string> {
   }
   const confined = resolveConfinedPath(base, filePath);
 
-  let realBase: string;
-  let realTarget: string;
-  try {
-    realBase = await realpath(base);
-    realTarget = await realpath(confined);
-  } catch {
-    throw new ToolError('INVALID_INPUT', 'file_path could not be resolved in the import directory');
+  const check = await realpathWithinBase(base, confined);
+  if (!check.ok) {
+    throw new ToolError(
+      'INVALID_INPUT',
+      check.reason === 'unresolvable'
+        ? 'file_path could not be resolved in the import directory'
+        : 'file_path resolves outside the permitted import directory',
+    );
   }
-  if (realTarget !== realBase && !realTarget.startsWith(realBase + sep)) {
-    throw new ToolError('INVALID_INPUT', 'file_path resolves outside the permitted import directory');
-  }
+  const realTarget = check.realTarget;
 
   let size: number;
   try {

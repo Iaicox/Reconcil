@@ -16,6 +16,7 @@ import type { RenderedExport } from '@reconcil/exporters';
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
+import { realpathAncestorWithinBase, resolveWithinBase } from '../fs-confine.js';
 import { runWriteTool } from '../write-tx.js';
 import type { CloseData } from './close-pack-data.js';
 
@@ -30,13 +31,39 @@ export interface ExportRunOptions {
   outDir?: string;
 }
 
+/** The operator-configured export root: `RECONCIL_EXPORT_DIR`, else `<cwd>/exports`. Unlike
+ *  the import base dir this is NOT fail-closed — exports have always had a working default,
+ *  and `out_dir` (below) only ever narrows a subpath under it, never replaces it. */
+function exportRoot(): string {
+  return resolve(process.env.RECONCIL_EXPORT_DIR ?? join(process.cwd(), 'exports'));
+}
+
 /**
- * Resolve the export root: an operator-supplied `out_dir`, else `RECONCIL_EXPORT_DIR`,
- * else `<cwd>/exports`. Callers isolate a run under an `<export_id>` subdir. Shared by
- * every export tool so the on-disk layout is defined once.
+ * Resolve the export root, confined to `exportRoot()`. `out_dir` is a MODEL-CONTROLLED tool
+ * argument (H2) and therefore hostile: it is interpreted as a subpath *under* the base, never
+ * as an arbitrary write location. Absent, it is a no-op (unchanged default behavior).
+ * Present, it is resolved against the base and must stay inside it — an absolute `out_dir`
+ * that happens to land inside the base is fine, but any `..` traversal or absolute path that
+ * escapes it throws `INVALID_INPUT` (mirrors the `recon_import_invoices` `file_path`
+ * confinement, `../fs-confine.ts`). Confinement is enforced twice: a pure prefix check, then
+ * a `realpath` re-check on the deepest existing ancestor (the target directory itself may not
+ * exist yet — callers `mkdir -p` it right after). Never echoes the resolved server path in
+ * the error — only the caller-supplied `out_dir` value, which the caller already knows.
  */
-export function baseDir(outDir?: string): string {
-  return resolve(outDir ?? process.env.RECONCIL_EXPORT_DIR ?? join(process.cwd(), 'exports'));
+export async function baseDir(outDir?: string): Promise<string> {
+  const base = exportRoot();
+  if (outDir === undefined) return base;
+
+  const resolved = resolveWithinBase(base, outDir);
+  const confined = resolved !== null && (await realpathAncestorWithinBase(base, resolved));
+  if (resolved === null || !confined) {
+    throw new ToolError(
+      'INVALID_INPUT',
+      `out_dir "${outDir}" resolves outside the export root`,
+      'set RECONCIL_EXPORT_DIR to relocate the export root, or pass out_dir as a subpath under it',
+    );
+  }
+  return resolved;
 }
 
 export async function runExport<T>(
@@ -44,7 +71,7 @@ export async function runExport<T>(
   outputSchema: { parse: (v: unknown) => T },
 ): Promise<ToolEnvelope<T>> {
   const { ctx, data, rendered, provenance } = opts;
-  const dir = join(baseDir(opts.outDir), provenance.exportId);
+  const dir = join(await baseDir(opts.outDir), provenance.exportId);
 
   const files: { name: string; path: string; sha256: string }[] = [];
   try {

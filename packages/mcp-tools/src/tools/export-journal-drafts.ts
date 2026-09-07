@@ -57,7 +57,7 @@ export async function exportJournalDrafts(
   });
 
   // Materialize the single CSV under out_dir/<export_id>/ (the subdir isolates runs).
-  const dir = join(baseDir(input.out_dir), exportId);
+  const dir = join(await baseDir(input.out_dir), exportId);
   const filePath = join(dir, rendered.file.name);
   try {
     await mkdir(dir, { recursive: true });

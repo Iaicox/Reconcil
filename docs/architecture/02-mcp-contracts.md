@@ -474,7 +474,7 @@ and the file paths when done (MVP: synchronous, seconds-scale; contract allows a
 ```ts
 input:  { month: string;                                         // '2026-06'
           scope?: Scope; client_id?: string; valuation: Valuation;
-          out_dir?: string }                                     // default: exports volume
+          out_dir?: string }                                     // subpath under the export root; escapes → INVALID_INPUT
 output: { export_id: string;
           files: Array<{ name: string; path: string; sha256: string; rows?: number }>;
           // balances_opening.csv, balances_closing.csv, transactions.csv, gas.csv,
@@ -487,7 +487,8 @@ output: { export_id: string;
 **`export_journal_drafts`**
 ```ts
 input:  { period: Period; target: 'qbo' | 'xero'; client_id?: string;
-          account_mapping?: Record<string, string> }             // category -> account code
+          account_mapping?: Record<string, string>;              // category -> account code
+          out_dir?: string }                                     // subpath under the export root; escapes → INVALID_INPUT
 output: { export_id: string; file: { name: string; path: string; sha256: string };
           lines: number; unmapped_categories: string[];
           balanced: true;                                        // by construction: no rounding line; a residue fails the export
@@ -498,6 +499,15 @@ Journal files are **drafts**: header rows and file names carry `DRAFT — review
 (P8). Only confirmed matches and ledger events feed journals — suggested matches never
 reach an export. Every export writes its `manifest.json` (coverage, price/fx refs,
 tool_call ids, rounding residues) and registers in the `exports` table.
+
+`out_dir` is a MODEL-CONTROLLED argument and therefore hostile (H2): every export tool
+resolves it relative to the export root (`RECONCIL_EXPORT_DIR`, default `<cwd>/exports`),
+never as a location of its own — a `..` traversal or an absolute path that escapes the root
+is rejected as `INVALID_INPUT` before anything is written, the same confinement discipline
+`recon_import_invoices`' `file_path` applies to reads (§6.4) against `RECONCIL_IMPORT_DIR`.
+The one difference: the export root is not fail-closed (it defaults to `<cwd>/exports`
+rather than refusing every call), since export write locations already had a safe default
+before `out_dir` existed.
 
 ## 7. Sanitization of hostile strings (P7, ADR-011)
 
