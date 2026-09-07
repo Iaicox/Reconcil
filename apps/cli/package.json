@@ -19,13 +19,13 @@
     "@reconcil/db": "workspace:*",
     "@reconcil/evals": "workspace:*",
     "@reconcil/mcp-tools": "workspace:*",
-    "@testcontainers/postgresql": "^11.0.0",
-    "drizzle-orm": "^0.45.2",
-    "pg": "^8.22.0"
+    "@testcontainers/postgresql": "catalog:",
+    "drizzle-orm": "catalog:",
+    "pg": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "catalog:",
     "eslint": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
