@@ -141,7 +141,7 @@ They are the system telling you the limits of its own answer.
 | `UNVERIFIED_EXCLUDED` | Spam-suspected tokens were omitted (the default). | Usually correct. Pass `include_unverified: true` if you genuinely need them. |
 | `PRICE_MISSING` | No price snapshot for a (token, date). The fiat value was omitted. | Let the price job catch up, or accept the token-denominated figure. Never substitute your own rate into an exported pack without noting it. |
 | `FX_DATE_SHIFTED` | A weekend/holiday: the previous ECB rate was used. | Informational — standard accounting practice, but disclose it if material. |
-| `SANITIZED_HEAVY` | More than 30% of an untrusted string was stripped. | A token or counterparty name was mostly hostile characters. Treat that counterparty with suspicion. |
+| `SANITIZED_HEAVY` | More than 30% of an untrusted string's characters were lost — to hostile-charset stripping, to truncation at the length cap, or both combined. | Could mean the name was mostly hostile characters (treat that counterparty with suspicion) — or simply a long legitimate name that got truncated. Check the sanitized value before assuming malice. |
 | `ROUNDING_RESIDUE` | A per-currency rounding residue was non-zero on an export. | You should not see this today: the close pack appends a labeled `Rounding` line so each currency balances exactly, the QBO/Xero drafts balance by construction (a non-zero residue fails the export instead of producing a file), and either way the manifest's `rounding_residues` records `0.00` per currency. Treat an occurrence as a bug — do not import the file. |
 
 ## Error codes
