@@ -155,8 +155,10 @@ export interface RenderedExport {
 
 // ----------------------------------------------- recon-backed journal drafts ---
 // `export_journal_drafts` (§6.5): confirmed matches → a QBO/Xero manual-journal CSV
-// draft. Valued from the confirmed legs' pinned fiat (face value, P5) — no fresh
-// pricing pass, so `price_refs`/`fx_refs` are empty. Every artifact is a DRAFT (P8).
+// draft. Valued from the confirmed legs' pinned fiat (P5) — never re-priced here.
+// `price_refs`/`fx_refs` are populated by the caller (mcp-tools) from any volatile-token
+// leg's pinned snapshot/FX (H11); a same-currency stablecoin leg pins neither, so a
+// stablecoin-only journal ships them empty. Every artifact is a DRAFT (P8).
 
 export type JournalTarget = 'qbo' | 'xero';
 
@@ -206,8 +208,8 @@ export interface JournalManifest {
   generated_at: string;
   draft: true;
   coverage: CoverageRef[];
-  price_refs: PriceRef[]; // empty: stablecoin face value (P5)
-  fx_refs: FxRef[]; // empty
+  price_refs: PriceRef[]; // non-empty only when a volatile-token leg is in the period (H11)
+  fx_refs: FxRef[]; // non-empty only when a cross-currency conversion backed a leg (H11)
   rounding_residues: RoundingResidue[];
   account_mapping: Record<string, string>;
   unmapped_categories: string[];

@@ -98,9 +98,18 @@ export async function reconSuggestMatches(
 
       // Each suggestion cites its backing settlement event (C1/C3): inline when ≤ cap,
       // else a summary whose drilldown re-enumerates the events via analytics_list_events.
+      // The drilldown carries the CANONICAL resolved `clientId` (not the caller's raw
+      // `input.client_id`) when the run was client-scoped — mirrors recon_status (H12/C3b);
+      // an unscoped run re-enumerates the whole tenant, so no scope key is added.
       const refs = selectRefs(
         [{ refs: rows.map((s) => ({ chainId: s.event.chainId, txHash: s.event.txHash, logIndex: s.event.logIndex })), totalCount: rows.length }],
-        { tool: 'analytics_list_events', args: input.period !== undefined ? { period: input.period } : {} },
+        {
+          tool: 'analytics_list_events',
+          args: {
+            ...(clientId !== undefined ? { scope: { client_id: clientId } } : {}),
+            ...(input.period !== undefined ? { period: input.period } : {}),
+          },
+        },
       );
 
       // Volatile-token legs carry pinned price/FX snapshots + any PRICE_MISSING warnings (C4/C5).

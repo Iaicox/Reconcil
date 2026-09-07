@@ -6,7 +6,7 @@ import {
   analyticsListEventsInput, analyticsStablecoinInput, analyticsStablecoinOutput, decimalString,
   isoDateString,
   ledgerStatusInput, ledgerStatusOutput, ledgerTraceToolCallInput, ledgerTraceToolCallOutput,
-  ledgerTrackWalletInput, ledgerTrackWalletOutput,
+  ledgerTrackWalletInput, ledgerTrackWalletOutput, reconTolerancesSchema,
 } from '../src/schemas.js';
 
 describe('contract schemas', () => {
@@ -162,5 +162,12 @@ describe('ledger_* schemas (§6.2)', () => {
     };
     expect(ledgerTraceToolCallOutput.safeParse(out).success).toBe(true);
     expect(ledgerTraceToolCallOutput.safeParse({ ...out, drilldown: { tool: 'analytics_list_events', args: {} } }).success).toBe(true);
+  });
+
+  it('reconTolerancesSchema caps date_window_days at 3650 (C9)', () => {
+    expect(reconTolerancesSchema.safeParse({ date_window_days: 3650 }).success).toBe(true);
+    expect(reconTolerancesSchema.safeParse({ date_window_days: 3651 }).success).toBe(false);
+    // Unbounded input would overflow Date arithmetic downstream into an opaque INTERNAL.
+    expect(reconTolerancesSchema.safeParse({ date_window_days: 1e15 }).success).toBe(false);
   });
 });

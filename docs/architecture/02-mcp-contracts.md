@@ -519,6 +519,16 @@ The one difference: the export root is not fail-closed (it defaults to `<cwd>/ex
 rather than refusing every call), since export write locations already had a safe default
 before `out_dir` existed.
 
+Valuation is the confirmed legs' own stored fiat (face value pinned at confirm, P5) — the
+journal is never re-priced at export time. The envelope's citations follow from that: a
+same-currency **stablecoin** leg pinned no snapshot at suggest time, so it contributes
+nothing; a **volatile-token** leg pinned a `price_snapshot_id` (+ `fx_rate_id` on a
+cross-currency conversion), and the export re-hydrates those into `price_refs`/`fx_refs`
+(C4) — a stablecoin-only journal for the period ships both empty, correctly. The backing
+settlement events are cited too (`event_refs`/`event_ref_summary`, C3): inline when ≤ the
+ref cap, else a summary whose `drilldown` re-enumerates them via `analytics_list_events`
+over the journal's own period plus the client scope, when the export was client-scoped.
+
 ## 7. Sanitization of hostile strings (P7, ADR-011)
 
 Applies to every string that originates on-chain or in imports: token `symbol`/`name`,
