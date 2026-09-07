@@ -79,7 +79,13 @@ async function erc20Balances(
   return out;
 }
 
-/** The native pseudo-token (address NULL) — created lazily if no seed shipped it. */
+/**
+ * The native pseudo-token (address NULL) — created lazily if no seed shipped it.
+ * The native symbol is a trusted chains.config.ts constant, so it also fills
+ * symbol_display/name_display (ADR-011); verified stays false here — the curated
+ * seed migration (0002_seed_curated_tokens.sql) is the verified=true authority and
+ * wins this row's slot via ON CONFLICT DO NOTHING.
+ */
 async function ensureNativeTokenId(db: Db, chainId: number): Promise<number> {
   const chain = chainById(chainId);
   await db
@@ -90,6 +96,8 @@ async function ensureNativeTokenId(db: Db, chainId: number): Promise<number> {
       standard: 'native',
       symbolRaw: chain.native.symbol,
       nameRaw: chain.native.symbol,
+      symbolDisplay: chain.native.symbol,
+      nameDisplay: chain.native.symbol,
       decimals: chain.native.decimals,
       verified: false,
     })
