@@ -60,10 +60,7 @@ describe('failoverProvider', () => {
 
     it('is absent entirely when no provider serves it — callers degrade, they do not throw', () => {
       const fp = failoverProvider([stub({}), stub({ kind: 'blockscout' })]);
-      // The assertion is that the property is ABSENT — it is never called, so the
-      // unbound-`this` hazard the rule guards against cannot arise here.
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(fp.getInternalTxs).toBeUndefined();
+      expect(typeof fp.getInternalTxs).toBe('undefined');
     });
 
     it('rethrows the last ProviderError when every capable provider fails', async () => {
