@@ -12,7 +12,7 @@ accounting tool that is 99% right is 0% trustworthy. Testing layers, bottom-up.
 | Contract (tool schemas ↔ golden JSON) | vitest snapshots | every commit |
 | Integration (ingest fixtures → assert ledger) | vitest + testcontainers (Postgres) | every commit (CI service container) |
 | E2E smoke (compose up, stdio client, 3 tool calls) | script | pre-release |
-| Agent evals (~30 cases) | Agent SDK runner in `packages/evals` | smoke on PR; full nightly + pre-demo |
+| Agent evals (~30 cases) | Agent SDK runner in `packages/evals` | smoke on PR; full on demand + pre-demo |
 
 No network in any test: providers are replayed from recorded fixtures.
 
@@ -189,7 +189,7 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 | `schema-parity` | PR + main | `scripts/check-schema-parity.sh`: drizzle migrations vs `schema.sql` applied to two fresh DBs (disposable postgres:16), `pg_dump --schema-only` diff must be empty |
 | `integration` | PR + main | Postgres service container, fixture ingest, ledger assertions |
 | `evals-smoke` | PR (repo secrets only, skipped on forks) | 5-case subset, 1 run — catches contract drift cheaply |
-| `evals-full` | nightly + manual | 30 cases × 3 runs, publishes scorecard artifact |
+| `evals-full` | manual (`workflow_dispatch`) / pre-demo | 30 cases × 3 runs, publishes scorecard artifact |
 | `e2e-smoke` | manual (`workflow_dispatch`) / pre-release | real compose stack up, stdio MCP client, 3 tool calls, assert envelopes — proves P10 self-host boots (`pnpm smoke:compose`, `apps/mcp-server/src/compose-smoke.ts`). Off the per-PR path (cost) |
 
 Secrets policy: `ANTHROPIC_API_KEY` only in `evals-*`; provider keys never needed in CI
@@ -197,8 +197,13 @@ Secrets policy: `ANTHROPIC_API_KEY` only in `evals-*`; provider keys never neede
 jobs gate on, so a missing key makes them **skip** (grey), never fail red.
 
 Gate cadence — deliberate: the live gate runs **pre-merge on the PR** (`evals-smoke`) and
-**nightly / on-demand** (`evals-full`), **not** on push to `main`. So the demo-readiness gate
-is a per-PR + nightly signal, not a per-`main`-push blocker; a change that lands on `main`
-without a PR (or a non-determinism only `evals-full` exercises) is caught by the next nightly.
+**on demand** (`evals-full`), **not** on push to `main` and **not** nightly. So the
+demo-readiness gate is a per-PR signal plus an explicit pre-demo run, not a per-`main`-push
+blocker. `evals-full` is the only job that spends real API budget, and a nightly run against
+an unchanged `main` re-answered a question nobody had asked — it drained the balance twice
+and went red for five weeks. The cost of dropping it: a non-determinism that only
+`evals-full` exercises is now caught at the next deliberate run rather than the next
+morning. The weekly `schedule` still runs the deterministic jobs as an ecosystem-drift
+canary.
 The deterministic reconciliation + ground-truth-numbers itests DO run on every PR (keyless
 `integration` job), so the R3/P1-P2 guarantees are enforced per-PR regardless.
