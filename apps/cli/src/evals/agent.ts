@@ -27,6 +27,20 @@ export interface AgentOptions {
    * red gate can be told apart from a moved baseline.
    */
   onResolvedModel?: (model: string) => void;
+  /**
+   * Called once per API call with that call's token usage. The suite makes hundreds of
+   * calls behind one `runUntilDone()`, so without this the only cost signal is the bill
+   * arriving days later — and the cache breakpoint above could not be shown to work.
+   */
+  onUsage?: (usage: TokenUsage) => void;
+}
+
+/** The four counters that decide what a run costs. Cached input bills at a fraction of new input. */
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheCreation: number;
+  cacheRead: number;
 }
 
 export function makeAgentProducer(opts: AgentOptions): SessionProducer {
@@ -34,7 +48,7 @@ export function makeAgentProducer(opts: AgentOptions): SessionProducer {
     const invocations: ToolInvocation[] = [];
     const runnableTools = buildRunnableTools(ctx, (inv) => invocations.push(inv));
 
-    const final = await opts.client.beta.messages
+    const runner = opts.client.beta.messages
       .toolRunner({
         model: opts.model,
         max_tokens: opts.maxTokens ?? 4096,
@@ -53,8 +67,22 @@ export function makeAgentProducer(opts: AgentOptions): SessionProducer {
         ],
         tools: runnableTools,
         messages: [{ role: 'user', content: evalCase.question }],
-      })
-      .runUntilDone();
+      });
+
+    // The runner is async-iterable and yields every assistant message, i.e. one per API
+    // call; `runUntilDone()` afterwards returns the last of them. Iterating is the only
+    // way to see per-call usage — the final message alone reports just its own.
+    if (opts.onUsage) {
+      for await (const message of runner) {
+        opts.onUsage({
+          input: message.usage.input_tokens,
+          output: message.usage.output_tokens,
+          cacheCreation: message.usage.cache_creation_input_tokens ?? 0,
+          cacheRead: message.usage.cache_read_input_tokens ?? 0,
+        });
+      }
+    }
+    const final = await runner.runUntilDone();
 
     opts.onResolvedModel?.(final.model);
 

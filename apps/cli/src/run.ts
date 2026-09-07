@@ -96,10 +96,17 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
       // `args.model` may be an undated alias that silently re-points; record what actually
       // answered so a red gate can be attributed to the code rather than a moved baseline.
       const resolvedModels = new Set<string>();
+      const usage = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
       const produce = makeAgentProducer({
         client,
         model: args.model,
         onResolvedModel: (m) => resolvedModels.add(m),
+        onUsage: (u) => {
+          usage.input += u.input;
+          usage.output += u.output;
+          usage.cacheCreation += u.cacheCreation;
+          usage.cacheRead += u.cacheRead;
+        },
       });
       const seedCase = makeSeedCase(db);
 
@@ -117,6 +124,16 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
       if (resolvedModels.size > 0) {
         console.error(`model resolved to: ${[...resolvedModels].sort().join(', ')}`);
       }
+      // Cached input bills at a fraction of new input, so the read/creation split is the
+      // whole point of the cache breakpoint in agent.ts — print it rather than assume it.
+      const cachedShare = usage.cacheRead + usage.input === 0
+        ? 0
+        : Math.round((usage.cacheRead / (usage.cacheRead + usage.input)) * 100);
+      console.error(
+        `tokens — input ${String(usage.input)}, cache read ${String(usage.cacheRead)} ` +
+          `(${String(cachedShare)}% of input served from cache), cache writes ` +
+          `${String(usage.cacheCreation)}, output ${String(usage.output)}`,
+      );
 
       const gate = evaluateGate(cases);
       const report = buildReport(
