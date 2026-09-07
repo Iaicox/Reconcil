@@ -12,13 +12,19 @@ import { assignErc20Metadata } from '../logindex.js';
 import { normalize } from '../normalize.js';
 import type { ProviderBundle } from '../providers/provider-factory.js';
 import type { NormalizedEvent, PageQuery, RawReceipt } from '../types.js';
-import { commitPage, getCheckpoint } from '../write/checkpoint-repo.js';
+import { commitPage, getCheckpoint, type CheckpointStatus } from '../write/checkpoint-repo.js';
 
 // ProcessorDeps lives here (the shared core) so backfill.ts/tail.ts import it
 // from ingest.ts — no ingest ↔ backfill cycle (dependency-cruiser no-circular).
 export interface ProcessorDeps { db: Db; bundleFor(chainId: number): ProviderBundle; logger: Logger; }
 export interface IngestTarget { chainId: number; address: string; stream: 'native' | 'erc20'; }
-export interface IngestResult { status: 'backfilling' | 'live'; lastProcessedBlock: number; inserted: number; unseenContracts: string[]; }
+// `status` is the full stored-checkpoint status type, not just 'backfilling' | 'live':
+// the H7 skip branch below reports whatever status is actually stored (queued, paused,
+// error, anchoring included — reachable via a stray/duplicate job hitting a checkpoint
+// ingestOnce wouldn't normally see), never a narrowed/coerced guess. Both call sites that
+// branch on this value (apps/worker/src/main.ts, processors/tail.ts) only ever test
+// `=== 'backfilling'`, so the widened union changes nothing for them.
+export interface IngestResult { status: CheckpointStatus; lastProcessedBlock: number; inserted: number; unseenContracts: string[]; }
 
 const PAGE_LIMIT = 1000;
 const uniq = (xs: string[]): string[] => [...new Set(xs)];
@@ -34,8 +40,35 @@ export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Pro
   const safe = head - chain.finalityDepth;
   const fromBlock = BigInt(cp.lastProcessedBlock) + 1n;
   if (fromBlock > safe) {
-    await commitPage(deps.db, target, [], { lastProcessedBlock: Number(safe), status: 'live' }, chain);
-    return { status: 'live', lastProcessedBlock: Number(safe), inserted: 0, unseenContracts: [] };
+    const safeNum = Number(safe);
+    // H7: a load-balanced provider node can return a slightly stale head (safe <
+    // cursor), and on a fresh/dev chain head < finalityDepth makes safe negative.
+    // Either way, committing here would regress or zero-out the cursor — "events
+    // complete <= last_processed_block" would be violated. Skip the commit
+    // entirely (nothing to insert on this path anyway) and report the checkpoint
+    // exactly as stored — `cp.status` verbatim, no coercion — only a genuine
+    // advance (safe > cursor) is legitimate.
+    //
+    // Known retry nuance: a freshly-seeded `queued` checkpoint hitting this path
+    // (e.g. a fresh/dev chain, trigger (b)) is reported back as `queued`, not
+    // promoted to `live`/`backfilling` — nothing here advances it. The onboard
+    // scan's periodic re-scan of `queued` checkpoints will retry it (no new
+    // mechanism needed), subject to BullMQ's completed-job dedup aging out for
+    // its deterministic backfillJobId so the retry isn't a no-op re-add.
+    if (safeNum <= cp.lastProcessedBlock) {
+      deps.logger.warn('ingest: safe head at or below the cursor — skipping commit to avoid regressing it', {
+        chainId: target.chainId, address: target.address, stream: target.stream,
+        safe: safeNum, lastProcessedBlock: cp.lastProcessedBlock,
+      });
+      return {
+        status: cp.status,
+        lastProcessedBlock: cp.lastProcessedBlock,
+        inserted: 0,
+        unseenContracts: [],
+      };
+    }
+    await commitPage(deps.db, target, [], { lastProcessedBlock: safeNum, status: 'live' }, chain);
+    return { status: 'live', lastProcessedBlock: safeNum, inserted: 0, unseenContracts: [] };
   }
 
   const q: PageQuery = { chainId: target.chainId, address: target.address, fromBlock, toBlock: safe, limit: PAGE_LIMIT, sort: 'asc' };

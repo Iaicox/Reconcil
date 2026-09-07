@@ -143,3 +143,23 @@ export class ProviderError extends Error {
     this.kind = kind;
   }
 }
+
+/**
+ * The requested `anchor_from` date resolves to a block inside the reorg-unsafe
+ * tip (`resolved > safeHead`, ADR-005 finality / ADR-008 amendment). Clamping to
+ * safeHead — the prior behavior — fetched the provider-attested balance there
+ * but stamped the `opening_balance` event's `block_time` at midnight-of-anchor-
+ * date, a block/time mismatch that breaks the monotonicity `ledger/src/as-of.ts`
+ * assumes and silently folds every deposit between the anchor date and safeHead
+ * into the "as of anchor date" balance. Rejected loudly instead (H8). Carries
+ * only the numeric finalityDepth — no provider text (ADR-011).
+ */
+export class AnchorTooRecentError extends Error {
+  readonly finalityDepth: number;
+
+  constructor(finalityDepth: number) {
+    super(`anchor date too recent: must be at least ${String(finalityDepth)} blocks old`);
+    this.name = 'AnchorTooRecentError';
+    this.finalityDepth = finalityDepth;
+  }
+}
