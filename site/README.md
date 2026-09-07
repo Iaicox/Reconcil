@@ -7,9 +7,12 @@ the positioning and recruits interview subjects (a `mailto:` CTA — no signup, 
 
 This directory is **deliberately outside the pnpm workspace** (the workspace globs only `apps/*`
 and `packages/*`). It has its own `package.json` and `package-lock.json` and uses **npm**, so
-Next.js and React never enter the product's root `pnpm-lock.yaml`, `turbo` task graph,
-`depcruise` boundaries, or the ADR-011 supply-chain scan. The backend build is completely
-unaffected by anything here.
+Next.js and React never enter the product's root `pnpm-lock.yaml`, `turbo` task graph, or
+`depcruise` boundaries. The backend build is completely unaffected by anything here.
+
+The one deliberate exception is the ADR-011 supply-chain scan: `pnpm check:supply-chain` reads
+`site/package-lock.json` too. The signing/key-material ban is about what this repository ships,
+not about which package manager installed it.
 
 ## Stack
 
