@@ -5,9 +5,9 @@
   "description": "Self-hostable, MCP-native on-chain ledger for crypto accounting",
   "license": "Apache-2.0",
   "type": "module",
-  "packageManager": "pnpm@11.13.0",
+  "packageManager": "pnpm@11.26.0",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "build": "turbo run build",
@@ -16,6 +16,7 @@
     "test": "turbo run test",
     "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
     "check:supply-chain": "node scripts/check-no-signing-libs.cjs",
+    "test:scripts": "node --test scripts/check-no-signing-libs.test.cjs",
     "smoke:compose": "pnpm --filter @reconcil/mcp-server smoke:compose"
   },
   "devDependencies": {

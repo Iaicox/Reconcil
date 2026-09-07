@@ -14,10 +14,14 @@ allowBuilds:
 # typescript is capped at 6.x: 7.x is the native (tsgo) port and typescript-eslint
 # peers require <6.1. @types/node tracks the Node 22 runtime (engines, Dockerfile).
 catalog:
+  "@testcontainers/postgresql": ^12.0.0
   "@types/node": ^22.10.0
+  "@types/pg": ^8.20.0
   "decimal.js": ^10.4.0
+  "drizzle-orm": ^0.45.2
   eslint: ^10.0.0
   fast-check: ^4.9.0
+  pg: ^8.22.0
   tsx: ^4.19.0
   typescript: ~6.0.3
   vitest: ^4.1.0
@@ -25,6 +29,11 @@ catalog:
 
 minimumReleaseAgeExclude:
   - '@anthropic-ai/sdk@0.114.0'
+
+# drizzle-kit (latest) still bundles the deprecated @esbuild-kit loader, which pins
+# esbuild ~0.18 (GHSA-67mh-4wv8-2f99); the transform API it uses is stable in 0.25+.
+overrides:
+  '@esbuild-kit/core-utils>esbuild': ^0.25.0
 
 onlyBuiltDependencies:
   - esbuild
