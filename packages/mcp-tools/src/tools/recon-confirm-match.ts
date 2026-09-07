@@ -46,7 +46,7 @@ export async function reconConfirmMatch(
       try {
         reconConfirmMatchOutput.parse(data);
       } catch (err) {
-        throw new ToolError('INTERNAL', `recon_confirm_match produced an output that violates its contract: ${String(err)}`);
+        throw new ToolError('INTERNAL', 'recon_confirm_match produced an output that violates its contract', undefined, err);
       }
 
       // A volatile-token leg cites the snapshot/FX that backs the confirmed value (C4); a

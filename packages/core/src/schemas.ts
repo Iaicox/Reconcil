@@ -423,7 +423,9 @@ export type DirectoryListEntitiesOutput = z.infer<typeof directoryListEntitiesOu
 
 export const directoryUpsertEntityInput = z
   .object({
-    entity_id: z.string().optional(), // present = update
+    // `entities` row id (UUID); present = update. A non-UUID value is INVALID_INPUT at
+    // validation, never a raw Postgres uuid-cast error (directory/repo.ts).
+    entity_id: z.string().uuid().optional(),
     name: z.string(),
     kind: directoryEntityKind,
     client_id: z.string().optional(),
@@ -555,6 +557,9 @@ export type ExportFileView = z.infer<typeof exportFileSchema>;
  * `export_close_pack` (contract §6.5) — monthly close bundle (6 CSVs + manifest).
  * Non-read-only (writes files, registers an `exports` row) but never destructive.
  * `valuation` is required: the pack values balances/flows and derives a journal draft.
+ * `out_dir`, if given, is a subpath under the export root (`RECONCIL_EXPORT_DIR`, default
+ * `<cwd>/exports`) — never an arbitrary write location; a path that escapes the root
+ * (absolute outside it, `..` traversal) is rejected as `INVALID_INPUT`.
  */
 export const exportClosePackInput = z
   .object({
@@ -562,7 +567,7 @@ export const exportClosePackInput = z
     scope: scopeSchema.optional(),
     client_id: z.string().optional(),
     valuation: valuationSchema,
-    out_dir: z.string().optional(),
+    out_dir: z.string().optional(), // subpath under the export root; escapes → INVALID_INPUT
   })
   .strict();
 export type ExportClosePackInput = z.infer<typeof exportClosePackInput>;
@@ -577,14 +582,15 @@ export const exportClosePackOutput = z
   .strict();
 export type ExportClosePackOutput = z.infer<typeof exportClosePackOutput>;
 
-/** `export_pdf_summary` (contract §6.5) — one-page PDF summary + manifest. Same input shape. */
+/** `export_pdf_summary` (contract §6.5) — one-page PDF summary + manifest. Same input shape,
+ *  including `out_dir` confinement to the export root (see `exportClosePackInput`). */
 export const exportPdfSummaryInput = z
   .object({
     month: monthString,
     scope: scopeSchema.optional(),
     client_id: z.string().optional(),
     valuation: valuationSchema,
-    out_dir: z.string().optional(),
+    out_dir: z.string().optional(), // subpath under the export root; escapes → INVALID_INPUT
   })
   .strict();
 export type ExportPdfSummaryInput = z.infer<typeof exportPdfSummaryInput>;
@@ -607,7 +613,8 @@ export type ExportPdfSummaryOutput = z.infer<typeof exportPdfSummaryOutput>;
  * vat_input / rounding) to the caller's chart-of-accounts codes; unmapped-but-present
  * categories come back in `unmapped_categories`. `balanced` is a guarantee by
  * construction: every entry is internally balanced, no rounding line is ever appended,
- * and a non-zero per-currency residue fails the export (invariant violation).
+ * and a non-zero per-currency residue fails the export (invariant violation). `out_dir`
+ * confinement to the export root is the same as `exportClosePackInput`.
  */
 export const exportJournalDraftsInput = z
   .object({
@@ -615,7 +622,7 @@ export const exportJournalDraftsInput = z
     target: z.enum(['qbo', 'xero']),
     client_id: z.string().optional(),
     account_mapping: z.record(z.string(), z.string()).optional(),
-    out_dir: z.string().optional(),
+    out_dir: z.string().optional(), // subpath under the export root; escapes → INVALID_INPUT
   })
   .strict();
 export type ExportJournalDraftsInput = z.infer<typeof exportJournalDraftsInput>;
@@ -654,9 +661,11 @@ export const reconImportInvoicesInput = z
       .object({
         currency: z.string().optional(),
         direction: externalRecordDirection.optional(),
-        // Non-negative: a negative default would poison every row that relies on it
-        // (INVALID_VAT), so fail fast at input validation instead.
-        vat_rate: z.number().nonnegative().optional(),
+        // Non-negative and capped at 100 (it is a percent, not a rate): an out-of-range
+        // default would poison every row that relies on it (INVALID_VAT), so fail fast
+        // at input validation instead — mirrors the same bound the parser applies to a
+        // per-row `vat_rate` cell.
+        vat_rate: z.number().nonnegative().max(100).optional(),
       })
       .strict()
       .optional(),
@@ -690,7 +699,14 @@ export const reconImportInvoicesOutput = z
   .object({
     inserted: z.number().int().nonnegative(),
     skipped_duplicates: z.number().int().nonnegative(),
-    errors: z.array(z.object({ row: z.number().int(), code: z.string(), message: z.string() })),
+    errors: z.array(z.object({
+      row: z.number().int(),
+      code: z.string(),
+      // Never a raw CSV cell value (C6, ADR-011) — row + code + field name are enough
+      // to drill down via the row number; the raw cell survives only server-side, in
+      // the record's stored `payload`.
+      message: z.string(),
+    })),
     records: z.array(reconImportedRecordSchema),
   })
   .strict();
@@ -716,7 +732,9 @@ export const reconSuggestMatchesInput = z
   .object({
     period: periodSchema.optional(),
     client_id: z.string().optional(),
-    record_ids: z.array(z.string()).optional(),
+    // `external_records.id` (UUID): a non-UUID value is INVALID_INPUT at validation,
+    // never a raw Postgres uuid-cast error (mirrors resolveClientId).
+    record_ids: z.array(z.string().uuid()).optional(),
     tolerances: reconTolerancesSchema.optional(),
   })
   .strict();
@@ -777,7 +795,11 @@ export type ReconSuggestMatchesOutput = z.infer<typeof reconSuggestMatchesOutput
  * free-text note (audited via the tool_call, not stored on the row). Exported under
  * both tool names so the registry references a schema per tool.
  */
-const matchDecisionInput = z.object({ match_id: z.string(), note: z.string().optional() }).strict();
+// `match_id` is the `matches` row id (UUID): a non-UUID value is INVALID_INPUT at
+// validation, never a raw Postgres uuid-cast error (decision-repo.ts, mirrors
+// resolveClientId). `note` is caller-supplied free text, not a hostile import/chain
+// string — it is audited via the tool_call, never stored/echoed (C6 does not apply).
+const matchDecisionInput = z.object({ match_id: z.string().uuid(), note: z.string().optional() }).strict();
 export const reconConfirmMatchInput = matchDecisionInput;
 export const reconRejectMatchInput = matchDecisionInput;
 export type ReconMatchDecisionInput = z.infer<typeof matchDecisionInput>;
