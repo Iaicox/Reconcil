@@ -429,21 +429,34 @@ checkpoint row is written. Trigger: onboarding a new chain in production. Where:
 `packages/ingestion` (checkpoint creation on the first tick).
 *(landing sweep — uncovered by the whole-arc review, not on the task ledger)*
 
-**The `integration` job starts one Postgres container per test file, in parallel.**
-`vitest.integration.config.ts` sets neither `fileParallelism` nor a `maxThreads` cap, so
-~17 `*.itest.ts` files run in parallel workers, each starting its own `postgres:16`. The job
-then fails intermittently on an unhandled `57P01 terminating connection due to administrator
-command` while **every test passes** — observed 2026-08-11 and five times on 2026-09-07, the
-originating file varying (`ledger-status`, `export`, `recon-*`), which rules out a per-suite
-teardown bug: the `await pool.end(); await container.stop();` order is correct everywhere.
-The likeliest cause is the session-scoped Ryuk reaper testcontainers starts — the first
-worker to finish can close the last tracked connection, and Ryuk then reaps containers still
-in use by other workers. Trigger: it already triggers; a rerun clears it. Candidate fixes are
-`TESTCONTAINERS_RYUK_DISABLED=true` in CI (the runner VM is destroyed anyway) or a
-`poolOptions.threads.maxThreads` cap — deliberately not applied blind, since the two causes
-cannot be told apart without reproducing locally. Where: each package
+**The `integration` job fails intermittently on a `57P01` while every test passes — cause
+still unknown.** The job dies on an unhandled `57P01 terminating connection due to
+administrator command`; the suites themselves are green (e.g. 164/164 on one occurrence).
+Observed 2026-08-11 and five times on 2026-09-07, with the originating file varying
+(`ledger-status`, `export`, `recon-*`) — which rules out a per-suite teardown bug: the
+`await pool.end(); await container.stop();` order is correct in all 18 itest files, and
+production code never opens a pool of its own, so nothing outlives the test's own cleanup.
+
+An investigation on 2026-09-07 ruled out more than it settled, and is recorded here so the
+next person does not repeat it:
+
+- **13/13 local runs were clean** (10 idle, 3 under CPU saturation) on 24 cores / 31 GB,
+  against a CI rate of roughly 40%.
+- That **weakens the Ryuk-reaper hypothesis**: testcontainers' session-scoped reaper is
+  machine-independent, so it should have reproduced locally. It did not.
+- It also **retires the container-contention hypothesis for CI**, which an earlier version of
+  this entry asserted. Vitest sizes its worker pool from `os.availableParallelism()`, so the
+  ~17 simultaneous `postgres:16` containers measured locally are a property of a 24-core
+  machine; a 2-core runner gets a pool of ~2 and therefore ~2 containers. A
+  `poolOptions.threads.maxThreads` cap — the fix this entry used to recommend — would
+  therefore be a **no-op on the machine where the problem actually occurs**.
+
+What is left is something specific to a small, slow runner that 13 local runs did not
+provoke. Reproducing it needs the runner's shape, not just its CPU count: constrain the
+Docker VM's memory (`.wslconfig` + a Docker restart) or run the suite on a 2-core VM.
+Trigger: it already triggers; a rerun clears it, at ~4 minutes a time. Where: each package's
 `vitest.integration.config.ts`, `.github/workflows/ci.yml` (`integration`).
-*(landing sweep — observed while merging the arc)*
+*(landing sweep — observed while merging the arc; investigated and narrowed 2026-09-07)*
 
 **Regenerating `pnpm-lock.yaml` does not reapply in-range security bumps.** When a lockfile
 conflict is resolved by regeneration rather than textual merge, pnpm preserves every
