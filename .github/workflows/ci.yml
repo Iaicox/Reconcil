@@ -25,15 +25,21 @@ on:
         type: boolean
         default: true
       suite:
+        # `choice`, not `string`: the value reaches a `run:` step, and a free-form input
+        # interpolated into a shell script is a script-injection vector — in the one job
+        # that holds ANTHROPIC_API_KEY. DATASETS in apps/cli/src/evals/args.ts has one
+        # entry today; add options here when a second suite lands.
         description: 'Eval suite'
-        type: string
+        type: choice
+        options: [core]
         default: core
       runs:
         # 3 is the default deliberately: the trajectory gate is majority-of-3 and the
         # safety gates are all-runs, so a lower value makes a cheap run a conscious
         # choice rather than a silent weakening of what the gate means.
         description: 'Runs per case (3 = the real gate; 1 = a cheap look, weaker gate)'
-        type: string
+        type: choice
+        options: ['3', '1']
         default: '3'
 
 # Least privilege for GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions):
@@ -168,8 +174,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @reconcil/cli evals -- --suite "${{ inputs.suite }}" --runs "${{ inputs.runs }}" --out eval-reports
+      # SUITE/RUNS arrive as environment variables, never as ${{ }} inside the script:
+      # expression interpolation is textual substitution done BEFORE the shell parses the
+      # line, so a value containing a quote would run arbitrary commands here. This file
+      # already SHA-pins its third-party action for the same reason ("a moved tag would be
+      # arbitrary code in jobs that later hold ANTHROPIC_API_KEY").
+      - run: pnpm --filter @reconcil/cli evals -- --suite "$SUITE" --runs "$RUNS" --out eval-reports
         env:
+          SUITE: ${{ inputs.suite }}
+          RUNS: ${{ inputs.runs }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # Optional gateway for Anthropic traffic; unset repo variable ⇒ the public API host.
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || 'https://api.anthropic.com' }}
