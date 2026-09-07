@@ -7,7 +7,14 @@ import { METRICS, type CaseResult, type GateResult, type Metric } from './types.
 
 export interface ReportMeta {
   suite: string;
+  /** What was REQUESTED — may be an undated alias such as `claude-opus-4-8`. */
   model: string;
+  /**
+   * What actually ANSWERED, as reported by the API. An undated alias re-points without
+   * warning, so two scorecards are only comparable when this matches; without it a red
+   * gate cannot be told apart from a moved baseline. Absent if no session got a response.
+   */
+  resolvedModel?: string;
   runs: number;
   generatedAt: string;
 }
@@ -46,7 +53,10 @@ export function toMarkdown(report: Report): string {
   const lines: string[] = [];
   lines.push(`# Eval scorecard — ${meta.suite}`);
   lines.push('');
-  lines.push(`- Model: \`${meta.model}\` · Runs: ${String(meta.runs)} · ${meta.generatedAt}`);
+  const resolved = meta.resolvedModel && meta.resolvedModel !== meta.model
+    ? ` (resolved: \`${meta.resolvedModel}\`)`
+    : '';
+  lines.push(`- Model: \`${meta.model}\`${resolved} · Runs: ${String(meta.runs)} · ${meta.generatedAt}`);
   lines.push(`- **Gate: ${gate.passed ? '✅ PASS' : '❌ FAIL'}**`);
   if (!gate.passed) for (const f of gate.failures) lines.push(`  - ${f}`);
   lines.push('');

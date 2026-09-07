@@ -93,7 +93,14 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
     const client = new Anthropic();
     const { db, dispose } = await provisionDb();
     try {
-      const produce = makeAgentProducer({ client, model: args.model });
+      // `args.model` may be an undated alias that silently re-points; record what actually
+      // answered so a red gate can be attributed to the code rather than a moved baseline.
+      const resolvedModels = new Set<string>();
+      const produce = makeAgentProducer({
+        client,
+        model: args.model,
+        onResolvedModel: (m) => resolvedModels.add(m),
+      });
       const seedCase = makeSeedCase(db);
 
       console.error(`running ${String(dataset.length)} cases × ${String(args.runs)} run(s) on ${args.model}…`);
@@ -107,9 +114,20 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
         },
       });
 
+      if (resolvedModels.size > 0) {
+        console.error(`model resolved to: ${[...resolvedModels].sort().join(', ')}`);
+      }
+
       const gate = evaluateGate(cases);
       const report = buildReport(
-        { suite: args.suite, model: args.model, runs: args.runs, generatedAt: new Date().toISOString() },
+        {
+          suite: args.suite,
+          model: args.model,
+          // exactOptionalPropertyTypes: omit the key entirely rather than set undefined.
+          ...(resolvedModels.size > 0 ? { resolvedModel: [...resolvedModels].sort().join(', ') } : {}),
+          runs: args.runs,
+          generatedAt: new Date().toISOString(),
+        },
         cases,
         gate,
       );

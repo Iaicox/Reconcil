@@ -21,6 +21,12 @@ export interface AgentOptions {
   model: string;
   maxTokens?: number;
   maxIterations?: number;
+  /**
+   * Called with the model id the API actually answered with. `model` above may be an
+   * undated alias, which silently re-points; the scorecard records what really ran so a
+   * red gate can be told apart from a moved baseline.
+   */
+  onResolvedModel?: (model: string) => void;
 }
 
 export function makeAgentProducer(opts: AgentOptions): SessionProducer {
@@ -33,11 +39,24 @@ export function makeAgentProducer(opts: AgentOptions): SessionProducer {
         model: opts.model,
         max_tokens: opts.maxTokens ?? 4096,
         max_iterations: opts.maxIterations ?? 8,
-        system: buildSystemPrompt(REFERENCE_DATE),
+        // One cache breakpoint, on the system block. The cached prefix is ordered
+        // tools -> system -> messages, so a breakpoint here covers the 19 tool schemas
+        // too (~5.5k tokens) — by far the largest fixed cost, re-sent on every iteration
+        // of every case. It is byte-identical across all 90 sessions of a run, and each
+        // read refreshes the TTL, so a sequential suite keeps it warm throughout.
+        system: [
+          {
+            type: 'text',
+            text: buildSystemPrompt(REFERENCE_DATE),
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
         tools: runnableTools,
         messages: [{ role: 'user', content: evalCase.question }],
       })
       .runUntilDone();
+
+    opts.onResolvedModel?.(final.model);
 
     const finalAnswer = final.content
       .map((b) => (b.type === 'text' ? b.text : ''))
