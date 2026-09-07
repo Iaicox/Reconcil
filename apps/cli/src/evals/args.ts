@@ -8,7 +8,9 @@
  */
 import { coreDatasetPath } from '@reconcil/evals';
 
-export const DEFAULT_MODEL = 'claude-opus-4-8';
+import { DEFAULT_MODEL } from '../model.js';
+
+export { DEFAULT_MODEL };
 
 /** Suite name → dataset-path loader. `--suite` selects from here (one entry today; a Face-B
  *  `recon` suite is on the roadmap, 04-testing.md §5). coreDatasetPath is a pure path helper. */

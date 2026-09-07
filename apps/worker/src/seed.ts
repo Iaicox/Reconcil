@@ -13,14 +13,14 @@ import { createLogger, serializeError } from '@reconcil/core';
 import { createDb, type Db } from '@reconcil/db';
 import { seedCheckpoint, type BackfillTarget } from '@reconcil/ingestion';
 import { loadConfig } from './config.js';
-import { BACKFILL_QUEUE, jobOptions, makeConnection } from './queues.js';
+import { BACKFILL_QUEUE, dlqJobOptions, makeConnection } from './queues.js';
 
 export async function seedWallet(db: Db, backfillQueue: Queue, chainId: number, address: string): Promise<void> {
   const addr = address.toLowerCase();
   for (const stream of ['native', 'erc20'] as const) {
     await seedCheckpoint(db, chainId, addr, stream);
     const target: BackfillTarget = { chainId, address: addr, stream };
-    await backfillQueue.add('page', target, jobOptions);
+    await backfillQueue.add('page', target, dlqJobOptions);
   }
 }
 

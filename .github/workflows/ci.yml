@@ -27,10 +27,10 @@ jobs:
       # packages (their tags cannot move), this third-party one does not — and a moved tag
       # would be arbitrary code in jobs that later hold ANTHROPIC_API_KEY. Dependabot
       # updates SHA pins and keeps the trailing version comment in sync.
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # build = tsc -b (project references): typecheck happens here, and
@@ -41,15 +41,18 @@ jobs:
       # ADR-011 transitive guard: depcruise skips node_modules, so scan the full lockfile
       # for signing/key-material packages (needs only the lockfile + cruiser config).
       - run: pnpm check:supply-chain
+      # Unit coverage for the guard's two lockfile parsers (node:test, no new deps) — this
+      # IS the ADR-011 enforcement, so its own parsing blind spots matter.
+      - run: pnpm test:scripts
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
@@ -63,16 +66,16 @@ jobs:
       - run: bash scripts/check-schema-parity.sh
 
   # Testcontainers spins its own Postgres per suite (needs only Docker, present on
-  # ubuntu-latest). Runs the db + ingestion + ledger + pricing + mcp-tools *.itest.ts
-  # suites that the hermetic `test` job excludes.
+  # ubuntu-latest). Runs the db + ingestion + ledger + pricing + mcp-tools +
+  # mcp-server + evals *.itest.ts suites that the hermetic `test` job excludes.
   integration:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
@@ -81,6 +84,7 @@ jobs:
       - run: pnpm --filter @reconcil/ledger test:integration
       - run: pnpm --filter @reconcil/pricing test:integration
       - run: pnpm --filter @reconcil/mcp-tools test:integration
+      - run: pnpm --filter @reconcil/mcp-server test:integration
       # Golden-wallet reconciliation (native balance == recorded eth_get_balance) and the
       # DB-derived ground-truth numbers (numbers.itest.ts) — deterministic, no LLM key.
       - run: pnpm --filter @reconcil/evals test:integration
@@ -108,10 +112,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
@@ -130,10 +134,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
@@ -161,10 +165,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # compose needs a non-empty POSTGRES_PASSWORD; .env.example ships one (change-me).

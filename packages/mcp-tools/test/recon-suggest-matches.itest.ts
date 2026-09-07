@@ -35,7 +35,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await pool.query(
-    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls RESTART IDENTITY CASCADE',
+    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls, fx_rates RESTART IDENTITY CASCADE',
   );
   await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'acme', 'acme')`, [TENANT]);
   await pool.query(`INSERT INTO clients (id, tenant_id, name) VALUES ($1, $2, 'Client One')`, [CLIENT, TENANT]);
@@ -79,6 +79,18 @@ async function seedNonStableToken(): Promise<number> {
     `INSERT INTO tokens (chain_id, address, standard, symbol_display, decimals, is_stablecoin, peg_currency, verified)
      VALUES (1, $1, 'erc20', 'WETH', 18, false, null, true) RETURNING id`,
     [WETH_ADDR],
+  );
+  return Number(rows[0]!.id);
+}
+
+const GBP_TOKEN_ADDR = `0x${'e'.repeat(40)}`; // a verified GBP-pegged stablecoin (H5: unsupported FX pair)
+
+/** A verified GBP-pegged stablecoin (6 decimals) — GBP↔EUR/USD has no ECB rate (H5). Returns its token id. */
+async function seedGbpToken(): Promise<number> {
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO tokens (chain_id, address, standard, symbol_display, decimals, is_stablecoin, peg_currency, verified)
+     VALUES (1, $1, 'erc20', 'GBPC', 6, true, 'GBP', true) RETURNING id`,
+    [GBP_TOKEN_ADDR],
   );
   return Number(rows[0]!.id);
 }
@@ -218,6 +230,45 @@ describe('recon_suggest_matches — engine run, persistence, audit', () => {
     expect(env.data.suggestions[0]!.amount_applied).toBe('1000');
     const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM matches`);
     expect(rows[0]!.n).toBe('1');
+  });
+
+  it('never suggests a leg for a zero-amount record, even from the expected sender (A4/A5, SQL layer)', async () => {
+    // A freshly imported zero-amount invoice sits at status='open' (the DB default,
+    // independent of amount — recon_import_invoices never calls deriveRecordStatus).
+    // Without the SQL-level openAmount>0 filter it would still be selected as a
+    // candidate target and a payment from its expected sender would wrongly settle it.
+    const tokenId = await seedToken();
+    await seedEvent(tokenId, PAYER, WALLET, '500000000', '2026-06-14T10:00:00Z'); // 500.00 EURC
+    await seedInvoice('INV-ZERO', '0.00', PAYER);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    expect(env.data.suggestions).toEqual([]);
+    // Excluded from scope entirely — not counted as "unmatched" either (it isn't a
+    // candidate at all, the same as an already-matched/void record wouldn't be).
+    expect(env.data.unmatched_records).toBe(0);
+    const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM matches`);
+    expect(rows[0]!.n).toBe('0'); // no leg persisted
+  });
+
+  it('rejects a non-UUID record_ids element with INVALID_INPUT (not a raw uuid-cast error)', async () => {
+    await expect(
+      reconSuggestMatches(ctx(), { record_ids: ['not-a-uuid'] }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  });
+
+  it('scopes the run to the given record_ids', async () => {
+    const tokenId = await seedToken();
+    await seedEvent(tokenId, PAYER, WALLET, '1000000000', '2026-06-14T10:00:00Z'); // settles INV-100
+    // A different counterparty and amount so it is not an address- or amount-candidate
+    // for INV-100 — the only way it could appear is if scoping failed to exclude INV-200.
+    await seedEvent(tokenId, STRANGER, WALLET, '500000000', '2026-06-14T11:00:00Z', 1); // settles INV-200
+    const recA = await seedInvoice('INV-100', '1000.00', PAYER);
+    await seedInvoice('INV-200', '500.00', STRANGER);
+
+    const env = await reconSuggestMatches(ctx(), { record_ids: [recA] });
+
+    expect(env.data.suggestions.map((s) => s.record.external_ref)).toEqual(['INV-100']);
   });
 
   it('reports unmatched records and unmatched settlements', async () => {
@@ -368,5 +419,137 @@ describe('recon_suggest_matches — market valuation (non-stablecoin)', () => {
     expect(env.data.suggestions).toHaveLength(0);
     expect(env.data.unmatched_records).toBe(1);
     expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
+  });
+
+  it('H5 regression: a GBP-pegged stablecoin with a manual GBP snapshot is dropped as PRICE_MISSING, not thrown — the batch succeeds and other candidates still match', async () => {
+    // The working candidate: an EUR-pegged stablecoin settling its own invoice normally.
+    const eurToken = await seedToken();
+    await seedEvent(eurToken, PAYER, WALLET, '1000000000', '2026-06-14T10:00:00Z'); // 1000.00 EURC
+    await seedInvoice('INV-100', '1000.00', PAYER);
+
+    // An EUR/USD rate exists (so a naive "no rate at all" skip wouldn't accidentally save this
+    // case) but is irrelevant to GBP — proving the drop comes from the pair guard, not a missing
+    // rate.
+    await seedFx('2026-06-14', '1.10');
+
+    // The regression candidate: resolvePrices' `manual` outranks every other source (resolve.ts
+    // marketPref) regardless of currency, so a manual GBP snapshot wins as this token's would-be
+    // valuation even though the target is EUR — GBP↔EUR has no ECB rate (H5). No invoice claims
+    // it; it's a floating settlement from an unrelated sender. Before this fix, match-repo.ts's
+    // own valueEventsInto call site (independent of packages/pricing's guarded valueQuantities)
+    // called valueOne on it directly and threw, failing the whole suggest batch — including the
+    // unrelated INV-100 match above.
+    const gbpTokenId = await seedGbpToken();
+    await seedSnapshot(gbpTokenId, '1', '2026-06-14', 'GBP', 'manual');
+    await seedEvent(gbpTokenId, STRANGER, WALLET, '500000000', '2026-06-14T11:00:00Z', 1); // 500.00 GBPC
+
+    const env = await reconSuggestMatches(ctx(), {}); // must not throw
+
+    // Only the working candidate is suggested; the GBP one is simply absent (never a wrong number).
+    expect(env.data.suggestions.map((s) => s.record.external_ref)).toEqual(['INV-100']);
+    expect(env.data.unmatched_records).toBe(0);
+    expect(env.warnings.map((w) => w.code)).toContain('PRICE_MISSING');
+
+    const { rows } = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM matches`);
+    expect(rows[0]!.n).toBe('1'); // only the working leg persisted
+  });
+});
+
+describe('recon_suggest_matches — confirmed-fiat currency predicate (C6)', () => {
+  it('ignores a wrong-currency confirmed leg in candidate eligibility and open_amount', async () => {
+    const tokenId = await seedToken();
+    const rec = await seedInvoice('INV-100', '1000.00', PAYER);
+
+    // The two pre-existing settlements are sent from STRANGER, not the invoice's
+    // `expected_address` (PAYER) — so neither is independently re-proposed as a FRESH
+    // suggestion candidate by this same call (no address/amount rule hit against the
+    // 600.00-band open amount); the only thing under test is whether their matches rows
+    // pollute the confirmed-fiat sums.
+
+    // A real EUR confirmed leg (400.00) — legitimately settles part of the invoice.
+    const { rows: eurEvRows } = await pool.query<{ id: string }>(
+      `INSERT INTO chain_events
+         (chain_id, tx_hash, log_index, event_kind, token_id, amount_raw, from_addr, to_addr, block_number, block_time, tx_from, provider, raw)
+       VALUES (1, $1, 1, 'erc20_transfer', $2, '400000000', $3, $4, 100, '2026-06-01T10:00:00Z', $3, 'test', '{}'::jsonb)
+       RETURNING id`,
+      [`0x${'1'.padStart(64, 'a')}`, tokenId, STRANGER, WALLET],
+    );
+    await pool.query(
+      `INSERT INTO matches
+         (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+       VALUES ($1,$2,$3,'400000000','400.00','EUR','confirmed','agent','agent',now(),0.9,'{}'::jsonb)`,
+      [TENANT, rec, eurEvRows[0]!.id],
+    );
+
+    // A bogus USD confirmed leg on the SAME record, inserted via raw SQL — the normal
+    // writer (this suggest flow) always pins fiat_currency = record currency, so this
+    // bypasses it deliberately (the reviewer's exact fixture shape). Its huge amount
+    // would, unfixed, push confirmedByRecord past the invoice amount — excluding the
+    // record from candidacy entirely (the SQL-level A4/A5 eligibility filter) — and
+    // separately corrupt the wire-visible open_amount.
+    const { rows: usdEvRows } = await pool.query<{ id: string }>(
+      `INSERT INTO chain_events
+         (chain_id, tx_hash, log_index, event_kind, token_id, amount_raw, from_addr, to_addr, block_number, block_time, tx_from, provider, raw)
+       VALUES (1, $1, 2, 'erc20_transfer', $2, '999999000000', $3, $4, 100, '2026-06-01T11:00:00Z', $3, 'test', '{}'::jsonb)
+       RETURNING id`,
+      [`0x${'2'.padStart(64, 'a')}`, tokenId, STRANGER, WALLET],
+    );
+    await pool.query(
+      `INSERT INTO matches
+         (tenant_id, external_record_id, chain_event_id, amount_applied_raw, fiat_value, fiat_currency, status, matched_by, confirmed_by, confirmed_at, confidence, rationale)
+       VALUES ($1,$2,$3,'999999000000','999999.00','USD','confirmed','agent','agent',now(),0.9,'{}'::jsonb)`,
+      [TENANT, rec, usdEvRows[0]!.id],
+    );
+
+    // The genuine remaining settlement: 600.00 EUR (1000.00 − 400.00), from the expected sender.
+    await seedEvent(tokenId, PAYER, WALLET, '600000000', '2026-06-14T10:00:00Z', 3);
+
+    const env = await reconSuggestMatches(ctx(), {});
+
+    // Without the fix: confirmedByRecord = 400.00 + 999999.00 far exceeds the 1000.00
+    // invoice amount, so the record never enters scope — zero suggestions, silently.
+    expect(env.data.suggestions).toHaveLength(1);
+    const s = env.data.suggestions[0]!;
+    expect(s.record.external_ref).toBe('INV-100');
+    expect(s.record.open_amount).toBe('600'); // 1000 − 400 (EUR only); the USD leg ignored
+    expect(s.amount_applied).toBe('600');
+  });
+});
+
+describe('recon_suggest_matches — summarized drilldown scope (H12/C3b)', () => {
+  it('threads the CANONICAL resolved client_id into the drilldown when client-scoped; omits it when unscoped', async () => {
+    const tokenId = await seedToken();
+    // > REF_CAP (64) suggestions so the envelope summarizes with a drilldown instead of
+    // inlining event_refs (refs.ts selectRefs only carries `drilldown` in that shape).
+    // Each record gets its OWN counterparty address (the address rule alone would
+    // otherwise fire for every record against every event sharing one PAYER, regardless
+    // of amount) and `amount_pct: 0` forces an exact-amount match, so exactly one leg is
+    // suggested per record — no cross-matching between the 65.
+    for (let i = 0; i < 65; i += 1) {
+      const payer = `0x${(1000 + i).toString(16).padStart(40, '0')}`;
+      const amount = String(1000 + i);
+      await seedEvent(tokenId, payer, WALLET, `${amount}000000`, '2026-06-14T10:00:00Z', i);
+      await seedInvoice(`INV-${String(i)}`, `${amount}.00`, payer);
+    }
+    const tolerances = { amount_pct: 0 };
+
+    // Mixed-case input: resolveClientId already canonicalizes, but the drilldown must
+    // carry THAT resolved id, never the caller's raw casing (C3b).
+    const scoped = await reconSuggestMatches(ctx(), { client_id: CLIENT.toUpperCase(), tolerances });
+    expect(scoped.data.suggestions).toHaveLength(65);
+    expect(scoped.citations.event_ref_summary?.count).toBe(65);
+    expect(scoped.citations.event_ref_summary?.drilldown.args).toEqual({ scope: { client_id: CLIENT } });
+
+    const unscoped = await reconSuggestMatches(ctx(), { tolerances });
+    expect(unscoped.citations.event_ref_summary?.count).toBe(65);
+    expect(unscoped.citations.event_ref_summary?.drilldown.args).toEqual({});
+  });
+});
+
+describe('recon_suggest_matches — input bounds (C9)', () => {
+  it('rejects date_window_days beyond the 3650-day bound with INVALID_INPUT', async () => {
+    await expect(
+      reconSuggestMatches(ctx(), { tolerances: { date_window_days: 1e15 } }),
+    ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 });

@@ -2,8 +2,9 @@
 
 A permanent register of everything deliberately left undone by the 2026-08 remediation
 arc — 17 review-driven PR slices (`fix/token-seed` … `chore/pricing-ledger-minors`, each
-its own branch off `612def4`, reviewed but not yet merged at the time this register was
-written) plus the doc/ADR sweep that closed the arc. Nothing here is an oversight: every
+its own branch off `612def4`) plus the doc/ADR sweep that closed the arc. The arc was
+written in 2026-08 and landed on `main` in 2026-09; entries tagged *(landing sweep)* were
+found during that landing, not during the arc itself. Nothing here is an oversight: every
 entry was seen, judged not worth blocking the slice on, and recorded instead of left as
 silent drift. Each entry states what it is, why it was deferred, what would trigger doing
 it, and exactly where it lives.
@@ -15,8 +16,7 @@ this same doc-sync slice, and are recorded here because they are exactly the kin
 decision this register exists to hold. This document does not restate ADR rationale —
 where an item is really an ADR-level trade-off, it links to the ADR instead of repeating it.
 
-Some entries live on a branch that has not merged yet (noted per item); their file
-references describe where the code will be once that branch lands, not `main` today.
+Every branch referenced here has since merged, so all file references describe `main`.
 
 ## Ingestion
 
@@ -290,6 +290,16 @@ production-multi-tenant work — build it as part of that milestone, not before.
 [ADR-012](../adr/ADR-012-mcp-transport-auth.md) Consequences. *(sweep — ADR-012 already
 covers "no expiry"; `last_used_at` is the gap this entry adds)*
 
+**Fastify is built without `trustProxy`, so the per-IP backstop degrades behind a proxy.**
+`request.ip` is the socket peer, which is the proxy itself once TLS is terminated in front
+of the server — every client then shares one bucket and the unauthenticated backstop added
+in decision 6 of ADR-012 becomes a *global* 600/min rather than a per-client limit. The
+tenant-keyed fairness bucket is unaffected (it keys on the verified tenant, not the IP).
+Trigger: the first deployment that puts a reverse proxy in front of the server — set
+`trustProxy` to the proxy topology at the same time. Where: `apps/mcp-server/src/http.ts`
+(the Fastify constructor) and its `onRequest` limiter.
+*(landing sweep — uncovered by the whole-arc review, not on the task ledger)*
+
 ## Exporters
 
 **Export I/O reads the path before its `realpath` re-check (TOCTOU).** The confinement
@@ -404,13 +414,56 @@ exception if a second such script appears. Where: `package.json:23` (root
 is in `.dependency-cruiser.cjs`. *(Task 15, `chore/supply-chain-config` — OPEN AUDIT ITEM,
 explicitly carried to this slice)*
 
+**The prod image ships the eval runner, so `apps/cli` carries `@testcontainers/postgresql`
+as a runtime dependency.** It sits in `dependencies`, not `devDependencies`, and correctly
+so: `apps/cli/src/run.ts` calls `new PostgreSqlContainer(...).start()` on the runtime path
+taken when `DATABASE_URL` is unset. The real defect is upstream of the manifest — the eval
+runner has no business being in the production image at all. Trigger: the slim-image slice;
+moving the dependency without moving the runner would only break the runner. Where:
+`apps/cli/package.json`, `apps/cli/src/run.ts`.
+*(landing sweep — two reviewers disagreed about this manifest; recorded, not "fixed")*
+
+**A freshly onboarded chain can sit at `queued` indefinitely.** With no checkpoint yet the
+ingestion status stays `queued`, and nothing advances it if the first tick fails before a
+checkpoint row is written. Trigger: onboarding a new chain in production. Where:
+`packages/ingestion` (checkpoint creation on the first tick).
+*(landing sweep — uncovered by the whole-arc review, not on the task ledger)*
+
+**The `integration` job starts one Postgres container per test file, in parallel.**
+`vitest.integration.config.ts` sets neither `fileParallelism` nor a `maxThreads` cap, so
+~17 `*.itest.ts` files run in parallel workers, each starting its own `postgres:16`. The job
+then fails intermittently on an unhandled `57P01 terminating connection due to administrator
+command` while **every test passes** — observed 2026-08-11 and five times on 2026-09-07, the
+originating file varying (`ledger-status`, `export`, `recon-*`), which rules out a per-suite
+teardown bug: the `await pool.end(); await container.stop();` order is correct everywhere.
+The likeliest cause is the session-scoped Ryuk reaper testcontainers starts — the first
+worker to finish can close the last tracked connection, and Ryuk then reaps containers still
+in use by other workers. Trigger: it already triggers; a rerun clears it. Candidate fixes are
+`TESTCONTAINERS_RYUK_DISABLED=true` in CI (the runner VM is destroyed anyway) or a
+`poolOptions.threads.maxThreads` cap — deliberately not applied blind, since the two causes
+cannot be told apart without reproducing locally. Where: each package
+`vitest.integration.config.ts`, `.github/workflows/ci.yml` (`integration`).
+*(landing sweep — observed while merging the arc)*
+
+**Regenerating `pnpm-lock.yaml` does not reapply in-range security bumps.** When a lockfile
+conflict is resolved by regeneration rather than textual merge, pnpm preserves every
+resolution that still satisfies its range, so only manifest-*forced* moves happen. Advisories
+closed purely by refreshing the lock silently revert — with a green gate, since the lockfile
+stays internally consistent and `--frozen-lockfile` succeeds. This cost four bumps between
+#35 and #62 (`brace-expansion`, `fast-uri`, `find-my-way`, `@hono/node-server`); the last was
+invisible because `@modelcontextprotocol/sdk@1.30.0` *widened* its hono range to
+`^1.19.9 || ^2.0.5`, so no install would ever produce v2 on its own. Trigger: any future
+lockfile regeneration — diff the result against the branch intended lock, never merely check
+that the install succeeds. Where: `pnpm-lock.yaml`.
+*(landing sweep — a real regression, caught by review and fixed in #62)*
+
 ## Reconciling the count
 
-This register holds **44 entries**. The source ledger
+This register holds **49 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
-15–17) — 32 raw ledger lines in total. The reconciliation from 32 lines to 44 entries:
+15–17) — 32 raw ledger lines in total. The reconciliation from 32 lines to 49 entries:
 
 - **−1**: Task 17's variant-phrased line (`minor (deferred → fold into PR-18)`, the
   `SANITIZED_HEAVY` contract-doc drift) is not a register entry — it was a direct doc fix
@@ -435,7 +488,13 @@ literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`min
   pool) and confirmed by inspecting the shipped code and the ADR-010 amendment; they were
   judged in-arc but recorded in-code/in-ADR rather than on the task ledger.
 
-32 − 1 + 5 + 4 + 4 = **44**, matching this document.
+- **+5**: five entries are tagged *(landing sweep)* — found in 2026-09 while merging the
+  arc onto `main`, so they cannot appear on a ledger written before it. Three came from
+  the whole-arc review (Fastify `trustProxy`, `apps/cli` testcontainers, the fresh-chain
+  `queued` path) and two from the merge itself (the `integration` container contention,
+  and the lockfile-regeneration hazard that silently reverted four security bumps).
+
+32 − 1 + 5 + 4 + 4 + 5 = **49**, matching this document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation

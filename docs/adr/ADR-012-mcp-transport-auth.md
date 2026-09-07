@@ -1,7 +1,7 @@
 # ADR-012: MCP transport & auth — stdio for self-host, streamable HTTP + bearer for hosted; OAuth post-gate
 
 **Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-08-06 (transport-level
-defense in depth — see decision 6)
+defense in depth — decision 6; model-controlled write roots — decision 7)
 
 ## Context
 
@@ -49,6 +49,14 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    - A hijacked transport's own request-handling failure is always caught and answered
      (`handleHijackedTransport`) — no unhandled rejection can leave a hijacked socket open
      indefinitely.
+
+7. **Model-controlled paths never choose an arbitrary write root.** A tool argument is
+   agent-supplied and therefore hostile — `export_*`'s `out_dir` is confined to the export
+   root (`RECONCIL_EXPORT_DIR`, default `<cwd>/exports`): resolved as a subpath under it,
+   prefix-checked, then `realpath`-rechecked past symlinks (`fs-confine.ts`, shared with
+   `recon_import_invoices`' `file_path` confinement against `RECONCIL_IMPORT_DIR`). An
+   escape (`..` traversal, an absolute path outside the root) is `INVALID_INPUT`, never a
+   write outside the configured base (H2 audit finding).
 
 ## Alternatives considered
 

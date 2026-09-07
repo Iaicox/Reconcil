@@ -2,7 +2,9 @@
  * Matching persistence (recon_suggest_matches, §6.4/ADR-010). The pure engine
  * (@reconcil/recon) scores; this layer owns the I/O: it loads the tenant's open
  * records and the candidate settlement events, values each candidate in the record's
- * currency, runs the engine, and persists the suggested legs.
+ * currency, runs the engine, and persists the suggested legs. Records with nothing
+ * outstanding are excluded from the record SELECT itself (A4/A5) — not just left to
+ * the engine's own `openAmount <= 0` guard — so nothing is even valued against them.
  *
  * Valuation is hybrid (C4 "priced means pinned"): a same-currency **stablecoin** keeps
  * face value at peg (reproducible as amount × 1, no snapshot needed, P5); any other token
@@ -25,7 +27,7 @@ import {
 } from '@reconcil/db';
 import type { TokenMeta } from '@reconcil/ledger';
 import {
-  priceKey, resolveFxRates, resolvePrices, valueOne,
+  isSupportedFxPair, priceKey, resolveFxRates, resolvePrices, valueOne,
   type Currency, type FxResolved,
   type FxRef as PricingFxRef, type PriceRef as PricingPriceRef, type ValueNeed,
 } from '@reconcil/pricing';
@@ -120,9 +122,11 @@ interface ValuedCandidate {
 /**
  * Value every candidate event into `target` via pinned market snapshots (+ ECB FX), keyed
  * by event id. Same-currency stablecoins are excluded here — the caller uses their face value
- * (P5). A token with no usable snapshot (or no FX for a required conversion) is simply absent
- * from the map: the caller drops that candidate and raises PRICE_MISSING (ADR-007, never
- * interpolate). Batched: one `resolvePrices` + at most one `resolveFxRates` for the whole set.
+ * (P5). A token with no usable snapshot, no FX for a required conversion, or a snapshot
+ * currency that isn't EUR↔USD-convertible to `target` (H5, e.g. a GBP-pegged stablecoin) is
+ * simply absent from the map: the caller drops that candidate and raises PRICE_MISSING
+ * (ADR-007, never interpolate — and never a wrong number, never a batch-failing throw).
+ * Batched: one `resolvePrices` + at most one `resolveFxRates` for the whole set.
  */
 async function valueEventsInto(
   tx: Tx,
@@ -147,7 +151,7 @@ async function valueEventsInto(
   const fxDates = new Set<string>();
   for (const n of needs) {
     const snap = prices.get(priceKey(n.tokenId, n.date));
-    if (snap && snap.currency !== target) fxDates.add(n.date);
+    if (snap && snap.currency !== target && isSupportedFxPair(snap.currency, target)) fxDates.add(n.date);
   }
   const fx = fxDates.size > 0
     ? await resolveFxRates(tx, [...fxDates], { base: 'EUR', quote: 'USD' })
@@ -158,6 +162,7 @@ async function valueEventsInto(
     if (!snap) continue;
     let fxResolved: FxResolved | undefined;
     if (snap.currency !== target) {
+      if (!isSupportedFxPair(snap.currency, target)) continue; // unsupported pair → PRICE_MISSING at the caller
       fxResolved = fx.get(n.date);
       if (!fxResolved) continue; // required conversion has no rate → PRICE_MISSING at the caller
     }
@@ -205,6 +210,17 @@ export async function suggestMatches(
           recordIds !== undefined ? inArray(externalRecords.id, recordIds) : undefined,
           period !== undefined ? gte(externalRecords.issuedOn, period.from) : undefined,
           period !== undefined ? lte(externalRecords.issuedOn, period.to) : undefined,
+          // A record with nothing outstanding is not a candidate target at all (A4/A5) —
+          // filtered here, at the SQL level, so it is excluded from scope entirely (not
+          // counted as "unmatched" either) and no candidate is even valued against it.
+          // A freshly imported zero-amount invoice sits at status='open' regardless of
+          // this fix (the DB default is amount-independent), so this is load-bearing on
+          // its own, not merely a mirror of the engine-layer guard in suggestForRecord.
+          // `fiat_currency = external_records.currency` (C6): match-repo always writes
+          // fiat_currency = record currency, but nothing at the schema level enforces
+          // that, so a leg written any other way must not count toward this record's
+          // applied sum — mirrors the same predicate in status-repo.ts/decision-repo.ts.
+          sql`${externalRecords.amount} > coalesce((select sum(${matches.fiatValue}) from ${matches} where ${matches.externalRecordId} = ${externalRecords.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed' and ${matches.fiatCurrency} = ${externalRecords.currency}), 0)`,
         ),
       )
       .orderBy(externalRecords.id); // stable suggestion order across runs
@@ -228,9 +244,13 @@ export async function suggestMatches(
     let timeFrom: Date | undefined;
     let timeTo: Date | undefined;
     if (refDates.every((d): d is string => d !== null) && refDates.length > 0) {
+      // Reduce, not `Math.min(...ts)`/`Math.max(...ts)` (C10): a spread of every in-scope
+      // record's timestamp blows the call-stack argument limit on a large tenant (RangeError).
       const ts = refDates.map((d) => Date.parse(d));
-      timeFrom = new Date(Math.min(...ts) - windowDays * MS_PER_DAY);
-      timeTo = new Date(Math.max(...ts) + (windowDays + 1) * MS_PER_DAY); // +1 day covers the whole 'to' day
+      const minTs = ts.reduce((a, b) => (b < a ? b : a));
+      const maxTs = ts.reduce((a, b) => (b > a ? b : a));
+      timeFrom = new Date(minTs - windowDays * MS_PER_DAY);
+      timeTo = new Date(maxTs + (windowDays + 1) * MS_PER_DAY); // +1 day covers the whole 'to' day
     }
 
     let eventRows: EventRow[] = [];
@@ -287,10 +307,22 @@ export async function suggestMatches(
     }
 
     // 5. Confirmed applied fiat per record → open amount (records here are open/partial).
+    //    Joined to external_records so the sum can be currency-matched (C6): a leg
+    //    written outside the normal writer in another currency must not count toward
+    //    THIS record's applied total (same predicate as the candidate-eligibility filter
+    //    above and status-repo.ts/decision-repo.ts's confirmed-fiat sums).
     const confSums = await tx
       .select({ recordId: matches.externalRecordId, sum: sql<string>`coalesce(sum(${matches.fiatValue}), 0)::text` })
       .from(matches)
-      .where(and(eq(matches.tenantId, ctx.tenantId), eq(matches.status, 'confirmed'), inArray(matches.externalRecordId, recIds)))
+      .innerJoin(externalRecords, eq(externalRecords.id, matches.externalRecordId))
+      .where(
+        and(
+          eq(matches.tenantId, ctx.tenantId),
+          eq(matches.status, 'confirmed'),
+          inArray(matches.externalRecordId, recIds),
+          eq(matches.fiatCurrency, externalRecords.currency),
+        ),
+      )
       .groupBy(matches.externalRecordId);
     const confirmedByRecord = new Map(confSums.map((r) => [r.recordId, r.sum]));
 

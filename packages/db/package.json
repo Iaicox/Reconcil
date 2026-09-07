@@ -23,13 +23,13 @@
   },
   "dependencies": {
     "@reconcil/core": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "pg": "^8.22.0"
+    "drizzle-orm": "catalog:",
+    "pg": "catalog:"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^11.0.0",
+    "@testcontainers/postgresql": "catalog:",
     "@types/node": "catalog:",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "catalog:",
     "drizzle-kit": "^0.31.10",
     "eslint": "catalog:",
     "typescript": "catalog:",

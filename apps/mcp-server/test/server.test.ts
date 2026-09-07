@@ -1,7 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type { ToolContext } from '@reconcil/mcp-tools';
-import { describe, expect, it } from 'vitest';
+import type { Logger } from '@reconcil/core';
+import { ToolError, type ToolContext } from '@reconcil/mcp-tools';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createServer } from '../src/server.js';
 
@@ -85,5 +86,38 @@ describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
     const res = await client.callTool({ name: 'ledger_status', arguments: { bogus: 1 } });
     expect(res.isError).toBe(true);
     expect((res.structuredContent as { code: string }).code).toBe('INVALID_INPUT');
+  });
+
+  it('a ToolError with a cause returns only the generic message, and logs the scrubbed cause (ADR-011)', async () => {
+    const secret = new Error("EACCES: permission denied, open '/abs/host/path/secret.csv'");
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    // `makeContext` throwing stands in for a handler that hits an INTERNAL catch with a
+    // cause (e.g. export-run's "failed to write export files"): the throw happens inside
+    // the same try the handler call sits in, so it exercises the identical catch path.
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = createServer(() => {
+      throw new ToolError('INTERNAL', 'export_close_pack failed to write export files', undefined, secret);
+    }, logger);
+    await server.connect(serverTransport);
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    await client.connect(clientTransport);
+
+    const res = await client.callTool({ name: 'ledger_status', arguments: {} });
+
+    expect(res.isError).toBe(true);
+    const body = res.structuredContent as { code: string; message: string };
+    expect(body.code).toBe('INTERNAL');
+    expect(body.message).toBe('export_close_pack failed to write export files');
+    expect(body.message).not.toContain('EACCES');
+    expect(body.message).not.toContain('/abs/host/path');
+    expect(JSON.stringify(res.content)).not.toContain('/abs/host/path');
+
+    // The scrubbed cause reached the logger (server-side only), never the client.
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0] as [string, Record<string, unknown>];
+    expect(fields['tool']).toBe('ledger_status');
+    expect(fields['code']).toBe('INTERNAL');
+    expect(fields['cause']).toMatchObject({ name: 'Error', message: expect.stringContaining('EACCES') });
   });
 });

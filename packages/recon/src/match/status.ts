@@ -13,8 +13,13 @@ export type DerivedRecordStatus = 'open' | 'partially_matched' | 'matched' | 'ov
 /**
  * Derive status from the record's full `amount` and the summed fiat value of its
  * confirmed legs (`appliedFiat`), both decimal strings in the record's currency.
- * "matched" holds when the applied total lands within the tolerance band, so a
- * within-tolerance settlement is not read as a partial.
+ * The band is evaluated FIRST (A4): "matched" holds whenever the applied total lands
+ * within the tolerance band of the full amount — including the zero-amount case
+ * (`amount="0"`, `applied="0"`): the band `{0,0}` contains 0, so a genuinely
+ * zero-value record is matched, not stuck "open" forever. "open" is reserved for the
+ * true zero-progress case — `applied=0` on a record whose band does *not* already
+ * contain 0 (i.e. `amount > 0`); a non-zero payment against a zero-amount record still
+ * reads as `overpaid` (band `{0,0}`, any positive applied lands outside it).
  *
  * Band policy (ADR-010): confirm calls this with the **canonical default** tolerance
  * (`tolerances = {}` → `DEFAULT_AMOUNT_PCT`). The suggest-time `tolerances` param widens
@@ -23,6 +28,9 @@ export type DerivedRecordStatus = 'open' | 'partially_matched' | 'matched' | 'ov
  * leg + this fixed policy (P1/P2), not depend on a transient query param. A configurable
  * per-tenant band, if ever needed, would be an explicit policy setting, not that param.
  * The `tolerances` argument is kept for hermetic testability of the band boundaries.
+ *
+ * `void` is never returned here — it is a manual, terminal state the caller checks and
+ * short-circuits on *before* calling this function (decision-repo.ts), not derived.
  */
 export function deriveRecordStatus(
   amount: string,
@@ -30,10 +38,10 @@ export function deriveRecordStatus(
   tolerances: Tolerances = {},
 ): DerivedRecordStatus {
   const applied = toMinor(appliedFiat);
-  if (applied === 0n) return 'open';
   const band = computeBand(amount, tolerances); // band around the full amount
   const diff = applied - band.openMinor;
   const mag = diff < 0n ? -diff : diff;
-  if (mag <= band.bandMinor) return 'matched';
+  if (mag <= band.bandMinor) return 'matched'; // includes amount=0, applied=0 (A4)
+  if (applied === 0n) return 'open';
   return applied < band.openMinor ? 'partially_matched' : 'overpaid';
 }

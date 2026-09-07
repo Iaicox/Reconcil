@@ -38,9 +38,8 @@ export async function analyticsListEvents(
   const chainScope = input.chain_ids ? { chainIds: input.chain_ids } : {};
 
   const params: ListEventsParams = {
-    scope: { addresses },
+    scope: { addresses, ...chainScope },
     ...(input.period ? { period: input.period } : {}),
-    ...chainScope,
     ...(input.tokens ? { tokens: input.tokens.map((t) => ({ chainId: t.chain_id, address: t.address })) } : {}),
     ...(input.counterparty_address !== undefined ? { counterpartyAddress: input.counterparty_address } : {}),
     ...(input.kinds ? { kinds: input.kinds } : {}),
@@ -103,7 +102,7 @@ export async function analyticsListEvents(
   try {
     analyticsListEventsOutput.parse(data);
   } catch (err) {
-    throw new ToolError('INTERNAL', `analytics_list_events produced an output that violates its contract: ${String(err)}`);
+    throw new ToolError('INTERNAL', 'analytics_list_events produced an output that violates its contract', undefined, err);
   }
   const toolCallId = await persistToolCall(ctx, {
     toolName: TOOL_NAME, args: input as Record<string, unknown>, coverage: coverageRefs, result: data,

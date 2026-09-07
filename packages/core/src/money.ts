@@ -31,7 +31,11 @@ export function formatUnits(raw: bigint, decimals: number): DecimalString {
   while (end > 0 && fracRaw.charCodeAt(end - 1) === 48) end -= 1; // 48 = '0'
   const frac = fracRaw.slice(0, end);
   const body = frac === '' ? intPart : `${intPart}.${frac}`;
-  return (neg && body !== '0' ? `-${body}` : body) as DecimalString;
+  // `neg` is only ever true when `raw < 0n`, in which case `body` can never be the
+  // literal "0" (the only raw value that formats to "0" is 0n itself, and -0n === 0n
+  // makes `neg` false for it) — bigint has no negative-zero, so the `body !== '0'`
+  // guard could never change the outcome; it advertised a case bigint cannot produce.
+  return (neg ? `-${body}` : body) as DecimalString;
 }
 
 /**

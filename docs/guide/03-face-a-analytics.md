@@ -195,6 +195,10 @@ Curated (built-in) entities are read-only; editing one returns `INVALID_INPUT`.
 
 ### Close pack — seven files
 
+Every filename carries the period, so two months copied into one folder never overwrite
+each other: a calendar month collapses to `YYYY-MM` (as below); any other period spells
+out both ends, `<start>_<end>`.
+
 ```json
 { "name": "export_close_pack",
   "arguments": { "month": "2026-06", "valuation": { "currency": "EUR" } } }
@@ -206,13 +210,13 @@ Curated (built-in) entities are read-only; editing one returns `INVALID_INPUT`.
     "kind": "close_pack",
     "period": { "start": "2026-06-01", "end": "2026-06-30" },
     "files": [
-      { "name": "balances_opening.csv",     "sha256": "3501fb55…" },
-      { "name": "balances_closing.csv",     "sha256": "dd398f08…" },
-      { "name": "transactions.csv",         "sha256": "12310983…" },
-      { "name": "gas.csv",                  "sha256": "1516f1b0…" },
-      { "name": "counterparty_summary.csv", "sha256": "f4c59582…" },
-      { "name": "journal_draft.csv",        "sha256": "922484d9…" },
-      { "name": "manifest.json",            "sha256": "1bb79508…" } ] },
+      { "name": "balances_opening_2026-06.csv",     "sha256": "3501fb55…" },
+      { "name": "balances_closing_2026-06.csv",     "sha256": "dd398f08…" },
+      { "name": "transactions_2026-06.csv",         "sha256": "12310983…" },
+      { "name": "gas_2026-06.csv",                  "sha256": "1516f1b0…" },
+      { "name": "counterparty_summary_2026-06.csv", "sha256": "f4c59582…" },
+      { "name": "journal_draft_2026-06.csv",        "sha256": "922484d9…" },
+      { "name": "manifest.json",                    "sha256": "1bb79508…" } ] },
   "warnings": [
     { "code": "COVERAGE_INCOMPLETE", … },
     { "code": "PRICE_MISSING", "message": "no price snapshot for token 1 on 2026-06-30",
@@ -252,7 +256,7 @@ Every export writes a `manifest.json` next to its files:
   "coverage": [ … ],
   "price_refs": [], "fx_refs": [],
   "rounding_residues": [ { "currency": "EUR", "residue": "0.00" } ],
-  "files": [ { "name": "balances_opening.csv", "sha256": "3501fb55…" }, … ]
+  "files": [ { "name": "balances_opening_2026-06.csv", "sha256": "3501fb55…" }, … ]
 }
 ```
 
@@ -260,8 +264,8 @@ Which wallets, which blocks, which prices, which tool call, and a hash of every 
 the pack to an auditor and the manifest answers "where did this come from" without you in
 the room.
 
-`journal_draft.csv` opens with a banner row: `DRAFT — REVIEW REQUIRED`. Journal artifacts are
-drafts for professional review, never filings (P8).
+`journal_draft_2026-06.csv` opens with a banner row: `DRAFT — REVIEW REQUIRED`. Journal
+artifacts are drafts for professional review, never filings (P8).
 
 ### Getting the files off the stack
 
@@ -278,8 +282,8 @@ reconcil-mcp-server-1 Copied reconcil-mcp-server-1:/app/exports to ./exports
 ```
 exports/
   fc61ec41-a2fd-476f-9ae4-664e6d00af29/
-    balances_opening.csv  balances_closing.csv  transactions.csv
-    gas.csv  counterparty_summary.csv  journal_draft.csv  manifest.json
+    balances_opening_2026-06.csv  balances_closing_2026-06.csv  transactions_2026-06.csv
+    gas_2026-06.csv  counterparty_summary_2026-06.csv  journal_draft_2026-06.csv  manifest.json
 ```
 
 One directory per `export_id`. To write somewhere else, set `RECONCIL_EXPORT_DIR` or pass

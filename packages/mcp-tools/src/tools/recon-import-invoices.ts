@@ -27,6 +27,34 @@ const NAME_MAX = 128;
 /** Byte-accurate cap on the resolved CSV text (contract: inline content ≤ 1 MB). */
 const MAX_CONTENT_BYTES = 1_000_000;
 
+/**
+ * `defaults.vat_rate` arrives as a JS `number` (wire schema) and is carried internally
+ * as a decimal string (ADR-004 shape, even though this particular field is a rate, not
+ * money). `String(n)` switches to exponential notation below ~1e-6 (`String(1e-7) ===
+ * '1e-7'`), which fails the `decimalString` regex downstream and turns every defaulted
+ * row into a spurious INVALID_VAT. `String(n)` is otherwise already the shortest
+ * round-tripping decimal for a double (JS's own algorithm), so this only rewrites the
+ * exponential case — by shifting the decimal point through the SAME digits already in
+ * the string (pure string math, no re-derivation from the double via `toFixed`, which
+ * would reintroduce binary-fraction noise for "nice" values like 7.7). No new dependency.
+ */
+export function formatDefaultVatRate(n: number): string {
+  const s = String(n);
+  const m = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/i.exec(s);
+  if (m === null) return s; // already plain — the common case (21, 21.5, 7.7, ...)
+  const sign = m[1]!;
+  const intPart = m[2]!;
+  const fracPart = m[3] ?? '';
+  const exp = Number(m[4]!);
+  const digits = intPart + fracPart;
+  const pointPos = intPart.length + exp; // index of the decimal point within `digits`
+  let out: string;
+  if (pointPos <= 0) out = `0.${'0'.repeat(-pointPos)}${digits}`;
+  else if (pointPos >= digits.length) out = digits + '0'.repeat(pointPos - digits.length);
+  else out = `${digits.slice(0, pointPos)}.${digits.slice(pointPos)}`;
+  return sign + out;
+}
+
 export async function reconImportInvoices(
   ctx: ToolContext,
   rawInput: unknown,
@@ -55,8 +83,9 @@ export async function reconImportInvoices(
     parseOpts.defaults = {
       ...(input.defaults.currency !== undefined ? { currency: input.defaults.currency } : {}),
       ...(input.defaults.direction !== undefined ? { direction: input.defaults.direction } : {}),
-      // vat_rate is a rate (number on the wire); carry it as a decimal string internally.
-      ...(input.defaults.vat_rate !== undefined ? { vatRate: String(input.defaults.vat_rate) } : {}),
+      // vat_rate is a rate (number on the wire); carry it as a decimal string internally
+      // (never `String(n)` directly — it goes exponential below ~1e-6).
+      ...(input.defaults.vat_rate !== undefined ? { vatRate: formatDefaultVatRate(input.defaults.vat_rate) } : {}),
     };
   }
 
@@ -104,7 +133,7 @@ export async function reconImportInvoices(
       try {
         reconImportInvoicesOutput.parse(data);
       } catch (err) {
-        throw new ToolError('INTERNAL', `recon_import_invoices produced an output that violates its contract: ${String(err)}`);
+        throw new ToolError('INTERNAL', 'recon_import_invoices produced an output that violates its contract', undefined, err);
       }
 
       return { data, envelope: { coverage: [], warnings } };
