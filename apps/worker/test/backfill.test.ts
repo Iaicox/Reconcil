@@ -10,12 +10,12 @@ describe('runBackfillJob (H15b stall guard)', () => {
   it('re-enqueues the next page once when the checkpoint advances', async () => {
     const added: { data: unknown; opts: unknown }[] = [];
     const queue: BackfillPageAdd = {
-      add: async (name, data, opts) => { added.push({ data, opts }); return undefined; },
+      add: (name, data, opts) => { added.push({ data, opts }); return Promise.resolve(undefined); },
     };
     const res: IngestResult = { status: 'backfilling', lastProcessedBlock: 200, inserted: 3, unseenContracts: [] };
     const deps: BackfillJobDeps = {
-      runPage: async () => res,
-      getCheckpointBlock: async () => 100,
+      runPage: () => Promise.resolve(res),
+      getCheckpointBlock: () => Promise.resolve(100),
     };
 
     const out = await runBackfillJob(deps, target, queue);
@@ -27,11 +27,11 @@ describe('runBackfillJob (H15b stall guard)', () => {
 
   it('does not re-enqueue when the result is live (page fully drained)', async () => {
     const added: unknown[] = [];
-    const queue: BackfillPageAdd = { add: async (...args) => { added.push(args); return undefined; } };
+    const queue: BackfillPageAdd = { add: (...args) => { added.push(args); return Promise.resolve(undefined); } };
     const res: IngestResult = { status: 'live', lastProcessedBlock: 500, inserted: 1, unseenContracts: [] };
     const deps: BackfillJobDeps = {
-      runPage: async () => res,
-      getCheckpointBlock: async () => 100,
+      runPage: () => Promise.resolve(res),
+      getCheckpointBlock: () => Promise.resolve(100),
     };
 
     await runBackfillJob(deps, target, queue);
@@ -41,11 +41,11 @@ describe('runBackfillJob (H15b stall guard)', () => {
 
   it('throws instead of re-enqueueing when the checkpoint did not advance while backfilling', async () => {
     const added: unknown[] = [];
-    const queue: BackfillPageAdd = { add: async (...args) => { added.push(args); return undefined; } };
+    const queue: BackfillPageAdd = { add: (...args) => { added.push(args); return Promise.resolve(undefined); } };
     const res: IngestResult = { status: 'backfilling', lastProcessedBlock: 100, inserted: 0, unseenContracts: [] };
     const deps: BackfillJobDeps = {
-      runPage: async () => res,
-      getCheckpointBlock: async () => 100, // same as res.lastProcessedBlock — no progress
+      runPage: () => Promise.resolve(res),
+      getCheckpointBlock: () => Promise.resolve(100), // same as res.lastProcessedBlock — no progress
     };
 
     await expect(runBackfillJob(deps, target, queue)).rejects.toThrow(/stalled/);
@@ -54,11 +54,11 @@ describe('runBackfillJob (H15b stall guard)', () => {
 
   it('throws when the checkpoint regressed while backfilling', async () => {
     const added: unknown[] = [];
-    const queue: BackfillPageAdd = { add: async (...args) => { added.push(args); return undefined; } };
+    const queue: BackfillPageAdd = { add: (...args) => { added.push(args); return Promise.resolve(undefined); } };
     const res: IngestResult = { status: 'backfilling', lastProcessedBlock: 90, inserted: 0, unseenContracts: [] };
     const deps: BackfillJobDeps = {
-      runPage: async () => res,
-      getCheckpointBlock: async () => 100,
+      runPage: () => Promise.resolve(res),
+      getCheckpointBlock: () => Promise.resolve(100),
     };
 
     await expect(runBackfillJob(deps, target, queue)).rejects.toThrow(/stalled/);
@@ -66,9 +66,9 @@ describe('runBackfillJob (H15b stall guard)', () => {
   });
 
   it('error message carries only numbers, no address/provider text', async () => {
-    const queue: BackfillPageAdd = { add: async () => undefined };
+    const queue: BackfillPageAdd = { add: () => Promise.resolve(undefined) };
     const res: IngestResult = { status: 'backfilling', lastProcessedBlock: 100, inserted: 0, unseenContracts: [] };
-    const deps: BackfillJobDeps = { runPage: async () => res, getCheckpointBlock: async () => 100 };
+    const deps: BackfillJobDeps = { runPage: () => Promise.resolve(res), getCheckpointBlock: () => Promise.resolve(100) };
 
     let message = '';
     try {

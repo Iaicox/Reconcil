@@ -57,8 +57,8 @@ describe('write layer', () => {
     expect(inserted).toBe(2);
     const cp = await getCheckpoint(db, 1, ADDR, 'native');
     expect(cp).toMatchObject({ status: 'live', lastProcessedBlock: 100 });
-    const { rows } = await pool.query('SELECT count(*)::int AS n FROM chain_events');
-    expect(rows[0].n).toBe(2);
+    const { rows } = await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM chain_events');
+    expect(rows[0]?.n).toBe(2);
   });
 
   it('is idempotent — re-committing the same events inserts nothing new', async () => {
@@ -73,7 +73,9 @@ describe('write layer', () => {
       [erc20Event(200, 0, ACME, { decimals: '6', symbolRaw: 'ACME', nameRaw: 'Acme Token' })],
       { lastProcessedBlock: 200, status: 'live' }, chain);
     expect(inserted).toBe(1);
-    const { rows } = await pool.query(
+    const { rows } = await pool.query<{
+      standard: string; verified: boolean; symbol_raw: string; name_raw: string; decimals: number;
+    }>(
       `SELECT standard, verified, symbol_raw, name_raw, decimals FROM tokens WHERE chain_id=1 AND address=$1`, [ACME]);
     expect(rows[0]).toEqual({
       standard: 'erc20', verified: false, symbol_raw: 'ACME', name_raw: 'Acme Token', decimals: 6,
@@ -85,8 +87,8 @@ describe('write layer', () => {
       [erc20Event(201, 0, CLAMP, { decimals: '40', symbolRaw: 'BIG', nameRaw: 'Big Decimals' })],
       { lastProcessedBlock: 201, status: 'live' }, chain);
     expect(inserted).toBe(1);
-    const { rows } = await pool.query(`SELECT decimals FROM tokens WHERE chain_id=1 AND address=$1`, [CLAMP]);
-    expect(rows[0].decimals).toBe(0);
+    const { rows } = await pool.query<{ decimals: number }>(`SELECT decimals FROM tokens WHERE chain_id=1 AND address=$1`, [CLAMP]);
+    expect(rows[0]?.decimals).toBe(0);
   });
 
   it('resolves two distinct erc20 tokens referenced in a single page', async () => {
@@ -97,9 +99,9 @@ describe('write layer', () => {
       ],
       { lastProcessedBlock: 202, status: 'live' }, chain);
     expect(inserted).toBe(2);
-    const { rows } = await pool.query(
+    const { rows } = await pool.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM tokens WHERE chain_id=1 AND address = ANY($1)`, [[TOK5, TOK6]]);
-    expect(rows[0].n).toBe(2);
+    expect(rows[0]?.n).toBe(2);
   });
 
   it('inv.6 — write-chunk size does not change the ledger', async () => {
@@ -112,11 +114,15 @@ describe('write layer', () => {
     // resolve one native token id, build rows once
     const chunkInsert = async (size: number): Promise<string[]> => {
       await pool.query('TRUNCATE chain_events CASCADE'); // matches FKs chain_events.id; CASCADE required (matches is empty here)
-      const tid = (await pool.query(`SELECT id FROM tokens WHERE chain_id=1 AND address IS NULL`)).rows[0].id as number;
+      // bigint columns come back from node-postgres as decimal strings (no
+      // pg.types.setTypeParser override here) — Number() it for toChainEventRow's
+      // `number` contract, same as event-writer.ts does for blockNumber.
+      const idRow = (await pool.query<{ id: string }>(`SELECT id FROM tokens WHERE chain_id=1 AND address IS NULL`)).rows[0];
+      const tid = Number(idRow!.id);
       const rows = events.map((e) => toChainEventRow(e, tid));
       for (let i = 0; i < rows.length; i += size) await insertEventRows(db, rows.slice(i, i + size));
-      const r = await pool.query('SELECT tx_hash FROM chain_events ORDER BY tx_hash');
-      return r.rows.map((x) => x.tx_hash as string);
+      const r = await pool.query<{ tx_hash: string }>('SELECT tx_hash FROM chain_events ORDER BY tx_hash');
+      return r.rows.map((x) => x.tx_hash);
     };
     const a = await chunkInsert(10); const b = await chunkInsert(100); const c = await chunkInsert(1000);
     expect(a).toEqual(b); expect(b).toEqual(c); expect(a.length).toBe(250);

@@ -7,15 +7,17 @@ import { describe, expect, it } from 'vitest';
 
 import { withRetry } from '../src/write-tx.js';
 
-const pgErr = (code: string): { code: string } => ({ code });
+// pg's DatabaseError is a real Error subclass with a `.code` — match that shape
+// (Object.assign onto a real Error) rather than throwing a bare object literal.
+const pgErr = (code: string): Error & { code: string } => Object.assign(new Error(`pg error ${code}`), { code });
 
 describe('withRetry — serialization-failure policy', () => {
   it('retries a 40001 (serialization_failure) and returns the eventual success', async () => {
     let attempts = 0;
-    const result = await withRetry(async () => {
+    const result = await withRetry(() => {
       attempts += 1;
       if (attempts < 2) throw pgErr('40001');
-      return 'ok';
+      return Promise.resolve('ok');
     });
     expect(result).toBe('ok');
     expect(attempts).toBe(2);
@@ -23,10 +25,10 @@ describe('withRetry — serialization-failure policy', () => {
 
   it('retries a 40P01 (deadlock_detected) too', async () => {
     let attempts = 0;
-    const result = await withRetry(async () => {
+    const result = await withRetry(() => {
       attempts += 1;
       if (attempts < 2) throw pgErr('40P01');
-      return 'ok';
+      return Promise.resolve('ok');
     });
     expect(result).toBe('ok');
     expect(attempts).toBe(2);
@@ -35,7 +37,7 @@ describe('withRetry — serialization-failure policy', () => {
   it('gives up after the attempt cap and rethrows the last serialization error', async () => {
     let attempts = 0;
     await expect(
-      withRetry(async () => {
+      withRetry(() => {
         attempts += 1;
         throw pgErr('40001');
       }),
@@ -46,7 +48,7 @@ describe('withRetry — serialization-failure policy', () => {
   it('does not retry a non-serialization error (e.g. a unique violation)', async () => {
     let attempts = 0;
     await expect(
-      withRetry(async () => {
+      withRetry(() => {
         attempts += 1;
         throw pgErr('23505');
       }),
@@ -56,10 +58,10 @@ describe('withRetry — serialization-failure policy', () => {
 
   it('unwraps a driver error nested under `cause`', async () => {
     let attempts = 0;
-    const result = await withRetry(async () => {
+    const result = await withRetry(() => {
       attempts += 1;
-      if (attempts < 2) throw { cause: pgErr('40001') };
-      return 'ok';
+      if (attempts < 2) throw new Error('wrapped', { cause: pgErr('40001') });
+      return Promise.resolve('ok');
     });
     expect(result).toBe('ok');
     expect(attempts).toBe(2);

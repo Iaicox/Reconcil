@@ -8,7 +8,7 @@ function fakeProcess(): { proc: MinimalProcess; handlers: Map<string, ((...args:
   const proc: MinimalProcess = {
     on: (event, listener) => {
       const list = handlers.get(event) ?? [];
-      list.push(listener as (...args: unknown[]) => void);
+      list.push(listener);
       handlers.set(event, list);
       return proc;
     },

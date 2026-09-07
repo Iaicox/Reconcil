@@ -56,7 +56,7 @@ describe('recon_import_invoices — import, sanitization, audit', () => {
 
     expect(env.data.inserted).toBe(2);
     expect(env.data.skipped_duplicates).toBe(0);
-    expect(env.data.errors).toEqual([{ row: 3, code: 'INVALID_AMOUNT', message: expect.any(String) }]);
+    expect(env.data.errors).toEqual([{ row: 3, code: 'INVALID_AMOUNT', message: expect.any(String) as unknown }]);
     expect(env.data.records.map((r) => r.external_ref).sort()).toEqual(['INV-001', 'INV-002']);
 
     // C6: the formula-lead name ships only sanitized, under `untrusted`.

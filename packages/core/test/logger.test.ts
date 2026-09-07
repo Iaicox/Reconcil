@@ -29,7 +29,9 @@ describe('createLogger', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     createLogger({ name: 'worker' }).info('tick', { chainId: 1 });
     expect(spy).toHaveBeenCalledOnce();
-    const line = JSON.parse(spy.mock.calls[0]![0] as string);
+    const line = JSON.parse(spy.mock.calls[0]![0] as string) as {
+      level: string; name: string; msg: string; chainId: number; time: unknown;
+    };
     expect(line).toMatchObject({ level: 'info', name: 'worker', msg: 'tick', chainId: 1 });
     expect(typeof line.time).toBe('string');
     spy.mockRestore();

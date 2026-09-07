@@ -31,7 +31,7 @@ export async function directoryUpsertEntity(
   // a failure — including the output-contract check below — rolls the upsert back.
   return runWriteTool<DirectoryUpsertEntityOutput>(ctx, {
     toolName: TOOL_NAME,
-    args: input as Record<string, unknown>,
+    args: input,
     body: async (txCtx) => {
       const { entityId, created, warnings } = await upsertEntity(txCtx, input);
       const data: DirectoryUpsertEntityOutput = { entity_id: entityId, created };

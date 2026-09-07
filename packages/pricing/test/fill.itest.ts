@@ -15,8 +15,8 @@ import { valueQuantities } from '../src/value.js';
 const logger = createLogger({ name: 'fill.itest' });
 
 /** Captures warn() calls so a test can assert a failure was actually recorded. */
-function spyLogger(): Logger & { warnCalls: { msg: string; fields?: Record<string, unknown> }[] } {
-  const warnCalls: { msg: string; fields?: Record<string, unknown> }[] = [];
+function spyLogger(): Logger & { warnCalls: { msg: string; fields?: Record<string, unknown> | undefined }[] } {
+  const warnCalls: { msg: string; fields?: Record<string, unknown> | undefined }[] = [];
   return {
     warnCalls,
     info: () => undefined,
@@ -82,7 +82,7 @@ function stubBundle(prices: Record<string, string>): PriceBundle {
 }
 
 const need = (o: Partial<ValueNeed> & Pick<ValueNeed, 'tokenId' | 'amount' | 'date'>): ValueNeed =>
-  ({ isStablecoin: false, pegCurrency: null, ...o } as ValueNeed);
+  ({ isStablecoin: false, pegCurrency: null, ...o });
 
 describe('runPriceFill — gaps → fetch → append, then valuation reads it', () => {
   it('fills market snapshots + FX, is idempotent, and feeds valueQuantities end-to-end', async () => {

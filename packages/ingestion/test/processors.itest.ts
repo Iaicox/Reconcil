@@ -60,42 +60,53 @@ type InternalFn = NonNullable<ChainDataProvider['getInternalTxs']>;
 type Erc20Fn = ChainDataProvider['getErc20Transfers'];
 type ReceiptsFn = ProviderBundle['getReceipts'];
 
+// Anchoring capabilities are unused by the backfill/tail processors under test
+// here (that's anchor.itest.ts) — stub them to fail loudly if that ever changes,
+// rather than silently degrading.
+const unused = (label: string) => (): Promise<never> => {
+  throw new Error(`${label} unexpectedly called by a processors.itest.ts case`);
+};
+
 const bundleOf = (opts: {
   native?: NativeFn; internal?: InternalFn; erc20?: Erc20Fn; receipts?: ReceiptsFn; head?: bigint;
 }): ProviderBundle => ({
   indexer: {
     kind: 'etherscan-v2',
-    getHead: async () => opts.head ?? 1_000_000n,
-    getNativeTxs: opts.native ?? (async () => ({ items: [] })),
-    getErc20Transfers: opts.erc20 ?? (async () => ({ items: [] })),
+    getHead: () => Promise.resolve(opts.head ?? 1_000_000n),
+    getNativeTxs: opts.native ?? (() => Promise.resolve({ items: [] })),
+    getErc20Transfers: opts.erc20 ?? (() => Promise.resolve({ items: [] })),
     // Optional capability (ADR-009): only present when the case supplies one, so
     // every pre-existing case still exercises the txlist-only degradation path.
     ...(opts.internal ? { getInternalTxs: opts.internal } : {}),
   },
-  getReceipts: opts.receipts ?? (async () => []),
+  getReceipts: opts.receipts ?? (() => Promise.resolve([])),
+  getBlockByTime: unused('getBlockByTime'),
+  getNativeBalanceAt: unused('getNativeBalanceAt'),
+  getErc20BalanceAt: unused('getErc20BalanceAt'),
+  estimateTxCount: unused('estimateTxCount'),
 });
 
 // safeHead for chain 1 = head(1_000_000) − finalityDepth(64) = 999_936.
 const SAFE = 999_936;
 
 // Short native page: 3 txs at 100–102, then empty ⇒ one page, straight to live.
-const nativeShort: NativeFn = async (q) => ({
+const nativeShort: NativeFn = (q) => Promise.resolve({
   items: Number(q.fromBlock) <= 100 ? [nativeTx(100), nativeTx(101), nativeTx(102)] : [],
 });
 // Full native page: exactly PAGE_LIMIT (1000) txs at blocks 1..1000.
 const bigTxs = Array.from({ length: 1000 }, (_, i) => nativeTx(i + 1));
-const nativeFull: NativeFn = async (q) => {
+const nativeFull: NativeFn = (q) => {
   const from = Number(q.fromBlock);
-  return { items: bigTxs.filter((t) => Number(t.blockNumber) >= from).slice(0, 1000) };
+  return Promise.resolve({ items: bigTxs.filter((t) => Number(t.blockNumber) >= from).slice(0, 1000) });
 };
 // A full page (PAGE_LIMIT) of relevant txs all in ONE block (500) — the
 // degenerate case block-granular overlap pagination cannot advance past.
 const spamBlock = Array.from({ length: 1000 }, (_, i) => ({ ...nativeTx(500), hash: `0xspam${i.toString(16)}` }));
-const nativeSpamBlock: NativeFn = async (q) => ({ items: Number(q.fromBlock) <= 500 ? spamBlock : [] });
+const nativeSpamBlock: NativeFn = (q) => Promise.resolve({ items: Number(q.fromBlock) <= 500 ? spamBlock : [] });
 // A single tx at block 500 (for the tail tick).
-const nativeAt500: NativeFn = async (q) => ({ items: Number(q.fromBlock) <= 500 ? [nativeTx(500)] : [] });
+const nativeAt500: NativeFn = (q) => Promise.resolve({ items: Number(q.fromBlock) <= 500 ? [nativeTx(500)] : [] });
 // Short internal page: 2 traces of ONE parent tx at block 103.
-const internalShort: InternalFn = async (q) => ({
+const internalShort: InternalFn = (q) => Promise.resolve({
   items: Number(q.fromBlock) <= 103
     ? [internalTx(103, '0xint1', '0'), internalTx(103, '0xint1', '1', '900')]
     : [],
@@ -103,12 +114,12 @@ const internalShort: InternalFn = async (q) => ({
 // Full internal page: exactly PAGE_LIMIT traces, 2 per parent tx over blocks 200..699.
 const bigInternals = Array.from({ length: 1000 }, (_, i) =>
   internalTx(200 + Math.floor(i / 2), `0xint${String(Math.floor(i / 2))}`, String(i % 2)));
-const internalFull: InternalFn = async (q) => {
+const internalFull: InternalFn = (q) => {
   const from = Number(q.fromBlock);
-  return { items: bigInternals.filter((t) => Number(t.blockNumber) >= from).slice(0, 1000) };
+  return Promise.resolve({ items: bigInternals.filter((t) => Number(t.blockNumber) >= from).slice(0, 1000) });
 };
 // A full internal page packed into ONE block (300) — 500 parent txs × 2 traces.
-const internalSpamBlock: InternalFn = async (q) => ({
+const internalSpamBlock: InternalFn = (q) => Promise.resolve({
   items: Number(q.fromBlock) <= 300
     ? Array.from({ length: 1000 }, (_, i) =>
         internalTx(300, `0xflood${String(Math.floor(i / 2))}`, String(i % 2)))
@@ -129,15 +140,15 @@ const splitTraces: RawInternalTx[] = [
 ];
 const splitFillers = Array.from({ length: 999 }, (_, i) =>
   internalTx(300 + i, `0xfill${String(i)}`, '0'));
-const internalSplitTx: InternalFn = async (q) => {
+const internalSplitTx: InternalFn = (q) => {
   const from = Number(q.fromBlock);
-  return {
+  return Promise.resolve({
     items: [...splitFillers, ...splitTraces].filter((t) => Number(t.blockNumber) >= from).slice(0, 1000),
-  };
+  });
 };
 // One erc20 transfer at block 200, with matching receipts.
-const erc20At200: Erc20Fn = async (q) => ({ items: Number(q.fromBlock) <= 200 ? [erc20Row(200, '0xerc1')] : [] });
-const erc20Receipts: ReceiptsFn = async (hashes) => hashes.map((h) => erc20Receipt(h));
+const erc20At200: Erc20Fn = (q) => Promise.resolve({ items: Number(q.fromBlock) <= 200 ? [erc20Row(200, '0xerc1')] : [] });
+const erc20Receipts: ReceiptsFn = (hashes) => Promise.resolve(hashes.map((h) => erc20Receipt(h)));
 
 describe('processors', () => {
   let container: StartedPostgreSqlContainer;
@@ -150,7 +161,7 @@ describe('processors', () => {
 
   // Captures warn() calls so H7's "skip, don't regress" branch can assert it logged
   // instead of silently swallowing the stale/negative-safe condition.
-  const warnLog: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const warnLog: { msg: string; fields?: Record<string, unknown> | undefined }[] = [];
   const depsWithWarnSpy = (bundle: () => ProviderBundle): ProcessorDeps => ({
     db,
     bundleFor: () => bundle(),
@@ -182,12 +193,15 @@ describe('processors', () => {
     );
   };
   const kinds = async (): Promise<Record<string, number>> => {
-    const { rows } = await pool.query('SELECT event_kind, count(*)::int AS n FROM chain_events GROUP BY event_kind');
-    return Object.fromEntries(rows.map((r) => [r.event_kind as string, r.n as number]));
+    const { rows } = await pool.query<{ event_kind: string; n: number }>(
+      'SELECT event_kind, count(*)::int AS n FROM chain_events GROUP BY event_kind',
+    );
+    return Object.fromEntries(rows.map((r) => [r.event_kind, r.n]));
   };
   const snapshot = async (): Promise<string> =>
-    (await pool.query('SELECT tx_hash, log_index, amount_raw FROM chain_events ORDER BY tx_hash, log_index'))
-      .rows.map((r) => `${r.tx_hash}:${String(r.log_index)}:${r.amount_raw}`).join('|');
+    (await pool.query<{ tx_hash: string; log_index: number; amount_raw: string }>(
+      'SELECT tx_hash, log_index, amount_raw FROM chain_events ORDER BY tx_hash, log_index',
+    )).rows.map((r) => `${r.tx_hash}:${String(r.log_index)}:${r.amount_raw}`).join('|');
 
   it('ingests native + gas events and reaches live', async () => {
     await reset('native', 0, 'queued');
@@ -242,13 +256,17 @@ describe('processors', () => {
     expect(res.status).toBe('live');
     expect(res.inserted).toBe(1);
     expect(res.unseenContracts).toEqual([TOKEN]);
-    const ev = (await pool.query(
+    const ev = (await pool.query<{
+      event_kind: string; log_index: number; from_addr: string; to_addr: string; tx_from: string; tx_to: string;
+    }>(
       `SELECT event_kind, log_index, from_addr, to_addr, tx_from, tx_to FROM chain_events WHERE event_kind='erc20_transfer'`,
     )).rows[0];
     expect(ev).toMatchObject({
       event_kind: 'erc20_transfer', log_index: 5, from_addr: ADDR, to_addr: DEST, tx_from: ADDR, tx_to: TOKEN,
     });
-    const tok = (await pool.query(
+    const tok = (await pool.query<{
+      standard: string; verified: boolean; symbol_raw: string; name_raw: string; decimals: number;
+    }>(
       `SELECT standard, verified, symbol_raw, name_raw, decimals FROM tokens WHERE chain_id=1 AND address=$1`, [TOKEN],
     )).rows[0];
     expect(tok).toEqual({ standard: 'erc20', verified: false, symbol_raw: 'ACME', name_raw: 'Acme Token', decimals: 6 });
@@ -268,7 +286,7 @@ describe('processors', () => {
     // Cursor already at safeHead ⇒ fromBlock = safe + 1 > safe. The provider mock
     // throws if queried, so this test fails if the `fromBlock > safe` guard is removed.
     await reset('native', SAFE, 'live');
-    const throwIfQueried: NativeFn = async () => { throw new Error('provider queried past safeHead'); };
+    const throwIfQueried: NativeFn = () => { throw new Error('provider queried past safeHead'); };
     const res = await runBackfillPage(
       deps(() => bundleOf({ native: throwIfQueried })),
       { chainId: 1, address: ADDR, stream: 'native' },
@@ -276,8 +294,8 @@ describe('processors', () => {
     expect(res.status).toBe('live');
     expect(res.inserted).toBe(0);
     expect(res.lastProcessedBlock).toBe(SAFE);
-    const { rows } = await pool.query('SELECT count(*)::int AS n FROM chain_events');
-    expect(rows[0].n).toBe(0);
+    const { rows } = await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM chain_events');
+    expect(rows[0]?.n).toBe(0);
   });
 
   // H7 — a stale (load-balanced) provider head must never regress the cursor, and a
@@ -337,7 +355,7 @@ describe('processors', () => {
       await reset('native', 1000, 'live');
       // head 1114, finalityDepth 64 (chain 1) ⇒ safe = 1050, comfortably above cursor 1000.
       const res = await runBackfillPage(
-        deps(() => bundleOf({ native: async () => ({ items: [] }), head: 1114n })),
+        deps(() => bundleOf({ native: () => Promise.resolve({ items: [] }), head: 1114n })),
         { chainId: 1, address: ADDR, stream: 'native' },
       );
       expect(res).toEqual({ status: 'live', lastProcessedBlock: 1050, inserted: 0, unseenContracts: [] });
@@ -356,7 +374,7 @@ describe('processors', () => {
     ).rejects.toThrow(/stalled|cannot advance/i);
     // Nothing committed; the cursor did not move (the whole page is one transaction).
     expect((await getCheckpoint(db, 1, ADDR, 'native'))?.lastProcessedBlock).toBe(499);
-    expect((await pool.query('SELECT count(*)::int AS n FROM chain_events')).rows[0].n).toBe(0);
+    expect((await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM chain_events')).rows[0]?.n).toBe(0);
   });
 
   // The `native` checkpoint stream covers txlist AND txlistinternal (ADR-005 d2):
@@ -365,11 +383,11 @@ describe('processors', () => {
   // ever revisits a passed block.
   describe('internal transfers on the native stream', () => {
     const internalRows = async (): Promise<{ tx: string; idx: number; amt: string }[]> =>
-      (await pool.query(
+      (await pool.query<{ tx_hash: string; log_index: number; amount_raw: string }>(
         'SELECT tx_hash, log_index, amount_raw FROM chain_events WHERE log_index <= -1000 ORDER BY tx_hash, log_index DESC',
-      )).rows.map((r) => ({ tx: r.tx_hash as string, idx: r.log_index as number, amt: r.amount_raw as string }));
+      )).rows.map((r) => ({ tx: r.tx_hash, idx: r.log_index, amt: r.amount_raw }));
     const internalCount = async (): Promise<number> =>
-      (await pool.query('SELECT count(*)::int AS n FROM chain_events WHERE log_index <= -1000')).rows[0].n as number;
+      (await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM chain_events WHERE log_index <= -1000')).rows[0]!.n;
 
     it('ingests txlistinternal alongside txlist in one page (the R3 inflows txlist omits)', async () => {
       await reset('native', 0, 'queued');
@@ -448,10 +466,10 @@ describe('processors', () => {
 
       // The union of what is stored equals the complete single-fetch result: three
       // rows, three distinct sentinels, each amount present exactly once.
-      const stored = (await pool.query(
+      const stored = (await pool.query<{ log_index: number; amount_raw: string }>(
         'select log_index, amount_raw from chain_events where tx_hash = $1 order by log_index desc',
         ['0xsplit'],
-      )).rows.map((r) => [r.log_index as number, r.amount_raw as string]);
+      )).rows.map((r) => [r.log_index, r.amount_raw]);
       expect(stored).toEqual([[-1000, '100'], [-1001, '500'], [-1002, '900']]);
       expect(new Set(stored.map(([idx]) => idx)).size).toBe(3); // no collisions
       // and no value invented or lost: Σ stored === Σ the provider's traces
@@ -464,24 +482,24 @@ describe('processors', () => {
       await reset('native', 299, 'backfilling');
       await expect(
         runBackfillPage(
-          deps(() => bundleOf({ native: async () => ({ items: [] }), internal: internalSpamBlock })),
+          deps(() => bundleOf({ native: () => Promise.resolve({ items: [] }), internal: internalSpamBlock })),
           { chainId: 1, address: ADDR, stream: 'native' },
         ),
       ).rejects.toThrow(/stalled|cannot advance/i);
       expect((await getCheckpoint(db, 1, ADDR, 'native'))?.lastProcessedBlock).toBe(299);
-      expect((await pool.query('SELECT count(*)::int AS n FROM chain_events')).rows[0].n).toBe(0);
+      expect((await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM chain_events')).rows[0]?.n).toBe(0);
     });
 
     it('opstack receipts stay driven by the NATIVE page alone — an internal transfer has no gas of its own', async () => {
       await pool.query('TRUNCATE chain_events, ingestion_checkpoints CASCADE');
       await seedCheckpoint(db, 8453, ADDR, 'native'); // Base: feeStrategy receipts-opstack
       const asked: string[] = [];
-      const receipts: ReceiptsFn = async (hashes) => {
+      const receipts: ReceiptsFn = (hashes) => {
         asked.push(...hashes);
-        return hashes.map((h) => ({
+        return Promise.resolve(hashes.map((h) => ({
           transactionHash: h, from: ADDR, to: DEST,
           gasUsed: '50000', effectiveGasPrice: '2', l1Fee: '7', status: '1' as const, logs: [],
-        }));
+        })));
       };
       const res = await runBackfillPage(
         deps(() => bundleOf({ native: nativeShort, internal: internalShort, receipts })),

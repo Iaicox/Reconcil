@@ -93,7 +93,7 @@ describe('golden-wallet reconciliation through the production ingestion path (in
   // ::int — node-postgres hands BIGINT back as a string, and computeBalances keys
   // tokenId as a number.
   const nativeTokenId = async (): Promise<number> =>
-    (await pool.query('select id::int as id from tokens where chain_id = 1 and address is null')).rows[0].id as number;
+    (await pool.query<{ id: number }>('select id::int as id from tokens where chain_id = 1 and address is null')).rows[0]!.id;
   const runOnePage = async (): Promise<{ status: string; lastProcessedBlock: number; inserted: number }> => {
     const fx = goldenIngestFixture('freelancer', 1);
     return runBackfillPage(

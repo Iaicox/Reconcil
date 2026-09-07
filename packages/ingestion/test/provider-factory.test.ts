@@ -10,23 +10,23 @@ import {
 
 const stub = (over: Partial<ChainDataProvider>): ChainDataProvider => ({
   kind: 'etherscan-v2',
-  getHead: async () => 1n,
-  getNativeTxs: async () => ({ items: [] }),
-  getErc20Transfers: async () => ({ items: [] }),
+  getHead: () => Promise.resolve(1n),
+  getNativeTxs: () => Promise.resolve({ items: [] }),
+  getErc20Transfers: () => Promise.resolve({ items: [] }),
   ...over,
 });
 
 describe('failoverProvider', () => {
   it('falls through to the secondary on a ProviderError and reports the served kind', async () => {
-    const primary = stub({ kind: 'etherscan-v2', getHead: async () => { throw new ProviderError('provider_error', 'no base'); } });
-    const secondary = stub({ kind: 'blockscout', getHead: async () => 42n });
+    const primary = stub({ kind: 'etherscan-v2', getHead: () => { throw new ProviderError('provider_error', 'no base'); } });
+    const secondary = stub({ kind: 'blockscout', getHead: () => Promise.resolve(42n) });
     const fp = failoverProvider([primary, secondary]);
     expect(await fp.getHead(8453)).toBe(42n);
     expect(fp.kind).toBe('blockscout');
   });
 
   it('rethrows when every provider fails', async () => {
-    const boom = stub({ getHead: async () => { throw new ProviderError('http', 'HTTP 500'); } });
+    const boom = stub({ getHead: () => { throw new ProviderError('http', 'HTTP 500'); } });
     await expect(failoverProvider([boom, boom]).getHead(1)).rejects.toThrow(ProviderError);
   });
 
@@ -42,9 +42,9 @@ describe('failoverProvider', () => {
     it('falls over to the secondary and reports the served kind', async () => {
       const primary = stub({
         kind: 'etherscan-v2',
-        getInternalTxs: async () => { throw new ProviderError('rate_limited', 'slow down'); },
+        getInternalTxs: () => { throw new ProviderError('rate_limited', 'slow down'); },
       });
-      const secondary = stub({ kind: 'blockscout', getInternalTxs: async () => page('7') });
+      const secondary = stub({ kind: 'blockscout', getInternalTxs: () => Promise.resolve(page('7')) });
       const fp = failoverProvider([primary, secondary]);
       expect(await fp.getInternalTxs!(Q)).toEqual(page('7'));
       expect(fp.kind).toBe('blockscout');
@@ -52,7 +52,7 @@ describe('failoverProvider', () => {
 
     it('skips a provider that does not implement it (no TypeError), serving from the one that does', async () => {
       const noCapability = stub({ kind: 'etherscan-v2' });
-      const capable = stub({ kind: 'blockscout', getInternalTxs: async () => page('9') });
+      const capable = stub({ kind: 'blockscout', getInternalTxs: () => Promise.resolve(page('9')) });
       const fp = failoverProvider([noCapability, capable]);
       expect(await fp.getInternalTxs!(Q)).toEqual(page('9'));
       expect(fp.kind).toBe('blockscout');
@@ -60,21 +60,21 @@ describe('failoverProvider', () => {
 
     it('is absent entirely when no provider serves it — callers degrade, they do not throw', () => {
       const fp = failoverProvider([stub({}), stub({ kind: 'blockscout' })]);
-      expect(fp.getInternalTxs).toBeUndefined();
+      expect(typeof fp.getInternalTxs).toBe('undefined');
     });
 
     it('rethrows the last ProviderError when every capable provider fails', async () => {
-      const boom = stub({ getInternalTxs: async () => { throw new ProviderError('http', 'HTTP 500'); } });
+      const boom = stub({ getInternalTxs: () => { throw new ProviderError('http', 'HTTP 500'); } });
       await expect(failoverProvider([boom, boom]).getInternalTxs!(Q)).rejects.toThrow(ProviderError);
     });
 
     it('the wrapper keeps reporting the live served kind after the capability call', async () => {
       const primary = stub({
         kind: 'etherscan-v2',
-        getNativeTxs: async () => ({ items: [] }),
-        getInternalTxs: async () => { throw new ProviderError('http', 'HTTP 500'); },
+        getNativeTxs: () => Promise.resolve({ items: [] }),
+        getInternalTxs: () => { throw new ProviderError('http', 'HTTP 500'); },
       });
-      const secondary = stub({ kind: 'blockscout', getInternalTxs: async () => page('1') });
+      const secondary = stub({ kind: 'blockscout', getInternalTxs: () => Promise.resolve(page('1')) });
       const fp = failoverProvider([primary, secondary]);
       await fp.getNativeTxs(Q);
       expect(fp.kind).toBe('etherscan-v2');
@@ -86,14 +86,14 @@ describe('failoverProvider', () => {
 
 describe('buildProviderBundle', () => {
   it('routes receipts to the injected RPC on receipts-opstack chains (base)', async () => {
-    const rpcCall = vi.fn(async () => ({
+    const rpcCall = vi.fn(() => Promise.resolve({
       transactionHash: '0x1', from: '0xa', to: '0xb',
       gasUsed: '0x1', effectiveGasPrice: '0x1', status: '0x1', logs: [],
     }));
     const bundle = buildProviderBundle({
       chainId: 8453,
       env: { BASE_RPC_URL: 'https://rpc.example' },
-      fetchJson: async () => ({ status: 200, body: {} }),
+      fetchJson: () => Promise.resolve({ status: 200, body: {} }),
       rpcCallFor: () => rpcCall,
     });
     const [r] = await bundle.getReceipts(['0x1']);

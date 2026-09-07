@@ -252,7 +252,7 @@ function balanceExport(r: BalanceRow, fiat: string | undefined): BalanceExportRo
     address: r.address,
     chainId: r.chainId,
     token: tokenLabel(r.token),
-    amount: r.amount as string,
+    amount: r.amount,
     ...(fiat !== undefined ? { fiatValue: fiat } : {}),
   };
 }
@@ -265,7 +265,7 @@ function transactionExport(e: EventListItem): TransactionExportRow {
     blockTime: e.blockTime,
     kind: e.kind,
     token: tokenLabel(e.token),
-    amount: e.amount as string,
+    amount: e.amount,
     direction: e.direction,
     from: e.fromAddr,
     to: e.toAddr,
@@ -276,7 +276,7 @@ function gasExport(r: GasRow, fiat: string | undefined): GasExportRow {
   return {
     chainId: r.chainId,
     nativeSymbol: r.token.symbolDisplay ?? '',
-    nativeAmount: r.nativeAmount as string,
+    nativeAmount: r.nativeAmount,
     txCount: r.txCount,
     ...(fiat !== undefined ? { fiatValue: fiat } : {}),
   };

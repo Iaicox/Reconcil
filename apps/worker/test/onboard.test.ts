@@ -10,7 +10,7 @@ describe('enqueueBackfills', () => {
   it('enqueues one page per target with the shared deterministic job id', async () => {
     const calls: { name: string; data: unknown; opts: JobsOptions }[] = [];
     const queue: BackfillEnqueuer = {
-      add: async (name, data, opts) => { calls.push({ name, data, opts }); return undefined; },
+      add: (name, data, opts) => { calls.push({ name, data, opts }); return Promise.resolve(undefined); },
     };
 
     await enqueueBackfills(
@@ -31,7 +31,7 @@ describe('enqueueBackfills', () => {
 
   it('does nothing for an empty target set', async () => {
     let added = 0;
-    const queue: BackfillEnqueuer = { add: async () => { added += 1; return undefined; } };
+    const queue: BackfillEnqueuer = { add: () => { added += 1; return Promise.resolve(undefined); } };
     await enqueueBackfills([], queue);
     expect(added).toBe(0);
   });
@@ -41,7 +41,7 @@ describe('enqueueAnchors', () => {
   it('enqueues one anchor job per target with the deterministic anchor job id', async () => {
     const calls: { name: string; data: unknown; opts: JobsOptions }[] = [];
     const queue: AnchorEnqueuer = {
-      add: async (name, data, opts) => { calls.push({ name, data, opts }); return undefined; },
+      add: (name, data, opts) => { calls.push({ name, data, opts }); return Promise.resolve(undefined); },
     };
 
     await enqueueAnchors(
@@ -62,7 +62,7 @@ describe('enqueueProbes', () => {
   it('enqueues one probe job per wallet with the per-address job id', async () => {
     const calls: { name: string; data: unknown; opts: JobsOptions }[] = [];
     const queue: ProbeEnqueuer = {
-      add: async (name, data, opts) => { calls.push({ name, data, opts }); return undefined; },
+      add: (name, data, opts) => { calls.push({ name, data, opts }); return Promise.resolve(undefined); },
     };
 
     await enqueueProbes([{ chainId: 1, address: '0xABC' }], queue);

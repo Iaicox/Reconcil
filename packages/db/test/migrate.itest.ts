@@ -86,7 +86,7 @@ describe('curated token seed (migration 0002)', () => {
 
   it('is idempotent — re-running migrations does not duplicate the seeded rows', async () => {
     await runMigrations(pool);
-    const { rows } = await pool.query('SELECT count(*)::int AS n FROM tokens WHERE verified = true');
-    expect(rows[0].n).toBe(10);
+    const { rows } = await pool.query<{ n: number }>('SELECT count(*)::int AS n FROM tokens WHERE verified = true');
+    expect(rows[0]?.n).toBe(10);
   });
 });

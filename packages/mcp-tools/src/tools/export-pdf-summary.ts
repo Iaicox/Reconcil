@@ -58,7 +58,7 @@ export async function exportPdfSummary(
       ctx,
       toolName: TOOL_NAME,
       kind: 'pdf_summary',
-      rawArgs: input as Record<string, unknown>,
+      rawArgs: input,
       data,
       rendered,
       provenance,

@@ -72,7 +72,7 @@ describe('priceGaps — verified (token, date) closes not yet priced', () => {
     await seedToken(5, { isStablecoin: true, pegCurrency: 'USD' });
     await seedEvent(5, '2026-06-01');
     await upsertSnapshots(db, [{ tokenId: 5, priceDate: '2026-06-01', currency: 'USD', price: '1', source: 'peg' }]);
-    expect(priceGaps(db).then((g) => g.map((x) => x.tokenId))).resolves.toEqual([5]);
+    expect((await priceGaps(db)).map((x) => x.tokenId)).toEqual([5]);
   });
 });
 

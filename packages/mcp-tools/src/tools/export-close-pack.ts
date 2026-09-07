@@ -61,7 +61,7 @@ export async function exportClosePack(
       ctx,
       toolName: TOOL_NAME,
       kind: 'close_pack',
-      rawArgs: input as Record<string, unknown>,
+      rawArgs: input,
       data,
       rendered,
       provenance,

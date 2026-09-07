@@ -1,0 +1,32 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    "src",
+    "test"
+  ],
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../db"
+    },
+    {
+      "path": "../exporters"
+    },
+    {
+      "path": "../ledger"
+    },
+    {
+      "path": "../pricing"
+    },
+    {
+      "path": "../recon"
+    }
+  ]
+}

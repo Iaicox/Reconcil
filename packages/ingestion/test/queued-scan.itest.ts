@@ -17,15 +17,26 @@ const nativeTx = (block: number): RawNativeTx => ({
   blockNumber: String(block), timeStamp: '1700000000', hash: `0xtx${String(block)}`,
   from: ADDR, to: DEST, value: '1000', gasUsed: '21000', gasPrice: '2', isError: '0',
 });
+// Anchoring capabilities are unused by the backfill path under test here
+// (that's anchor.itest.ts) — stub them to fail loudly if that ever changes,
+// rather than silently degrading.
+const unused = (label: string) => (): Promise<never> => {
+  throw new Error(`${label} unexpectedly called by a queued-scan.itest.ts case`);
+};
+
 // Short native page (1 tx then empty) ⇒ backfill flips the checkpoint straight to 'live'.
 const bundle: ProviderBundle = {
   indexer: {
     kind: 'etherscan-v2',
-    getHead: async () => 1_000_000n,
-    getNativeTxs: async (q) => ({ items: Number(q.fromBlock) <= 100 ? [nativeTx(100)] : [] }),
-    getErc20Transfers: async () => ({ items: [] }),
+    getHead: () => Promise.resolve(1_000_000n),
+    getNativeTxs: (q) => Promise.resolve({ items: Number(q.fromBlock) <= 100 ? [nativeTx(100)] : [] }),
+    getErc20Transfers: () => Promise.resolve({ items: [] }),
   },
-  getReceipts: async () => [],
+  getReceipts: () => Promise.resolve([]),
+  getBlockByTime: unused('getBlockByTime'),
+  getNativeBalanceAt: unused('getNativeBalanceAt'),
+  getErc20BalanceAt: unused('getErc20BalanceAt'),
+  estimateTxCount: unused('estimateTxCount'),
 };
 
 let container: StartedPostgreSqlContainer;

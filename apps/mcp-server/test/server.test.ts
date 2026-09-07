@@ -90,7 +90,8 @@ describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
 
   it('a ToolError with a cause returns only the generic message, and logs the scrubbed cause (ADR-011)', async () => {
     const secret = new Error("EACCES: permission denied, open '/abs/host/path/secret.csv'");
-    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const errorSpy = vi.fn();
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: errorSpy };
 
     // `makeContext` throwing stands in for a handler that hits an INTERNAL catch with a
     // cause (e.g. export-run's "failed to write export files"): the throw happens inside
@@ -114,10 +115,10 @@ describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
     expect(JSON.stringify(res.content)).not.toContain('/abs/host/path');
 
     // The scrubbed cause reached the logger (server-side only), never the client.
-    expect(logger.error).toHaveBeenCalledTimes(1);
-    const [, fields] = (logger.error as ReturnType<typeof vi.fn>).mock.calls[0] as [string, Record<string, unknown>];
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [, fields] = errorSpy.mock.calls[0] as [string, Record<string, unknown>];
     expect(fields['tool']).toBe('ledger_status');
     expect(fields['code']).toBe('INTERNAL');
-    expect(fields['cause']).toMatchObject({ name: 'Error', message: expect.stringContaining('EACCES') });
+    expect(fields['cause']).toMatchObject({ name: 'Error', message: expect.stringContaining('EACCES') as unknown });
   });
 });

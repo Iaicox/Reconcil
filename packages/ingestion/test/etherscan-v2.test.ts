@@ -308,7 +308,7 @@ describe('getHead', () => {
     await expect(adapter(transport).getHead(8453)).rejects.toMatchObject({
       name: 'ProviderError',
       kind: 'provider_error',
-      message: expect.not.stringContaining('Free API'),
+      message: expect.not.stringContaining('Free API') as unknown,
     });
   });
 
@@ -317,7 +317,7 @@ describe('getHead', () => {
     await expect(adapter(transport).getHead(1)).rejects.toMatchObject({
       name: 'ProviderError',
       kind: 'malformed',
-      message: expect.not.stringContaining('not-a-quantity'),
+      message: expect.not.stringContaining('not-a-quantity') as unknown,
     });
   });
 
@@ -348,7 +348,7 @@ describe('getReceipts', () => {
       },
     };
     const { transport, calls } = stub(receiptBody);
-    const receipts = await adapter(transport).getReceipts(1, [
+    const receipts = await adapter(transport).getReceipts!(1, [
       '0xCCC3000000000000000000000000000000000000000000000000000000000003',
     ]);
     expect(receipts).toEqual([
@@ -383,7 +383,7 @@ describe('getReceipts', () => {
       },
     };
     const { transport } = stub(receiptBody);
-    await expect(adapter(transport).getReceipts(1, ['0xccc3'])).rejects.toMatchObject({
+    await expect(adapter(transport).getReceipts!(1, ['0xccc3'])).rejects.toMatchObject({
       name: 'ProviderError',
       kind: 'malformed',
       message: expect.not.stringContaining(hostile) as unknown,
@@ -405,7 +405,7 @@ describe('getReceipts', () => {
       },
     };
     const { transport } = stub(receiptBody);
-    const receipts = await adapter(transport).getReceipts(1, ['0xccc3']);
+    const receipts = await adapter(transport).getReceipts!(1, ['0xccc3']);
     expect(receipts[0]?.l1Fee).toBeNull();
   });
 });
@@ -438,7 +438,7 @@ describe('getBlockByTime', () => {
     const { transport } = stub({ status: '0', message: 'NOTOK', result: 'Free API access is not supported for this chain.' });
     await expect(adapter(transport).getBlockByTime!(8453, 1)).rejects.toMatchObject({
       kind: 'provider_error',
-      message: expect.not.stringContaining('Free API'),
+      message: expect.not.stringContaining('Free API') as unknown,
     });
   });
 });
@@ -468,15 +468,15 @@ describe('estimateTxCount', () => {
 describe('capabilities', () => {
   it('does not expose PRO-only balance capabilities (ADR-009 degradation)', () => {
     const a = adapter(stub({}).transport);
-    expect(a.getTokenMeta).toBeUndefined();
-    expect(a.getNativeBalanceAt).toBeUndefined();
-    expect(a.getErc20BalanceAt).toBeUndefined();
+    expect(typeof a.getTokenMeta).toBe('undefined');
+    expect(typeof a.getNativeBalanceAt).toBe('undefined');
+    expect(typeof a.getErc20BalanceAt).toBe('undefined');
     expect(a.kind).toBe('etherscan-v2');
   });
 
   it('exposes free-tier block/probe capabilities (anchoring + >50k probe)', () => {
     const a = adapter(stub({}).transport);
-    expect(a.getBlockByTime).toBeDefined();
-    expect(a.estimateTxCount).toBeDefined();
+    expect(typeof a.getBlockByTime).toBe('function');
+    expect(typeof a.estimateTxCount).toBe('function');
   });
 });

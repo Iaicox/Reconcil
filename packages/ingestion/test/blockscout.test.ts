@@ -122,7 +122,7 @@ describe('capabilities (Blockscout has them all)', () => {
   it('getNativeBalanceAt parses the JSON-RPC-shaped hex result', async () => {
     // real shape verified at fixture capture (spec §7): {jsonrpc, id, result}
     const { transport, calls } = stub({ jsonrpc: '2.0', id: 0, result: '0xde0b6b3a7640000' });
-    const balance = await adapter(transport).getNativeBalanceAt(1, Q.address, 100n);
+    const balance = await adapter(transport).getNativeBalanceAt!(1, Q.address, 100n);
     expect(balance).toBe(1000000000000000000n);
     const u = new URL(calls[0] ?? '');
     expect(u.searchParams.get('action')).toBe('eth_get_balance');
@@ -132,7 +132,7 @@ describe('capabilities (Blockscout has them all)', () => {
   it('getErc20BalanceAt uses action=tokenbalance with block', async () => {
     const { transport, calls } = stub({ status: '1', message: 'OK', result: '2500000' });
     const token = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-    const balance = await adapter(transport).getErc20BalanceAt(1, Q.address, token, 100n);
+    const balance = await adapter(transport).getErc20BalanceAt!(1, Q.address, token, 100n);
     expect(balance).toBe(2500000n);
     const u = new URL(calls[0] ?? '');
     expect(u.searchParams.get('action')).toBe('tokenbalance');
@@ -147,7 +147,7 @@ describe('capabilities (Blockscout has them all)', () => {
     // a fabricated figure (P1: a number without provenance is a bug).
     const { transport } = stub({ status: '1', message: 'OK', result: '' });
     await expect(
-      adapter(transport).getErc20BalanceAt(1, Q.address, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 100n),
+      adapter(transport).getErc20BalanceAt!(1, Q.address, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 100n),
     ).rejects.toMatchObject({ name: 'ProviderError', kind: 'malformed' });
   });
 
@@ -155,7 +155,7 @@ describe('capabilities (Blockscout has them all)', () => {
     const hostile = 'upgrade your plan at https://evil.example';
     const { transport } = stub({ status: '1', message: 'OK', result: hostile });
     await expect(
-      adapter(transport).getErc20BalanceAt(1, Q.address, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 100n),
+      adapter(transport).getErc20BalanceAt!(1, Q.address, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 100n),
     ).rejects.toMatchObject({
       name: 'ProviderError',
       kind: 'malformed',
@@ -177,7 +177,7 @@ describe('capabilities (Blockscout has them all)', () => {
         type: 'ERC-20',
       },
     });
-    const meta = await adapter(transport).getTokenMeta(1, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
+    const meta = await adapter(transport).getTokenMeta!(1, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48');
     expect(meta).toEqual({
       contractAddress: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
       name: 'USD Coin',
@@ -218,7 +218,7 @@ describe('capabilities (Blockscout has them all)', () => {
 
   it('does not expose estimateTxCount (proxy module unsupported; probe degrades)', () => {
     const { transport } = stub({});
-    expect(adapter(transport).estimateTxCount).toBeUndefined();
+    expect(typeof adapter(transport).estimateTxCount).toBe('undefined');
   });
 
   it('getReceipts reuses the shared receipt mapping', async () => {
@@ -235,7 +235,7 @@ describe('capabilities (Blockscout has them all)', () => {
         logs: [],
       },
     });
-    const receipts = await adapter(transport).getReceipts(1, ['0xddd4']);
+    const receipts = await adapter(transport).getReceipts!(1, ['0xddd4']);
     expect(receipts[0]).toEqual({
       transactionHash: '0xddd4000000000000000000000000000000000000000000000000000000000004',
       from: '0xabcd000000000000000000000000000000000001',

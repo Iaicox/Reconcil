@@ -83,7 +83,7 @@ describe('handleHijackedTransport — H14 error path after hijack', () => {
     expect(destroy).not.toHaveBeenCalled();
     // logged via serializeError, not the raw thrown value/message text (§4/ADR-011)
     expect(errors).toHaveLength(1);
-    expect(errors).toEqual([expect.objectContaining({ msg: expect.stringContaining('handleRequest failed') })]);
+    expect(errors).toEqual([expect.objectContaining({ msg: expect.stringContaining('handleRequest failed') as unknown })]);
   });
 
   it('no hang: rejection after headers already sent → destroy() the socket, no double-write', async () => {
@@ -131,7 +131,7 @@ describe('buildHttpApp — DNS-rebinding Host validation (minor, defense-in-dept
     // loosely on the reason so a future SDK bump that changes the code doesn't
     // silently stop testing the right thing).
     expect(res.statusCode).toBeGreaterThanOrEqual(400);
-    const body = res.json() as { error?: { message?: string } };
+    const body = res.json<{ error?: { message?: string } }>();
     expect(body.error?.message).toContain('Invalid Host header');
     await app.close();
   });
