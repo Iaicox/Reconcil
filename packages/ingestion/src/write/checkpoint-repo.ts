@@ -5,7 +5,7 @@
  */
 import type { ChainConfig } from '@reconcil/core';
 import { chainEvents, ingestionCheckpoints, tokens, type Db } from '@reconcil/db';
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import type { NormalizedEvent } from '../types.js';
 import { insertEventRows, toChainEventRow } from './event-writer.js';
 import { tokenInsertValues, tokenKey } from './token-repo.js';
@@ -146,6 +146,27 @@ export async function commitAnchor(
   });
 }
 
+/**
+ * Commit one ingestion page: token resolution + event insert + cursor/status
+ * advance, all in one transaction. Two guards on the checkpoint UPDATE
+ * (belt-and-braces alongside the caller's own H7 regression check):
+ *
+ *  - The cursor can never move backwards, at the SQL level, regardless of what
+ *    `next.lastProcessedBlock` says: `GREATEST(current, next)` on the SET
+ *    clause. Chosen over a `WHERE last_processed_block <= next` predicate
+ *    because events for this page are already committed in the same tx
+ *    (idempotent, ADR-005) — a clamped write here is harmless and always
+ *    matches a row, whereas a WHERE-predicate guard could 0-row-noop a
+ *    legitimate call silently.
+ *  - A manually-`paused` checkpoint is left completely untouched (`WHERE
+ *    status <> 'paused'`) — neither the cursor nor the status moves, so an
+ *    operator pause cannot be defeated by a stray retried/duplicate job. This
+ *    is deliberately a WHERE-predicate 0-row noop: skipping is the desired
+ *    outcome here, not an error. A stored `'error'` status is NOT guarded —
+ *    a later successful run correctly overwrites it (that recovery path must
+ *    keep working); nothing currently writes `'error'` or clears `last_error`
+ *    (tracked separately — see apps/worker/src/onboard.ts's failure-path note).
+ */
 export async function commitPage(
   db: Db,
   target: CommitTarget,
@@ -185,11 +206,16 @@ export async function commitPage(
 
     await tx
       .update(ingestionCheckpoints)
-      .set({ lastProcessedBlock: next.lastProcessedBlock, status: next.status, updatedAt: new Date() })
+      .set({
+        lastProcessedBlock: sql`GREATEST(${ingestionCheckpoints.lastProcessedBlock}, ${next.lastProcessedBlock})`,
+        status: next.status,
+        updatedAt: new Date(),
+      })
       .where(and(
         eq(ingestionCheckpoints.chainId, target.chainId),
         eq(ingestionCheckpoints.address, target.address),
         eq(ingestionCheckpoints.stream, target.stream),
+        ne(ingestionCheckpoints.status, 'paused'),
       ));
 
     return inserted;

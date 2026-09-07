@@ -15,6 +15,13 @@
       "when": 1784830179675,
       "tag": "0001_milky_shockwave",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785963610328,
+      "tag": "0002_seed_curated_tokens",
+      "breakpoints": true
     }
   ]
 }

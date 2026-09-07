@@ -26,9 +26,15 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: site/package-lock.json
+      # ADR-011 transitive guard (same script ci.yml runs): the checker has zero deps of
+      # its own (just node:fs/node:path + the root cruiser config), so it runs against a
+      # plain checkout — no pnpm/root install needed in this standalone npm job.
+      - name: ADR-011 supply-chain guard
+        working-directory: .
+        run: node scripts/check-no-signing-libs.cjs
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       # `npm test` builds the static export first, then runs the suite against it —

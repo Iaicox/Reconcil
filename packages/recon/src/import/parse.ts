@@ -4,10 +4,14 @@
  * and the tool handler owns reading `file_path`. Row failures are collected and
  * reported, never thrown (the row is skipped, first fault per row wins). Amounts
  * stay decimal strings (ADR-004); counterparty names stay raw (sanitized only at
- * the response edge, P7/ADR-011). Columns are auto-detected from the header and
- * can be overridden per the `mapping` input.
+ * the response edge, P7/ADR-011) — `external_ref` differs: it is the dedupe key and
+ * is echoed by three tools (import/suggest/status), so it is sanitized HERE, at the
+ * parser edge, and the scrubbed value is what gets stored/deduped/echoed. Row-error
+ * `message` strings never interpolate a raw cell value (C6) — the raw row survives
+ * only in `payload` (server-side audit, never returned). Columns are auto-detected
+ * from the header and can be overridden per the `mapping` input.
  */
-import { isoDateString, nonNegativeDecimalString } from '@reconcil/core';
+import { isoDateString, nonNegativeDecimalString, sanitize } from '@reconcil/core';
 import { parse } from 'csv-parse/sync';
 
 import type {
@@ -33,6 +37,15 @@ const FIELD_ALIASES: Record<CanonicalField, readonly string[]> = {
 
 const CANONICAL_FIELDS = Object.keys(FIELD_ALIASES) as CanonicalField[];
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+// external_ref is import-sourced (hostile, ADR-011/C6): it is the dedupe key and is
+// echoed by three tools (import/suggest/status), same exposure as counterparty_name.
+// Sanitizing here — the parser edge — means the sanitized value is what ever gets
+// stored/deduped/echoed; nothing downstream sees the raw cell.
+const EXTERNAL_REF_MAX = 128;
+// vat_rate is a percent (schema comment, core), so values above 100 are nonsensical
+// and would otherwise round-trip cleanly into the journal exporter.
+const VAT_RATE_MAX = 100;
 
 const normalizeHeader = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -126,12 +139,22 @@ export function parseInvoiceCsv(content: string, opts: ParseOptions = {}): Parse
       return v === '' ? undefined : v;
     };
 
-    const externalRef = cell('external_ref');
-    if (externalRef === undefined) { errors.push({ row: rowNo, code: 'MISSING_FIELD', message: 'external_ref is empty' }); continue; }
+    const externalRefRaw = cell('external_ref');
+    if (externalRefRaw === undefined) { errors.push({ row: rowNo, code: 'MISSING_FIELD', message: 'external_ref is empty' }); continue; }
+    const externalRef = sanitize(externalRefRaw, { maxLength: EXTERNAL_REF_MAX }).display;
+    // sanitize() falls back to the '(unnamed)' placeholder when nothing allowlisted
+    // survives — for a required, dedupe-key field that means "empty", not a value.
+    if (externalRef === '(unnamed)') {
+      errors.push({ row: rowNo, code: 'MISSING_FIELD', message: 'external_ref is empty after sanitization' });
+      continue;
+    }
 
     const amount = cell('amount');
     if (amount === undefined) { errors.push({ row: rowNo, code: 'MISSING_FIELD', message: 'amount is empty' }); continue; }
-    if (!isDecimal(amount)) { errors.push({ row: rowNo, code: 'INVALID_AMOUNT', message: `amount is not a non-negative decimal: ${amount}` }); continue; }
+    // Row-error messages never echo the raw cell (C6, ADR-011): row + code + field name
+    // are enough to drill down via the row number; the raw value stays in `payload`
+    // (stored server-side only, never returned).
+    if (!isDecimal(amount)) { errors.push({ row: rowNo, code: 'INVALID_AMOUNT', message: 'amount is not a non-negative decimal' }); continue; }
 
     const currencyRaw = cell('currency') ?? defaults.currency;
     if (currencyRaw === undefined) { errors.push({ row: rowNo, code: 'MISSING_CURRENCY', message: 'currency is empty and no default given' }); continue; }
@@ -141,7 +164,7 @@ export function parseInvoiceCsv(content: string, opts: ParseOptions = {}): Parse
     let direction: Direction;
     if (directionRaw !== undefined) {
       if (directionRaw !== 'receivable' && directionRaw !== 'payable') {
-        errors.push({ row: rowNo, code: 'INVALID_DIRECTION', message: `direction must be receivable|payable, got ${directionRaw}` });
+        errors.push({ row: rowNo, code: 'INVALID_DIRECTION', message: 'direction must be receivable|payable' });
         continue;
       }
       direction = directionRaw;
@@ -151,29 +174,32 @@ export function parseInvoiceCsv(content: string, opts: ParseOptions = {}): Parse
 
     const issuedOn = cell('issued_on');
     if (issuedOn !== undefined && !isoDateString.safeParse(issuedOn).success) {
-      errors.push({ row: rowNo, code: 'INVALID_DATE', message: `issued_on is not an ISO date: ${issuedOn}` });
+      errors.push({ row: rowNo, code: 'INVALID_DATE', message: 'issued_on is not an ISO date' });
       continue;
     }
     const dueOn = cell('due_on');
     if (dueOn !== undefined && !isoDateString.safeParse(dueOn).success) {
-      errors.push({ row: rowNo, code: 'INVALID_DATE', message: `due_on is not an ISO date: ${dueOn}` });
+      errors.push({ row: rowNo, code: 'INVALID_DATE', message: 'due_on is not an ISO date' });
       continue;
     }
 
     const vatRate = cell('vat_rate') ?? defaults.vatRate;
-    if (vatRate !== undefined && !isDecimal(vatRate)) {
-      errors.push({ row: rowNo, code: 'INVALID_VAT', message: `vat_rate is not a non-negative decimal: ${vatRate}` });
+    // vat_rate is a percent (schema comment, core): bound it at 100 in addition to the
+    // non-negative decimal shape, or a 99999 "percent" would import cleanly and later
+    // feed the journal exporter.
+    if (vatRate !== undefined && (!isDecimal(vatRate) || Number(vatRate) > VAT_RATE_MAX)) {
+      errors.push({ row: rowNo, code: 'INVALID_VAT', message: 'vat_rate is not a non-negative decimal of at most 100' });
       continue;
     }
     const vatAmount = cell('vat_amount');
     if (vatAmount !== undefined && !isDecimal(vatAmount)) {
-      errors.push({ row: rowNo, code: 'INVALID_VAT', message: `vat_amount is not a non-negative decimal: ${vatAmount}` });
+      errors.push({ row: rowNo, code: 'INVALID_VAT', message: 'vat_amount is not a non-negative decimal' });
       continue;
     }
 
     const expectedRaw = cell('expected_address');
     if (expectedRaw !== undefined && !ADDRESS_RE.test(expectedRaw)) {
-      errors.push({ row: rowNo, code: 'INVALID_ADDRESS', message: `expected_address is not a 0x-address: ${expectedRaw}` });
+      errors.push({ row: rowNo, code: 'INVALID_ADDRESS', message: 'expected_address is not a 0x-address' });
       continue;
     }
 

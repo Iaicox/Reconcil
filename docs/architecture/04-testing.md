@@ -58,7 +58,10 @@ hand-verified against a block explorer once, then guarded by tests forever.
 > figures. (b) **RESOLVED (PR #15):** a `txlistinternal` stream (ADR-005 d2, `getInternalTxs`
 > on both adapters, normalized to `native_transfer` at sentinel `−(1000+n)`) supplies the
 > contract-initiated native inflows `txlist` omits, so the freelancer native balance reconciles
-> to `eth_get_balance` exactly (the 5 internal transfers sum to the former R3 gap). (c) Base
+> to `eth_get_balance` exactly (the 5 internal transfers sum to the former R3 gap). Since the
+> internal-transfer slice the same reconciliation also runs through the PRODUCTION path —
+> `ingestOnce` over the recorded fixtures (`goldenIngestFixture` + `reconcile.itest.ts`), not
+> just the seed harness's own replay loop. (c) Base
 > (8453) gas still needs OP-stack RPC receipts (03-ingestion.md §6 `receipts-opstack`), the same
 > capture gap. (d) The one-time block-explorer values are frozen as recorded fixtures + pinned
 > `numbers`, guarded by `numbers.itest.ts`.
