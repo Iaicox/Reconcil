@@ -27,7 +27,7 @@ alternatives.
 ## Commands
 
 ```bash
-pnpm install      # Node >= 22.12, pnpm 11 (packageManager is pinned)
+pnpm install      # Node >= 22.13, pnpm 11 (packageManager is pinned)
 pnpm build        # turbo run build — tsc -b with project references
 pnpm typecheck    # turbo run typecheck (build-ordered tsc -b)
 pnpm lint         # eslint per package (flat config at repo root)

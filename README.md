@@ -93,7 +93,7 @@ pnpm check:supply-chain # ADR-011 transitive guard: same denylist, scans both lo
 pnpm smoke:compose # full self-host stack + stdio MCP client, then tears down
 ```
 
-Node ≥ 22.12, pnpm 11. Details in [Contributing](docs/guide/07-contributing.md).
+Node ≥ 22.13, pnpm 11. Details in [Contributing](docs/guide/07-contributing.md).
 
 ## License
 
