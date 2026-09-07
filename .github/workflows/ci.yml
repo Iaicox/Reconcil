@@ -1,6 +1,6 @@
 # CI plan: docs/architecture/04-testing.md §7. Jobs: `check`, `test`, `schema-parity`,
 # `integration` (testcontainers Postgres), plus the live-LLM `evals-smoke` (PR) and
-# `evals-full` (nightly + manual) — the only jobs that use ANTHROPIC_API_KEY /
+# `evals-full` (manual / pre-demo) — the only jobs that use ANTHROPIC_API_KEY /
 # ANTHROPIC_BASE_URL.
 
 name: ci
@@ -10,7 +10,10 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: '0 6 * * *' # nightly evals-full (UTC)
+    # Weekly ecosystem-drift canary for the deterministic jobs only. `evals-full` is
+    # deliberately NOT on this trigger: it is 30 cases x 3 runs of live LLM traffic, and
+    # running it against an unchanged `main` bought nothing while draining the API budget.
+    - cron: '0 6 * * 1' # Mondays (UTC)
   workflow_dispatch: {}
 
 # Least privilege for GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions):
@@ -128,12 +131,13 @@ jobs:
           # Optional gateway for Anthropic traffic; unset repo variable ⇒ the public API host.
           ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || 'https://api.anthropic.com' }}
 
-  # Full suite (30 cases × 3 runs) + published scorecard. Nightly and on-demand only —
-  # never on every PR (cost). Applies the demo-readiness gate (§6): a failure exits
-  # non-zero and marks the run red.
+  # Full suite (30 cases × 3 runs) + published scorecard. On demand only (and pre-demo) —
+  # never on every PR, and no longer nightly (cost: it is the only job that spends real API
+  # budget, and `main` does not change on most days). Applies the demo-readiness gate (§6):
+  # a failure exits non-zero and marks the run red.
   evals-full:
     needs: evals-preflight
-    if: needs.evals-preflight.outputs.has_key == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    if: needs.evals-preflight.outputs.has_key == 'true' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
