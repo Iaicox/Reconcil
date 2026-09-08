@@ -50,6 +50,19 @@ describe('numberToDecimalString — provider precision', () => {
     expect(numberToDecimalString(1.5e-7)).toBe('0.00000015');
   });
 
+  it('rejects an overflowing exponent rather than pinning a nonsense price', () => {
+    // Both used to be rejected because JSON.parse had already collapsed them to Infinity.
+    // Keeping the source text must not quietly widen the accepted MAGNITUDE: past
+    // decimal.js's maxE this returns the literal string 'Infinity', and below it a
+    // 10,001-digit price — either one pinned into price_snapshots instead of failing
+    // over to the next provider.
+    expect(numberToDecimalString('1e999999999999999999')).toBeNull();
+    expect(numberToDecimalString('1e10000')).toBeNull();
+    expect(numberToDecimalString('-1e10000')).toBeNull();
+    // A large but float-representable magnitude is accepted, exactly as before.
+    expect(numberToDecimalString('1e300')).toBe(`1${'0'.repeat(300)}`);
+  });
+
   it('rejects a string that is not a JSON number, so a symbol never becomes a price', () => {
     expect(numberToDecimalString('USD')).toBeNull();
     expect(numberToDecimalString('')).toBeNull();

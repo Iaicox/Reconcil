@@ -57,7 +57,16 @@ const JSON_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
  */
 export function numberToDecimalString(n: unknown): DecimalString | null {
   if (typeof n === 'string') {
-    return JSON_NUMBER.test(n) ? (new D(n).toFixed() as DecimalString) : null;
+    // Two guards, and both matter. `Number.isFinite` bounds the MAGNITUDE exactly as the
+    // number branch below always did: `1e10000` used to arrive already collapsed to
+    // Infinity and be rejected, and it must still be — otherwise a hostile or corrupt body
+    // pins a 10,001-digit "price", or (past decimal.js's maxE) the literal string
+    // "Infinity", into price_snapshots instead of failing over to the next provider.
+    // What the source text buys is the last DIGITS, never a wider exponent range: any
+    // price a provider really quotes is float-representable in magnitude.
+    if (!JSON_NUMBER.test(n) || !Number.isFinite(Number(n))) return null;
+    const d = new D(n);
+    return d.isFinite() ? (d.toFixed() as DecimalString) : null;
   }
   if (typeof n !== 'number' || !Number.isFinite(n)) return null;
   return new D(String(n)).toFixed() as DecimalString;
