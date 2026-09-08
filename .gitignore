@@ -12,6 +12,7 @@ coverage/
 
 # local runtime artifacts
 exports/
+eval-reports/
 .kanbn/
 
 # local-only Claude Code settings
