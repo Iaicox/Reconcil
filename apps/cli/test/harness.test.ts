@@ -139,7 +139,7 @@ describe('harness → gate (hermetic)', () => {
     expect(guardrail!.runs[0]!.answer).toContain("I can't provide investment advice");
   });
 
-  it('reseeds per run for Face B (write tools mutate shared state), once for Face A (D3)', async () => {
+  it('reseeds before every run, so run 2 never inherits run 1‑s writes (D3)', async () => {
     const RECON_CASE: EvalCase = {
       id: 'recon-status-x',
       face: 'B',
@@ -160,8 +160,10 @@ describe('harness → gate (hermetic)', () => {
       return Promise.resolve({ ctx: {} as never });
     };
     await runSuite([BALANCE_CASE, RECON_CASE], 3, deps(answers, { seedCase: countingSeed }));
-    // Face A is read-only → seeded once and shared across the 3 runs; Face B writes → reseeded each run.
-    expect(seedCalls.filter((id) => id === 'bal-x')).toHaveLength(1);
+    // Face is not the discriminator: dir-001 and track-001 are Face A and call WRITE tools,
+    // and a live run showed run 1 creating the directory entity that runs 2 and 3 then found
+    // already present (and correctly declined to re-create) — scored as 2 trajectory failures.
+    expect(seedCalls.filter((id) => id === 'bal-x')).toHaveLength(3);
     expect(seedCalls.filter((id) => id === 'recon-status-x')).toHaveLength(3);
   });
 });

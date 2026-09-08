@@ -29,15 +29,17 @@ export async function runSuite(
 ): Promise<CaseResult[]> {
   const results: CaseResult[] = [];
   for (const evalCase of dataset) {
-    // Face A tools are read-only, so seed once per case and share the static data across
-    // runs (only the agent session and its persisted tool_calls differ). Face B tools
-    // WRITE — a confirm flips a leg suggested→confirmed, so run 2's suggest would find that
-    // settlement already consumed and confirm would fail; each run needs a clean scenario.
-    // seedCase truncates first, so re-seeding per run is safe (D3, 04-testing.md §5).
-    let env = await deps.seedCase(evalCase);
     const runResults: RunResult[] = [];
     for (let runIndex = 0; runIndex < runs; runIndex++) {
-      if (runIndex > 0 && evalCase.face === 'B') env = await deps.seedCase(evalCase);
+      // Every run gets a clean world. This used to reseed only for Face B, on the premise
+      // that "Face A tools are read-only" — which is false: dir-001 and track-001 are Face A
+      // and call WRITE tools. A live dir-001 run showed exactly that, run 1 creating the
+      // address-book entity and runs 2–3 finding it already there and (correctly) declining
+      // to re-create it, scored 1/3. Face was never the right discriminator; with the
+      // trajectory allowlist gone, no case can promise what the model will call at all.
+      // seedCase truncates first, so this is safe; it costs one local reseed per run
+      // (D3, 04-testing.md §5) against ~90 LLM sessions, which is not the expensive half.
+      const env = await deps.seedCase(evalCase);
       const transcript = await deps.produce({ eval: evalCase, ctx: env.ctx, runIndex });
       const resolver = await deps.makeResolver(env.ctx, transcript);
       // The transcript is kept alongside the verdicts, not discarded with the session —
