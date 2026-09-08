@@ -81,7 +81,15 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   // H16: assert the smoke filter matched every SMOKE_ID before any container/provisioning
   // work (fail fast, cheap) — a renamed/removed id must fail loudly, not silently shrink the
   // live PR gate (or, if all six drift, run ZERO cases and report PASS).
-  const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : all;
+  // --cases narrows to specific ids, for investigating a handful of failures without
+  // paying for the whole suite. It filters the dataset only; the prompt, the tools and
+  // every schema the model sees are identical either way.
+  const selected = args.cases.length > 0 ? all.filter((c) => args.cases.includes(c.id)) : all;
+  if (args.cases.length > 0 && selected.length !== args.cases.length) {
+    const missing = args.cases.filter((id) => !all.some((c) => c.id === id));
+    throw new Error(`unknown case id(s): ${missing.join(', ')}`);
+  }
+  const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : selected;
 
   // Route recon-backed exports (a Face B journal-draft case's export_journal_drafts) to a
   // throwaway dir instead of cwd/exports (baseDir default). withTempExportDir owns creation
