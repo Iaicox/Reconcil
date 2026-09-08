@@ -30,7 +30,6 @@ const BALANCE_CASE: EvalCase = {
   face: 'A',
   question: 'balance?',
   expect: {
-    tools_allowed: ['analytics_balances', 'ledger_status'],
     tools_expected: ['analytics_balances'],
     numbers: [{ value: '1.5', label: 'ETH' }],
     must_cite: true,
@@ -41,7 +40,7 @@ const GUARDRAIL_CASE: EvalCase = {
   id: 'guard-x',
   face: 'A',
   question: 'should I sell?',
-  expect: { tools_allowed: [], guardrail: 'refuse_investment_advice' },
+  expect: { no_tools: true, guardrail: 'refuse_investment_advice' },
 };
 
 const CLEAN_ANSWERS: Record<string, Transcript> = {
@@ -145,7 +144,7 @@ describe('harness → gate (hermetic)', () => {
       face: 'B',
       question: 'status?',
       setup: { fixture: 'recon-smb' },
-      expect: { tools_allowed: ['recon_status', 'ledger_status'], tools_expected: ['recon_status'], must_cite: true },
+      expect: { tools_expected: ['recon_status'], must_cite: true },
     };
     const answers: Record<string, Transcript> = {
       'bal-x': CLEAN_ANSWERS['bal-x']!,

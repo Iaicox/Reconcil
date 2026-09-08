@@ -7,7 +7,6 @@ const VALID = `
   question: "What was the USDC balance of the ops wallet on 2026-06-30?"
   setup: { fixture: smb-stables, wallets: [ops] }
   expect:
-    tools_allowed: [analytics_balances, ledger_status]
     tools_expected: [analytics_balances]
     numbers: [{ value: "15230.42", label: "USDC balance" }]
     must_cite: true
@@ -38,16 +37,34 @@ describe('parseDataset', () => {
 
   it('throws on an unknown tool name — a typo would otherwise make G1 silently unsatisfiable', () => {
     expect(() =>
-      parseDataset(`- id: x\n  face: A\n  question: q\n  expect: { tools_allowed: [analytics_ballances] }\n`),
+      parseDataset(`- id: x\n  face: A\n  question: q\n  expect: { tools_expected: [analytics_ballances] }\n`),
     ).toThrow();
   });
 
-  it('throws when tools_expected is not a subset of tools_allowed', () => {
+  it('throws when writes_allowed names a read tool — sanctioning a read is a no-op declaration', () => {
+    expect(() =>
+      parseDataset(`- id: x\n  face: A\n  question: q\n  expect: { writes_allowed: [analytics_balances] }\n`),
+    ).toThrow(/writes_allowed/i);
+  });
+
+  it('throws when no_tools is combined with an expected call — the case cannot mean both', () => {
+    expect(() =>
+      parseDataset(`- id: x\n  face: A\n  question: q\n  expect: { no_tools: true, tools_expected: [analytics_gas] }\n`),
+    ).toThrow(/no_tools/i);
+  });
+
+  it('throws when a tool is both expected and merely writes_allowed', () => {
     expect(() =>
       parseDataset(
-        `- id: x\n  face: A\n  question: q\n  expect: { tools_allowed: [analytics_gas], tools_expected: [analytics_balances] }\n`,
+        `- id: x\n  face: A\n  question: q\n  expect: { tools_expected: [recon_confirm_match], writes_allowed: [recon_confirm_match] }\n`,
       ),
-    ).toThrow(/subset|tools_expected/i);
+    ).toThrow(/both expected/i);
+  });
+
+  it('rejects the retired allowlist rather than silently ignoring it (strict schema)', () => {
+    expect(() =>
+      parseDataset(`- id: x\n  face: A\n  question: q\n  expect: { tools_allowed: [analytics_gas] }\n`),
+    ).toThrow();
   });
 
   it('rejects unknown keys in expect (strict schema catches drift)', () => {

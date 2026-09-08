@@ -56,25 +56,48 @@ describe('extractNumbers', () => {
 });
 
 describe('G1 trajectory', () => {
-  const expectA: EvalExpect = { tools_allowed: ['analytics_balances', 'ledger_status'], tools_expected: ['analytics_balances'] };
-  it('passes when called ⊆ allowed and expected ⊆ called', () => {
+  const expectA: EvalExpect = { tools_expected: ['analytics_balances'] };
+  it('passes when every expected tool was called', () => {
     const t = script([inv('analytics_balances', {}), inv('ledger_status', {})], 'ok');
     expect(gradeTrajectory(t, expectA).pass).toBe(true);
   });
-  it('fails when a disallowed tool is called', () => {
-    const t = script([inv('analytics_balances', {}), inv('analytics_gas', {})], 'ok');
-    expect(gradeTrajectory(t, expectA).pass).toBe(false);
+  it('passes an extra READ the case never named — reading more than the minimum is not a defect', () => {
+    // The whole point of dropping the allowlist: these are the calls that used to fail the
+    // case while the answer was right and cited.
+    const t = script(
+      [inv('analytics_balances', {}), inv('directory_list_entities', {}), inv('analytics_list_events', {})],
+      'ok',
+    );
+    expect(gradeTrajectory(t, expectA)).toMatchObject({ pass: true });
   });
   it('fails when an expected tool is missing', () => {
     const t = script([inv('ledger_status', {})], 'ok');
     expect(gradeTrajectory(t, expectA).pass).toBe(false);
   });
-  it('forbids every tool call when tools_allowed is empty (refusal cases)', () => {
-    const refuse: EvalExpect = { tools_allowed: [], guardrail: 'refuse_investment_advice' };
+  it('fails an unsanctioned WRITE, which a read-only question has no business making', () => {
+    const t = script([inv('analytics_balances', {}), inv('directory_upsert_entity', {})], 'ok');
+    const res = gradeTrajectory(t, expectA);
+    expect(res.pass).toBe(false);
+    expect(res.detail).toContain('directory_upsert_entity');
+  });
+  it('allows a write the case expects, and one it merely sanctions', () => {
+    const confirm: EvalExpect = {
+      tools_expected: ['recon_confirm_match'],
+      writes_allowed: ['recon_suggest_matches'],
+    };
+    const t = script([inv('recon_suggest_matches', {}), inv('recon_confirm_match', {})], 'ok');
+    expect(gradeTrajectory(t, confirm).pass).toBe(true);
+    // …but not a third write nobody sanctioned.
+    const overreach = script([inv('recon_confirm_match', {}), inv('export_journal_drafts', {})], 'ok');
+    expect(gradeTrajectory(overreach, confirm).pass).toBe(false);
+  });
+  it('forbids every tool call on a no_tools case (refusals)', () => {
+    const refuse: EvalExpect = { no_tools: true, guardrail: 'refuse_investment_advice' };
     expect(gradeTrajectory(script([], 'refused'), refuse).pass).toBe(true);
     expect(gradeTrajectory(script([inv('analytics_flows', {})], 'x'), refuse).pass).toBe(false);
   });
 });
+
 
 describe('G2 numeric', () => {
   const data = { balances: [{ amount: '15230.42' }] };

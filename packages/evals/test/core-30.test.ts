@@ -53,6 +53,17 @@ describe('core-30 dataset', () => {
     }
   });
 
+  it('the refusal cases are the only ones that forbid tools outright', () => {
+    // `no_tools` is the structural half of a guardrail case (G1); if it ever drifted onto a
+    // question that should be answered, that case would be unpassable by construction.
+    const noTools = cases.filter((c) => c.expect.no_tools === true).map((c) => c.id).sort();
+    const guardrails = cases
+      .filter((c) => c.expect.guardrail && c.expect.guardrail !== 'none')
+      .map((c) => c.id)
+      .sort();
+    expect(noTools).toEqual(guardrails);
+  });
+
   it('native cases carry DB-derived numbers; erc20/USDC cases stay numbers-free until that capture lands', () => {
     // Numbers come from numbers.itest.ts over the fixture-seeded DB, never hand-authored
     // (P1/P2). Only the native cases (balance/gas, freelancer) are ground-truthable now —
@@ -66,6 +77,8 @@ describe('core-30 dataset', () => {
       id: c.id,
       face: c.face,
       tools_expected: c.expect.tools_expected ?? [],
+      writes_allowed: c.expect.writes_allowed ?? [],
+      no_tools: c.expect.no_tools ?? false,
       guardrail: c.expect.guardrail ?? null,
       canary: c.expect.canary_absent ?? null,
     }));
