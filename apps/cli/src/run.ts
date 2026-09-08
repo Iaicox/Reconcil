@@ -81,7 +81,15 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   // H16: assert the smoke filter matched every SMOKE_ID before any container/provisioning
   // work (fail fast, cheap) — a renamed/removed id must fail loudly, not silently shrink the
   // live PR gate (or, if all six drift, run ZERO cases and report PASS).
-  const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : all;
+  // --cases narrows to specific ids, for investigating a handful of failures without
+  // paying for the whole suite. It filters the dataset only; the prompt, the tools and
+  // every schema the model sees are identical either way.
+  const selected = args.cases.length > 0 ? all.filter((c) => args.cases.includes(c.id)) : all;
+  if (args.cases.length > 0 && selected.length !== args.cases.length) {
+    const missing = args.cases.filter((id) => !all.some((c) => c.id === id));
+    throw new Error(`unknown case id(s): ${missing.join(', ')}`);
+  }
+  const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : selected;
 
   // Route recon-backed exports (a Face B journal-draft case's export_journal_drafts) to a
   // throwaway dir instead of cwd/exports (baseDir default). withTempExportDir owns creation
@@ -93,7 +101,21 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
     const client = new Anthropic();
     const { db, dispose } = await provisionDb();
     try {
-      const produce = makeAgentProducer({ client, model: args.model });
+      // `args.model` may be an undated alias that silently re-points; record what actually
+      // answered so a red gate can be attributed to the code rather than a moved baseline.
+      const resolvedModels = new Set<string>();
+      const usage = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+      const produce = makeAgentProducer({
+        client,
+        model: args.model,
+        onResolvedModel: (m) => resolvedModels.add(m),
+        onUsage: (u) => {
+          usage.input += u.input;
+          usage.output += u.output;
+          usage.cacheCreation += u.cacheCreation;
+          usage.cacheRead += u.cacheRead;
+        },
+      });
       const seedCase = makeSeedCase(db);
 
       console.error(`running ${String(dataset.length)} cases × ${String(args.runs)} run(s) on ${args.model}…`);
@@ -107,9 +129,30 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
         },
       });
 
+      if (resolvedModels.size > 0) {
+        console.error(`model resolved to: ${[...resolvedModels].sort().join(', ')}`);
+      }
+      // Cached input bills at a fraction of new input, so the read/creation split is the
+      // whole point of the cache breakpoint in agent.ts — print it rather than assume it.
+      const cachedShare = usage.cacheRead + usage.input === 0
+        ? 0
+        : Math.round((usage.cacheRead / (usage.cacheRead + usage.input)) * 100);
+      console.error(
+        `tokens — input ${String(usage.input)}, cache read ${String(usage.cacheRead)} ` +
+          `(${String(cachedShare)}% of input served from cache), cache writes ` +
+          `${String(usage.cacheCreation)}, output ${String(usage.output)}`,
+      );
+
       const gate = evaluateGate(cases);
       const report = buildReport(
-        { suite: args.suite, model: args.model, runs: args.runs, generatedAt: new Date().toISOString() },
+        {
+          suite: args.suite,
+          model: args.model,
+          // exactOptionalPropertyTypes: omit the key entirely rather than set undefined.
+          ...(resolvedModels.size > 0 ? { resolvedModel: [...resolvedModels].sort().join(', ') } : {}),
+          runs: args.runs,
+          generatedAt: new Date().toISOString(),
+        },
         cases,
         gate,
       );

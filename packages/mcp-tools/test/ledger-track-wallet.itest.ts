@@ -15,6 +15,12 @@ let S: Seeder;
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:16').start();
   pool = new Pool({ connectionString: container.getConnectionUri() });
+  // A Pool with no 'error' listener turns a server-side disconnect into an UNHANDLED
+  // error — apps/mcp-server/src/{http,stdio}.ts attach one for exactly this reason.
+  // Stopping the container in afterAll IS such a disconnect: on a slow machine the
+  // shutdown notice (57P01) can reach an idle client before its socket finishes closing,
+  // which failed whole CI runs while every test passed.
+  pool.on('error', () => { /* expected while the container is torn down */ });
   await runMigrations(pool);
   db = createDb(pool);
   S = makeSeeder(pool, db);

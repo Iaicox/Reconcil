@@ -22,15 +22,18 @@ export interface Args {
   suite: string;
   runs: number;
   smoke: boolean;
+  /** Explicit case ids; empty = the whole suite. Selection only — nothing the model sees. */
+  cases: string[];
   model: string;
   out: string;
 }
 
 export function parseArgs(argv: string[]): Args {
-  const args: Args = { suite: 'core', runs: 3, smoke: false, model: DEFAULT_MODEL, out: 'eval-reports' };
+  const args: Args = { suite: 'core', runs: 3, smoke: false, cases: [], model: DEFAULT_MODEL, out: 'eval-reports' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--smoke') args.smoke = true;
+    else if (a === '--cases') args.cases = (argv[++i] ?? '').split(',').map((c) => c.trim()).filter(Boolean);
     else if (a === '--suite') args.suite = argv[++i] ?? args.suite;
     else if (a === '--runs') args.runs = Number(argv[++i] ?? args.runs);
     else if (a === '--model') args.model = argv[++i] ?? args.model;
