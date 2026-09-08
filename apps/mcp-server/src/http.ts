@@ -12,6 +12,7 @@ import { Pool } from 'pg';
 import { parseBearerToken, resolveTenantByBearer } from './auth.js';
 import { DEFAULT_PORT, loadConfig, resolveAllowedHosts, resolveTrustProxy } from './config.js';
 import { createServer } from './server.js';
+import { installShutdown } from './shutdown.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -266,13 +267,16 @@ async function main(): Promise<void> {
     ...(trustProxy !== undefined ? { trustProxy } : {}),
   });
 
-  const shutdown = async (): Promise<void> => {
-    await app.close();
-    await pool.end();
-  };
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-    process.once(sig, () => { void shutdown().catch(() => {}).finally(() => { process.exit(0); }); });
-  }
+  // Fastify closes before the pg pool, so an in-flight tool call is not severed
+  // mid-transaction. Shared with stdio.ts (shutdown.ts) — this used to exit 0 even when
+  // the close threw, reporting a clean shutdown that had not happened.
+  installShutdown({
+    logger,
+    close: async () => {
+      await app.close();
+      await pool.end();
+    },
+  });
 
   await app.listen({ port: cfg.PORT, host: '0.0.0.0' });
   logger.info('mcp-server http ready', { port: cfg.PORT });

@@ -8,6 +8,7 @@ import { Pool } from 'pg';
 import { loadConfig } from './config.js';
 import { createStderrLogger } from './logger.js';
 import { createServer } from './server.js';
+import { installShutdown } from './shutdown.js';
 
 /**
  * stdio entrypoint — the self-host default for Claude Desktop/Code (ADR-012).
@@ -18,9 +19,6 @@ import { createServer } from './server.js';
  * — a stray stdout log line would corrupt the stream.
  */
 const logger = createStderrLogger('mcp-server:stdio');
-
-/** Worker's shutdown timeout (apps/worker/src/main.ts) — same grace period. */
-const FORCE_EXIT_TIMEOUT_MS = 10_000;
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -36,30 +34,17 @@ async function main(): Promise<void> {
   await server.connect(new StdioServerTransport());
   logger.info('mcp-server stdio ready', { tenant: cfg.SELF_HOST_TENANT_SLUG });
 
-  // Shutdown parity with apps/worker/src/main.ts: idempotent flag, close the MCP
-  // server/transport (Protocol.close() cascades to transport.close()) before the
-  // pg pool so no in-flight tool call is severed mid-transaction, a forced-exit
-  // timer in case a close() hangs, and handlers registered only now that `server`
-  // exists (the bug: previously they closed only the pool, `server` undefined).
-  let shuttingDown = false;
-  const shutdown = async (signal: string): Promise<void> => {
-    if (shuttingDown) return; // ignore a second SIGINT/SIGTERM
-    shuttingDown = true;
-    logger.info('shutting down', { signal });
-    const force = setTimeout(() => { logger.error('shutdown timed out; forcing exit'); process.exit(1); }, FORCE_EXIT_TIMEOUT_MS);
-    force.unref();
-    try {
+  // Shutdown parity with apps/worker/src/main.ts (shutdown.ts): the MCP server/transport
+  // closes (Protocol.close() cascades to transport.close()) BEFORE the pg pool, so no
+  // in-flight tool call is severed mid-transaction. Registered only now that `server`
+  // exists — the original bug here was handlers that closed only the pool.
+  installShutdown({
+    logger,
+    close: async () => {
       await server.close();
       await pool.end();
-      process.exit(0);
-    } catch (err) {
-      logger.error('shutdown error', { err: serializeError(err) });
-      process.exit(1);
-    }
-  };
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, () => { void shutdown(signal); });
-  }
+    },
+  });
 }
 
 // Start only when run directly (node dist/stdio.js) — importing this module in a
