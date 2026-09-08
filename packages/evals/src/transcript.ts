@@ -48,17 +48,28 @@ export function canonicalDecimal(raw: string): string | null {
 }
 
 /**
- * Blank the spans that are not figures: full 0x-hex runs, and ISO dates with an optional
- * time (`2026-06-30`, `2026-06-30T12:34:56.789Z`). Shared, so `extractNumbers` and the
- * failure-message excerpt in numeric.ts cannot disagree about what counts as a number —
- * the excerpt has to point at the same token the check rejected. `blank` decides whether
- * a span collapses (tokenising) or keeps its width (index-preserving excerpts).
- * Fixed repetition counts, no nested quantifiers ⇒ ReDoS-safe.
+ * Blank the spans that are not figures, so `extractNumbers` never reads one as a quantity:
+ *
+ *  - full 0x-hex runs (addresses, tx hashes);
+ *  - ISO dates with an optional time (`2026-06-30`, `2026-06-30T12:34:56.789Z`);
+ *  - digits glued to the end of a word (`ERC-20`, `ERC20`, `sha256`). A live cover-001 run
+ *    answered "the ERC-20 stream is still queued" and was scored as a fabricated −20: the
+ *    hyphen belongs to the standard's name, not to a sign, and the 20 was never a
+ *    quantity. Only a digit run ADJACENT to letters is masked, so a standalone figure —
+ *    always preceded by whitespace, punctuation or start — is untouched, and a unit
+ *    written the other way round ("1.5ETH") still reads as 1.5.
+ *
+ * Shared, so `extractNumbers` and the failure-message excerpt in numeric.ts cannot
+ * disagree about what counts as a number — the excerpt has to point at the same token the
+ * check rejected. `blank` decides whether a span collapses (tokenising) or keeps its width
+ * (index-preserving excerpts). Fixed repetition counts and single bounded character
+ * classes throughout, no nested quantifiers ⇒ ReDoS-safe.
  */
 export function maskNonFigureSpans(text: string, blank: (match: string) => string): string {
   return text
     .replace(/0x[0-9a-fA-F]+/g, blank)
-    .replace(/\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?/g, blank);
+    .replace(/\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?/g, blank)
+    .replace(/[A-Za-z]+-?\d[\d.]*/g, blank);
 }
 
 /**

@@ -44,6 +44,16 @@ describe('extractNumbers', () => {
     expect(extractNumbers('computed at 2026-06-30T12:34:56.789Z')).toEqual(new Set());
     expect(extractNumbers('window 2026-06-01 to 2026-06-30 cost 0.5 ETH')).toEqual(new Set(['0.5']));
   });
+  it('reads no figure out of an identifier that ends in digits', () => {
+    // Live cover-001 (2026-09-08): "the ERC-20 stream is still queued" was scored as a
+    // FABRICATED −20. The hyphen is part of a standard's name, not a minus sign, and the
+    // 20 is not a quantity either. Same class as the date fragments: text shaped like a
+    // number that was never a figure.
+    expect(extractNumbers('the ERC-20 stream is still queued')).toEqual(new Set());
+    expect(extractNumbers('ERC20 and sha256 and base64')).toEqual(new Set());
+    expect(extractNumbers('the ERC-20 stream holds 0.5 ETH')).toEqual(new Set(['0.5']));
+  });
+
   it('keeps a genuine negative but invents none in a numeric range', () => {
     expect(extractNumbers('net was -3.5 ETH')).toEqual(new Set(['-3.5']));
     expect(extractNumbers('between 1.5-2.5')).toEqual(new Set(['1.5', '2.5']));
