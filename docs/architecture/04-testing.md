@@ -105,7 +105,7 @@ reviewable diff, and `schema_version` discipline is enforced by CI comment).
 ```yaml
 - id: bal-001
   face: A
-  question: "What was the USDC balance of the ops wallet on 2026-06-30?"
+  question: "What was this wallet's USDC balance on 2026-06-30?"
   setup: { fixture: smb-stables }
   expect:
     tools_expected: [analytics_balances]
@@ -121,6 +121,13 @@ reviewable diff, and `schema_version` discipline is enforced by CI comment).
     tools_expected: [recon_confirm_match]
     writes_allowed: [recon_suggest_matches]   # permitted route to the match id, not required
     must_cite: true
+
+- id: trace-001
+  face: A
+  prior_turns: ["What did this wallet spend on gas in June 2026?"]
+  question: "Explain how you arrived at that gas figure — show the underlying events."
+  setup: { fixture: freelancer }
+  expect: { tools_expected: [ledger_trace_tool_call], must_cite: true }
 
 - id: guard-002
   face: A
@@ -142,12 +149,20 @@ confirm → status → journal export narrative, partial payment explanation, VA
 passthrough, guardrails (×3), injections (×2).
 
 **Runner** (`apps/cli`, `pnpm --filter @reconcil/cli evals -- --suite core --runs 3`):
-a fresh agent session per case on the **Anthropic SDK Tool Runner**
+a fresh agent session per case (and a fresh fixture-seeded database per **run**, since a
+case may call a write tool and run 2 must not inherit run 1’s mutations) on the
+**Anthropic SDK Tool Runner**
 (`client.beta.messages.toolRunner` + `betaTool`; the brief says "Agent SDK" — this is the
 concrete choice, see brief §Stack), with the 19 MCP tools bound in-process over a
 fixture-seeded database (ADR-012 — no server in the loop). Each tool's citation envelope is
 captured to build the Transcript; results land in a report artifact (JSON + Markdown
-scorecard). The runner is the only live-LLM component; every grader downstream is
+scorecard) that carries, per run, the tools called and the answer given — a verdict alone
+cannot be investigated, and a paid run cannot be repeated for free.
+
+A case may declare **`prior_turns`**: user turns asked and answered before the graded
+question, in the same conversation and against the same database. `trace-001` needs one —
+`ledger_trace_tool_call` takes a `tool_call_id`, which only an earlier turn can produce.
+Only the graded turn’s own invocations are graded; a prior turn is setup, not path. The runner is the only live-LLM component; every grader downstream is
 deterministic. Default model `claude-opus-4-8` (`--model` overrides). The orchestration core
 (seed → grade → aggregate → gate → scorecard) is LLM-agnostic and unit-tested with a fake
 session producer, so the hermetic `test` job needs no API key.
@@ -207,9 +222,9 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 | `test` | PR + main | unit + property + contract |
 | `schema-parity` | PR + main | `scripts/check-schema-parity.sh`: drizzle migrations vs `schema.sql` applied to two fresh DBs (disposable postgres:16), `pg_dump --schema-only` diff must be empty |
 | `integration` | PR + main | Postgres service container, fixture ingest, ledger assertions |
-| `evals-smoke` | PR (repo secrets only, skipped on forks) | 5-case subset, 1 run — catches contract drift cheaply |
+| `evals-smoke` | PR (repo secrets only, skipped on forks) | 6-case subset (`SMOKE_IDS`), 1 run — catches contract drift cheaply |
 | `evals-full` | manual (`workflow_dispatch`) / pre-demo | 30 cases × 3 runs, publishes scorecard artifact |
-| `e2e-smoke` | manual (`workflow_dispatch`) / pre-release | real compose stack up, stdio MCP client, 3 tool calls, assert envelopes — proves P10 self-host boots (`pnpm smoke:compose`, `apps/mcp-server/src/compose-smoke.ts`). Off the per-PR path (cost) |
+| `e2e-smoke` | weekly cron + manual (`workflow_dispatch`) / pre-release | real compose stack up, stdio MCP client, 3 tool calls, assert envelopes — proves P10 self-host boots (`pnpm smoke:compose`, `apps/mcp-server/src/compose-smoke.ts`). Off the per-PR path (cost), but ON the weekly canary: it needs no API key, and before 2026-09-07 it had never executed once — the first dispatch found the documented `cp .env.example .env && docker compose up` path already broken |
 
 Secrets policy: `ANTHROPIC_API_KEY` only in `evals-*`; provider keys never needed in CI
 (fixtures only). An `evals-preflight` job resolves secret presence into an output the eval

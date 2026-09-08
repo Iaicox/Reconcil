@@ -12,7 +12,9 @@
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "lint": "turbo run lint",
+    "lint:scripts": "eslint scripts .dependency-cruiser.cjs",
     "test": "turbo run test",
     "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
     "check:supply-chain": "node scripts/check-no-signing-libs.cjs",
@@ -22,6 +24,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@reconcil/ingestion": "workspace:*",
+    "@types/node": "catalog:",
     "dependency-cruiser": "^18.1.0",
     "eslint": "catalog:",
     "tsx": "catalog:",
