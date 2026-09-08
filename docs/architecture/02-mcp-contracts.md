@@ -471,9 +471,21 @@ output: { records: Record<'open'|'partially_matched'|'matched'|'overpaid'|'void'
           open_amounts: Array<{ currency: string; value: DecimalString }>;
           unmatched_settlements: { count: number; sample: EventRef[];
                                    drilldown: { tool: 'analytics_list_events'; args: object } };
+          partially_applied_settlements: { count: number; sample: EventRef[];
+                                   drilldown: { tool: 'analytics_list_events'; args: object } };
           overpayments: Array<{ record_id: string; external_ref: string;
                                 excess: DecimalString; currency: string }> }
 ```
+
+`unmatched_settlements` counts settlements with **no** confirmed leg — it is the count
+`recon_suggest_matches` defers to, so it lists exactly what suggest could still offer.
+`partially_applied_settlements` is the separate figure for events with SOME confirmed leg
+and unapplied value left over. The two are disjoint by construction and share one scope.
+Kept apart rather than folded together on purpose: a partly-applied event is not a
+candidate suggest would offer, so widening the first would break the relationship it is
+defined by, while leaving it alone made the leftover value invisible — a settlement drops
+out of the unmatched count the moment its first leg is confirmed, however much of it is
+still unaccounted for.
 
 ### 6.5 `export_*` — files (close pack in weeks 4–5; journals in 6–8)
 

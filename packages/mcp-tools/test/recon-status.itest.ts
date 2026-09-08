@@ -265,6 +265,48 @@ describe('recon_status — unmatched settlements (authoritative view)', () => {
     const { rows } = await pool.query<{ tx_hash: string }>(`SELECT tx_hash FROM chain_events WHERE id = $1`, [outbound]);
     expect(env.data.unmatched_settlements.sample[0]!.tx_hash).toBe(rows[0]!.tx_hash);
   });
+  it('a partly applied settlement leaves the unmatched count and lands in its own figure', async () => {
+    const eur = await seedToken();
+    // 2000 base units settled, only 500 of them confirmed against a record: the event is no
+    // longer a suggest candidate (so it must NOT be unmatched) but 1500 is still unaccounted
+    // for (so it must not vanish either — the gap this figure closes).
+    const partial = await seedEvent(eur, '2000000000', { logIndex: 1 });
+    const rec = await seedInvoice('INV-PART', '500.00', { status: 'matched' });
+    await seedConfirmedLeg(rec, partial, '500000000', '500.00');
+
+    const env = await reconStatus(ctx(), {});
+
+    expect(env.data.unmatched_settlements.count).toBe(0);
+    expect(env.data.partially_applied_settlements.count).toBe(1);
+    expect(env.data.partially_applied_settlements.sample).toHaveLength(1);
+    const { rows } = await pool.query<{ tx_hash: string }>('SELECT tx_hash FROM chain_events WHERE id = $1', [partial]);
+    expect(env.data.partially_applied_settlements.sample[0]!.tx_hash).toBe(rows[0]!.tx_hash);
+    // Self-citing like its sibling (C3).
+    expect(env.data.partially_applied_settlements.drilldown.tool).toBe('analytics_list_events');
+  });
+
+  it('a FULLY applied settlement is in neither figure', async () => {
+    const eur = await seedToken();
+    const full = await seedEvent(eur, '2000000000', { logIndex: 1 });
+    const rec = await seedInvoice('INV-FULL', '2000.00', { status: 'matched' });
+    await seedConfirmedLeg(rec, full, '2000000000', '2000.00');
+
+    const env = await reconStatus(ctx(), {});
+
+    expect(env.data.unmatched_settlements.count).toBe(0);
+    expect(env.data.partially_applied_settlements.count).toBe(0);
+  });
+
+  it('an untouched settlement is unmatched, and not partially applied', async () => {
+    const eur = await seedToken();
+    await seedEvent(eur, '2000000000', { logIndex: 1 });
+
+    const env = await reconStatus(ctx(), {});
+
+    // Disjoint by construction: nothing applied vs some-but-not-all applied.
+    expect(env.data.unmatched_settlements.count).toBe(1);
+    expect(env.data.partially_applied_settlements.count).toBe(0);
+  });
 });
 
 describe('recon_status — coverage / staleness (C5)', () => {

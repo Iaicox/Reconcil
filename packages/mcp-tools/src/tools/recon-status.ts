@@ -65,6 +65,21 @@ export async function reconStatus(
         },
       },
     },
+    // Same wallet subset, same period, same drilldown shape as above — the two figures are
+    // one split of one scope, so their citations must not diverge either.
+    partially_applied_settlements: {
+      count: result.partiallyAppliedSettlements.count,
+      sample: result.partiallyAppliedSettlements.sample.map((e) => ({
+        chain_id: e.chainId, tx_hash: e.txHash, log_index: e.logIndex,
+      })),
+      drilldown: {
+        tool: 'analytics_list_events',
+        args: {
+          ...(clientId !== undefined ? { scope: { client_id: clientId } } : {}),
+          ...(input.period !== undefined ? { period: input.period } : {}),
+        },
+      },
+    },
     overpayments: result.overpayments.map((o) => ({
       record_id: o.recordId, external_ref: o.externalRef, excess: o.excess, currency: o.currency,
     })),
