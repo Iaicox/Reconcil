@@ -6,11 +6,11 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { createLogger, serializeError, type Logger } from '@reconcil/core';
 import { createDb, type Db } from '@reconcil/db';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, type FastifyServerOptions } from 'fastify';
 import { Pool } from 'pg';
 
 import { parseBearerToken, resolveTenantByBearer } from './auth.js';
-import { DEFAULT_PORT, loadConfig, resolveAllowedHosts } from './config.js';
+import { DEFAULT_PORT, loadConfig, resolveAllowedHosts, resolveTrustProxy } from './config.js';
 import { createServer } from './server.js';
 
 declare module 'fastify' {
@@ -163,6 +163,10 @@ export interface HttpDeps {
    * DB-verified key (see `tenantRateLimitKey`). Defaults to the production 120/min
    * (the original single-layer policy). Overridable for tests. */
   tenantRateLimit?: { max: number; timeWindow: string };
+  /** Fastify `trustProxy` (config.ts `resolveTrustProxy`). Omitted ⇒ off, so `request.ip`
+   * is the socket peer and no `X-Forwarded-For` is believed. Layer 1 keys on `request.ip`,
+   * so this is what decides whether that backstop is per-client or global behind a proxy. */
+  trustProxy?: boolean | string;
 }
 
 /**
@@ -178,7 +182,13 @@ export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   const allowedHosts = deps.allowedHosts ?? resolveAllowedHosts({ PORT: DEFAULT_PORT });
   const ipRateLimitPolicy = deps.ipRateLimit ?? { max: 600, timeWindow: '1 minute' };
   const tenantRateLimitPolicy = deps.tenantRateLimit ?? { max: 120, timeWindow: '1 minute' };
-  const app = Fastify({ logger: true });
+  // Built as a typed value rather than spread inline: a union-typed `trustProxy` in an
+  // object literal defeats Fastify's server-type overload resolution, and the failure
+  // surfaces as unrelated errors on the route handlers below. Assigning after the
+  // annotation also keeps "unset" distinct from an explicit `false`.
+  const serverOptions: FastifyServerOptions = { logger: true };
+  if (deps.trustProxy !== undefined) serverOptions.trustProxy = deps.trustProxy;
+  const app = Fastify(serverOptions);
 
   // Rate-limit the authenticated /mcp route (in-memory; CodeQL js/missing-rate-limiting).
   // global:false → only opted-in routes are limited, so /healthz stays unlimited. Awaited
@@ -248,7 +258,13 @@ async function main(): Promise<void> {
   // crashes the process (dumping the raw cause, ADR-011). Route it to the logger.
   pool.on('error', (err) => { logger.error('postgres pool error', { err: serializeError(err) }); });
   const db = createDb(pool);
-  const app = await buildHttpApp({ db, logger, allowedHosts: resolveAllowedHosts(cfg) });
+  const trustProxy = resolveTrustProxy(cfg);
+  const app = await buildHttpApp({
+    db,
+    logger,
+    allowedHosts: resolveAllowedHosts(cfg),
+    ...(trustProxy !== undefined ? { trustProxy } : {}),
+  });
 
   const shutdown = async (): Promise<void> => {
     await app.close();

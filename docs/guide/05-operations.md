@@ -45,6 +45,12 @@ are minted with the keygen script ([Connect a client](02-connect-a-client.md#min
 |---|---|---|
 | `COINGECKO_API_KEY` | worker | Optional. Secondary price source; a demo key raises rate limits. DefiLlama (primary) and ECB (FX) are keyless. |
 
+### Behind a reverse proxy (mcp-server only)
+
+| Variable | Used by | Notes |
+|---|---|---|
+| `RECONCIL_TRUST_PROXY` | mcp-server (HTTP) | **Unset by default, and leave it unset unless a proxy really is in front.** The per-IP rate-limit backstop (ADR-012 decision 6) keys on `request.ip`. Terminate TLS in front without setting this and `request.ip` becomes the proxy — every client shares one bucket, so the 600/min ceiling stops being per-client and becomes global. Set it to the proxies you trust (comma-separated IPs/CIDRs, e.g. `10.0.0.0/8`), which is what tells Fastify it may read `X-Forwarded-For`. `true` trusts the header from anyone that can reach the port, so use it only when nothing untrusted can. |
+
 ### Files
 
 | Variable | Used by | Notes |

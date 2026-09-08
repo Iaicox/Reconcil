@@ -18,6 +18,10 @@ const schema = z.object({
   // rebinding protection (http.ts). Unset ⇒ resolveAllowedHosts derives the default
   // from PORT. See .env.example for the deployment-shaped default.
   RECONCIL_ALLOWED_HOSTS: z.string().optional(),
+  // Proxy topology for Fastify's `trustProxy` (http.ts). Unset ⇒ OFF, which is the safe
+  // default: see resolveTrustProxy for why turning it on unconditionally would be worse
+  // than the problem it solves.
+  RECONCIL_TRUST_PROXY: z.string().optional(),
 });
 
 export type ServerConfig = z.infer<typeof schema>;
@@ -35,6 +39,37 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
  * reality actually sends: localhost / 127.0.0.1 (host-mapped local dev) and the
  * `mcp-server` compose service name, all suffixed with the configured PORT.
  */
+/**
+ * Fastify's `trustProxy` value, or `undefined` to leave it off.
+ *
+ * Off is the default, and deliberately so. With no proxy, `request.ip` is the socket peer
+ * and ADR-012 decision 6's per-IP backstop works as intended. Behind a TLS-terminating
+ * proxy the peer is the proxy, so every client shares one bucket and the 600/min ceiling
+ * degrades from per-client to GLOBAL — that is the bug this setting exists to fix. But
+ * turning it on unconditionally is worse, not better: `trustProxy: true` believes any
+ * `X-Forwarded-For`, so any client can name its own IP and escape the bucket entirely. A
+ * hard ceiling that an attacker can opt out of is not a ceiling. So the operator states
+ * their real topology and nobody else's header is trusted.
+ *
+ * Two accepted forms, both Fastify's own: `true`/`false`, or a comma-separated list of
+ * trusted proxy IPs/CIDRs which Fastify hands to proxy-addr. The CIDR list is the form a
+ * real deployment should use — it names *which* proxies may speak for a client, where bare
+ * `true` only fits a topology in which nothing untrusted can reach the port at all.
+ *
+ * Fastify's hop-count form is deliberately not offered: `trustProxy` dropped `number` from
+ * its type in 5.12, and naming the proxies is the better instruction anyway — a hop count
+ * trusts whatever sits at that depth, whoever it turns out to be.
+ */
+export function resolveTrustProxy(
+  cfg: Pick<ServerConfig, 'RECONCIL_TRUST_PROXY'>,
+): boolean | string | undefined {
+  const raw = cfg.RECONCIL_TRUST_PROXY?.trim();
+  if (raw === undefined || raw === '') return undefined;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return raw;
+}
+
 export function resolveAllowedHosts(cfg: Pick<ServerConfig, 'PORT' | 'RECONCIL_ALLOWED_HOSTS'>): string[] {
   if (cfg.RECONCIL_ALLOWED_HOSTS !== undefined) {
     const hosts = cfg.RECONCIL_ALLOWED_HOSTS.split(',').map((h) => h.trim()).filter((h) => h.length > 0);

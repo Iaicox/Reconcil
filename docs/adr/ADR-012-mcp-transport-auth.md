@@ -46,6 +46,14 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
      token: rotating a fresh garbage `Authorization` header per request landed each one in
      a new bucket, so the limit never tripped while every request still paid for a live
      `resolveTenantByBearer` DB lookup — unbounded 401 + query amplification per IP.
+     The IP backstop keys on `request.ip`, which is only the real client while nothing
+     rewrites it. Behind a TLS-terminating proxy it is the proxy, and the backstop degrades
+     from per-client to a single **global** ceiling; trusting `X-Forwarded-For`
+     unconditionally is the worse failure, since any client that can reach the port could
+     then name its own IP and leave the bucket entirely. So the topology is stated by the
+     operator — `RECONCIL_TRUST_PROXY` (`resolveTrustProxy`, `config.ts`), unset ⇒ off —
+     rather than guessed. The tenant fairness bucket is unaffected either way: it keys on
+     the DB-verified tenant, not on any header.
    - A hijacked transport's own request-handling failure is always caught and answered
      (`handleHijackedTransport`) — no unhandled rejection can leave a hijacked socket open
      indefinitely.
