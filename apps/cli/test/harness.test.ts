@@ -202,6 +202,33 @@ describe('scorecard', () => {
     expect(md).toContain('fabricated number'); // the grader's reason, per run
   });
 
+  it('an aborted suite reports what ran and claims no gate verdict', async () => {
+    // A live 30×3 run died at case 29 on an API usage limit. The 28 completed cases were
+    // paid for and are not repeatable, so they are reported — but a rollup over 28 of 30
+    // cases is not a gate result, and must never render as one.
+    const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 1, deps(CLEAN_ANSWERS));
+    const gate = evaluateGate(cases);
+    expect(gate.passed).toBe(true); // …and yet:
+    const md = toMarkdown(
+      buildReport(
+        {
+          suite: 'core',
+          model: 'test',
+          runs: 1,
+          generatedAt: 'now',
+          aborted: { completedCases: 2, totalCases: 30, reason: '400 usage limit reached' },
+        },
+        cases,
+        gate,
+      ),
+    );
+    expect(md).toContain('⚠️ INCOMPLETE — 2 of 30 cases ran');
+    expect(md).toContain('400 usage limit reached');
+    expect(md).not.toContain('✅ PASS');
+    // The data that was paid for is still there.
+    expect(md).toContain('| bal-x | A |');
+  });
+
   it('leaves out the transcript appendix entirely when every case passed', async () => {
     const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 1, deps(CLEAN_ANSWERS));
     const gate = evaluateGate(cases);

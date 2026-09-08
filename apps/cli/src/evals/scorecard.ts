@@ -17,6 +17,14 @@ export interface ReportMeta {
   resolvedModel?: string;
   runs: number;
   generatedAt: string;
+  /**
+   * Set when the suite did not finish. A session can die on something that has nothing to
+   * do with the cases — an API usage limit, a dropped connection — and the run to that
+   * point is paid for and not repeatable, so it is reported rather than discarded. Its
+   * presence also says the rollup below covers only `completedCases`, which is why an
+   * aborted report never claims a gate verdict.
+   */
+  aborted?: { completedCases: number; totalCases: number; reason: string };
 }
 
 const METRIC_LABEL: Record<Metric, string> = {
@@ -107,8 +115,16 @@ export function toMarkdown(report: Report): string {
     ? ` (resolved: \`${meta.resolvedModel}\`)`
     : '';
   lines.push(`- Model: \`${meta.model}\`${resolved} · Runs: ${String(meta.runs)} · ${meta.generatedAt}`);
-  lines.push(`- **Gate: ${gate.passed ? '✅ PASS' : '❌ FAIL'}**`);
-  if (!gate.passed) for (const f of gate.failures) lines.push(`  - ${f}`);
+  if (meta.aborted) {
+    // Never a ✅ on a partial suite: the cases that never ran cannot be assumed to pass.
+    const { completedCases, totalCases, reason } = meta.aborted;
+    lines.push(`- **Gate: ⚠️ INCOMPLETE — ${String(completedCases)} of ${String(totalCases)} cases ran**`);
+    lines.push(`  - the suite stopped early: ${reason}`);
+    lines.push('  - everything below covers only the cases that ran, and is not a gate verdict');
+  } else {
+    lines.push(`- **Gate: ${gate.passed ? '✅ PASS' : '❌ FAIL'}**`);
+    if (!gate.passed) for (const f of gate.failures) lines.push(`  - ${f}`);
+  }
   lines.push('');
 
   // Per-metric rollup.
