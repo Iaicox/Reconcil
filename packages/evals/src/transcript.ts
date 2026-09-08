@@ -48,11 +48,31 @@ export function canonicalDecimal(raw: string): string | null {
 }
 
 /**
+ * Blank the spans that are not figures: full 0x-hex runs, and ISO dates with an optional
+ * time (`2026-06-30`, `2026-06-30T12:34:56.789Z`). Shared, so `extractNumbers` and the
+ * failure-message excerpt in numeric.ts cannot disagree about what counts as a number —
+ * the excerpt has to point at the same token the check rejected. `blank` decides whether
+ * a span collapses (tokenising) or keeps its width (index-preserving excerpts).
+ * Fixed repetition counts, no nested quantifiers ⇒ ReDoS-safe.
+ */
+export function maskNonFigureSpans(text: string, blank: (match: string) => string): string {
+  return text
+    .replace(/0x[0-9a-fA-F]+/g, blank)
+    .replace(/\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?/g, blank);
+}
+
+/**
  * Decimal-number tokens in free text, canonicalised + deduped. A leading `-` is a sign
- * only when not preceded by a digit or dot (the `(?<![\d.])` guard), so an ISO date
- * ("2026-06-30") yields 2026/6/30 rather than 2026/-6/-30, and a range ("1.5-2.5") does
- * not invent a negative. The pattern is bounded (the lookbehind is zero-width, no nested
- * quantifier over an overlapping class), so it is ReDoS-safe.
+ * only when not preceded by a digit or dot (the `(?<![\d.])` guard), so a range ("1.5-2.5")
+ * does not invent a negative. The pattern is bounded (the lookbehind is zero-width, no
+ * nested quantifier over an overlapping class), so it is ReDoS-safe.
+ *
+ * Date-shaped literals are removed before tokenising, on both sides of G2: a date is a
+ * period, not a figure, and its components are not claims the agent has to source. Left in,
+ * "the USDC balance as of 2026-06-30" contributed a 6 and a 30 that no tool result had to
+ * provide, and G2 reported them as fabricated (live bal-001). This covers a date the answer
+ * writes date-shaped; a date rendered in prose ("July 17, 2026") is still tokenised, which
+ * is what the `referenceDate` whitelist in numeric.ts remains for.
  *
  * Full 0x-hex runs (addresses, tx hashes) are stripped first, so their incidental digits
  * never register as figures — on either side of the anti-fabrication check. A hash the
@@ -69,7 +89,7 @@ export function canonicalDecimal(raw: string): string | null {
  * classes, no overlapping quantifiers.
  */
 export function extractNumbers(text: string): Set<string> {
-  const scrubbed = text.replace(/0x[0-9a-fA-F]+/g, ' ');
+  const scrubbed = maskNonFigureSpans(text, () => ' ');
   const out = new Set<string>();
   for (const m of scrubbed.matchAll(/(?<![\d.])-?\d[\d,]*(?:\.\d+)?/g)) {
     const c = canonicalDecimal(m[0]);

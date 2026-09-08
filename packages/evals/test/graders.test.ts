@@ -39,8 +39,10 @@ describe('extractNumbers', () => {
   it('pulls canonicalised decimals out of free text', () => {
     expect(extractNumbers('You spent 1,234.50 on gas and 0.5 ETH')).toEqual(new Set(['1234.5', '0.5']));
   });
-  it('does not read ISO-date hyphens as negative signs', () => {
-    expect(extractNumbers('as of 2026-06-30')).toEqual(new Set(['2026', '6', '30']));
+  it('reads no figures at all out of a date — a date is not a number in the answer', () => {
+    expect(extractNumbers('as of 2026-06-30')).toEqual(new Set());
+    expect(extractNumbers('computed at 2026-06-30T12:34:56.789Z')).toEqual(new Set());
+    expect(extractNumbers('window 2026-06-01 to 2026-06-30 cost 0.5 ETH')).toEqual(new Set(['0.5']));
   });
   it('keeps a genuine negative but invents none in a numeric range', () => {
     expect(extractNumbers('net was -3.5 ETH')).toEqual(new Set(['-3.5']));
@@ -118,9 +120,28 @@ describe('G2 numeric', () => {
     expect(gradeNumeric(t, balanceExpect).pass).toBe(true);
   });
 
-  it('still flags that same date when no reference date is provided (whitelist is what fixes it)', () => {
+  it('does not flag an ISO date the answer states, reference date or not', () => {
+    // bal-001 reported "fabricated number in answer: 6" and "…: 30" beside "as of 2026-06-30".
+    // Date-shaped literals are stripped for every date now, not just the whitelisted one.
     const t = script([inv('analytics_balances', bal), inv('ledger_status', status)], freshnessAnswer);
-    expect(gradeNumeric(t, balanceExpect).pass).toBe(false);
+    expect(gradeNumeric(t, balanceExpect).pass).toBe(true);
+    const asked = script(
+      [inv('analytics_balances', bal)],
+      'Your USDC balance as of 2026-06-30 was 0.00214576074380375 (via analytics_balances).',
+    );
+    expect(gradeNumeric(asked, balanceExpect).pass).toBe(true);
+  });
+
+  it('still needs the reference-date whitelist for a date written out in prose', () => {
+    // Stripping only catches date-SHAPED text; "July 17, 2026" is the same date as words.
+    const prose =
+      'Your current ETH balance is 0.00214576074380375 (via analytics_balances), current as of July 17, 2026.';
+    expect(gradeNumeric(script([inv('analytics_balances', bal)], prose), balanceExpect).pass).toBe(false);
+    const withRef: Transcript = {
+      ...script([inv('analytics_balances', bal)], prose),
+      referenceDate: '2026-07-17',
+    };
+    expect(gradeNumeric(withRef, balanceExpect).pass).toBe(true);
   });
 
   it('still catches a genuinely fabricated figure even with a reference date set', () => {
