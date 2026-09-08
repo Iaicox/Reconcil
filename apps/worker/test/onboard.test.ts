@@ -11,6 +11,7 @@ describe('enqueueBackfills', () => {
     const calls: { name: string; data: unknown; opts: JobsOptions }[] = [];
     const queue: BackfillEnqueuer = {
       add: (name, data, opts) => { calls.push({ name, data, opts }); return Promise.resolve(undefined); },
+      getJob: () => Promise.resolve(undefined),
     };
 
     await enqueueBackfills(
@@ -31,7 +32,7 @@ describe('enqueueBackfills', () => {
 
   it('does nothing for an empty target set', async () => {
     let added = 0;
-    const queue: BackfillEnqueuer = { add: () => { added += 1; return Promise.resolve(undefined); } };
+    const queue: BackfillEnqueuer = { add: () => { added += 1; return Promise.resolve(undefined); }, getJob: () => Promise.resolve(undefined) };
     await enqueueBackfills([], queue);
     expect(added).toBe(0);
   });
@@ -42,6 +43,7 @@ describe('enqueueAnchors', () => {
     const calls: { name: string; data: unknown; opts: JobsOptions }[] = [];
     const queue: AnchorEnqueuer = {
       add: (name, data, opts) => { calls.push({ name, data, opts }); return Promise.resolve(undefined); },
+      getJob: () => Promise.resolve(undefined),
     };
 
     await enqueueAnchors(
@@ -63,6 +65,7 @@ describe('enqueueProbes', () => {
     const calls: { name: string; data: unknown; opts: JobsOptions }[] = [];
     const queue: ProbeEnqueuer = {
       add: (name, data, opts) => { calls.push({ name, data, opts }); return Promise.resolve(undefined); },
+      getJob: () => Promise.resolve(undefined),
     };
 
     await enqueueProbes([{ chainId: 1, address: '0xABC' }], queue);
@@ -73,5 +76,72 @@ describe('enqueueProbes', () => {
       data: { chainId: 1, address: '0xABC' },
       opts: { jobId: 'probe:1:0xabc' },
     });
+  });
+});
+
+// --- retained-job wedge (the fresh-chain `queued` path) --------------------------------
+
+/** A fake queue whose `getJob` returns a job in the given terminal/live state. */
+function queueHolding(state: 'completed' | 'failed' | 'waiting' | 'none') {
+  const added: string[] = [];
+  let removed = false;
+  const job = {
+    isCompleted: () => Promise.resolve(state === 'completed'),
+    isFailed: () => Promise.resolve(state === 'failed'),
+    remove: () => { removed = true; return Promise.resolve(undefined); },
+  };
+  const queue: BackfillEnqueuer = {
+    add: (_n, _d, opts) => { added.push(String(opts.jobId)); return Promise.resolve(undefined); },
+    getJob: () => Promise.resolve(state === 'none' ? undefined : job),
+  };
+  return { queue, added, wasRemoved: () => removed };
+}
+
+const TARGET = { chainId: 1, address: '0xabc', stream: 'native' } as const;
+
+describe('enqueueBackfills — a retained job must not silently swallow the re-add', () => {
+  it('clears a COMPLETED job holding the id, then re-adds', async () => {
+    // ingestOnce's H7 branch completes the job without advancing the checkpoint (fresh
+    // chain: head < finalityDepth). removeOnComplete:1000 then keeps that job around, and
+    // on a quiet deployment the checkpoint sits at `queued` for as long as it takes 1000
+    // other jobs to complete.
+    const { queue, added, wasRemoved } = queueHolding('completed');
+    await enqueueBackfills([TARGET], queue);
+    expect(wasRemoved()).toBe(true);
+    expect(added).toEqual(['backfill:1:0xabc:native']);
+  });
+
+  it('clears a FAILED job holding the id (the ADR-008 DLQ retains it by design)', async () => {
+    const { queue, added, wasRemoved } = queueHolding('failed');
+    await enqueueBackfills([TARGET], queue);
+    expect(wasRemoved()).toBe(true);
+    expect(added).toEqual(['backfill:1:0xabc:native']);
+  });
+
+  it('leaves a job that is still waiting or active alone — that dedup is the point', async () => {
+    const { queue, added, wasRemoved } = queueHolding('waiting');
+    await enqueueBackfills([TARGET], queue);
+    expect(wasRemoved()).toBe(false);
+    // The add still runs; BullMQ dedups it against the live job, which is correct.
+    expect(added).toEqual(['backfill:1:0xabc:native']);
+  });
+
+  it('adds normally when nothing holds the id', async () => {
+    const { queue, added, wasRemoved } = queueHolding('none');
+    await enqueueBackfills([TARGET], queue);
+    expect(wasRemoved()).toBe(false);
+    expect(added).toEqual(['backfill:1:0xabc:native']);
+  });
+
+  it('a lookup failure does not abort the scan for the remaining targets', async () => {
+    // The job can vanish between lookup and remove (its retention aged out, or another
+    // scanner got there first) — which is the state we wanted anyway.
+    const added: string[] = [];
+    const queue: BackfillEnqueuer = {
+      add: (_n, _d, opts) => { added.push(String(opts.jobId)); return Promise.resolve(undefined); },
+      getJob: () => Promise.reject(new Error('redis blip')),
+    };
+    await enqueueBackfills([TARGET, { chainId: 8453, address: '0xdef', stream: 'erc20' }], queue);
+    expect(added).toEqual(['backfill:1:0xabc:native', 'backfill:8453:0xdef:erc20']);
   });
 });
