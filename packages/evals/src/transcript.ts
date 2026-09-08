@@ -68,8 +68,26 @@ export function canonicalDecimal(raw: string): string | null {
 export function maskNonFigureSpans(text: string, blank: (match: string) => string): string {
   return text
     .replace(/0x[0-9a-fA-F]+/g, blank)
-    .replace(/\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?/g, blank)
+    .replace(isoDatePattern(), blank)
     .replace(/[A-Za-z]+-?\d[\d.]*/g, blank);
+}
+
+/**
+ * A fresh ISO-date matcher each call. Built rather than shared as a module constant: a
+ * `/g` regex carries `lastIndex`, and one object used from two call sites is a stateful
+ * trap for no gain.
+ */
+const isoDatePattern = (): RegExp =>
+  /\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?/g;
+
+/**
+ * The ISO dates appearing in `text`. `maskNonFigureSpans` removes these from the ANSWER
+ * (a date is not a figure the agent has to source); numeric.ts uses this to do the
+ * opposite on the PROVIDED side, where a date the tool returned legitimately supplies the
+ * components of that same date written out in prose. One pattern, so the two cannot drift.
+ */
+export function isoDatesIn(text: string): string[] {
+  return [...text.matchAll(isoDatePattern())].map((m) => m[0]);
 }
 
 /**
