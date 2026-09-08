@@ -51,7 +51,12 @@ CREATE TABLE api_keys (
     key_hash    TEXT NOT NULL UNIQUE,          -- sha256(key); plaintext never stored
     label       TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    revoked_at  TIMESTAMPTZ
+    revoked_at  TIMESTAMPTZ,
+    -- Both nullable with no default: a key minted before these columns existed keeps
+    -- working unchanged. NULL expires_at = never expires (ADR-012's original posture,
+    -- amended); NULL last_used_at = minted but never presented.
+    expires_at  TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ
 );
 
 -- ------------------------------------------------------------ chain data ---
@@ -215,7 +220,9 @@ CREATE TABLE matches (
     -- Portion of the event applied to this record, token base units.
     amount_applied_raw  NUMERIC(78,0) NOT NULL CHECK (amount_applied_raw > 0),
     -- Valuation of that portion, pinned to the exact price/FX rows used (P5).
-    fiat_value          NUMERIC NOT NULL,
+    -- >= 0, not > 0: a zero-value leg is legitimate (a peg-valued transfer can round to
+    -- nothing at the fiat scale), unlike a zero amount_applied_raw.
+    fiat_value          NUMERIC NOT NULL CHECK (fiat_value >= 0),
     fiat_currency       TEXT NOT NULL,
     price_snapshot_id   BIGINT REFERENCES price_snapshots(id),
     fx_rate_id          BIGINT REFERENCES fx_rates(id),
