@@ -117,8 +117,10 @@ CREATE INDEX chain_events_from_idx  ON chain_events (from_addr, block_time);
 CREATE INDEX chain_events_to_idx    ON chain_events (to_addr, block_time);
 -- Integrity checks and coverage math per chain height.
 CREATE INDEX chain_events_block_idx ON chain_events (chain_id, block_number);
--- Token-level scans (stablecoin movement queries, spam audits).
-CREATE INDEX chain_events_token_idx ON chain_events (token_id);
+-- Token-level scans (stablecoin movement queries, spam audits), and the peg
+-- materialization DISTINCT (token_id, block_time::date) over every verified stablecoin.
+-- token_id alone is a prefix, so this replaces the former single-column index.
+CREATE INDEX chain_events_token_time_idx ON chain_events (token_id, block_time);
 
 -- ---------------------------------------------------------------- pricing ---
 

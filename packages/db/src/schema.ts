@@ -207,8 +207,12 @@ export const chainEvents = pgTable(
     index('chain_events_to_idx').on(t.toAddr, t.blockTime),
     // Integrity checks and coverage math per chain height.
     index('chain_events_block_idx').on(t.chainId, t.blockNumber),
-    // Token-level scans (stablecoin movement queries, spam audits).
-    index('chain_events_token_idx').on(t.tokenId),
+    // Token-level scans (stablecoin movement queries, spam audits), and the peg
+    // materialization's `DISTINCT (token_id, block_time::date)` over every verified
+    // stablecoin's events — with block_time in the index that DISTINCT is served from the
+    // index instead of fetching each event's heap row. `token_id` alone is a prefix of
+    // this, so it replaces the single-column index rather than joining it.
+    index('chain_events_token_time_idx').on(t.tokenId, t.blockTime),
   ],
 );
 

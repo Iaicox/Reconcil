@@ -87,16 +87,24 @@ export async function upsertFxRates(db: Db, rows: FxInsert[]): Promise<number> {
  * "does this (token, date) already have a peg row" on every run regardless of when the
  * row was inserted, so a newly-backfilled old event is still covered.
  *
- * A separate watermark table (e.g. "max chain_events.id already scanned", which — unlike
- * block_time — IS safely monotonic with insertion order since `id` is
- * `generatedAlwaysAsIdentity()`) would avoid re-scanning `chain_events` itself and could
- * cut cost further, but adds new persistent state and a migration for what the audit
- * flagged as a minor/latent item. `NOT EXISTS` needs no new state, is correct for
- * backfills by construction, and removes the actual O(all history) cost this was flagged
- * for (the repeated `DISTINCT`-then-conflict-check over every historical row) — the
- * cheaper-but-still-correct alternative called for when a safe zero-new-state predicate
- * isn't available; a watermark table is a follow-up if `chain_events`'s own full scan
- * ever becomes the bottleneck.
+ * A `max chain_events.id already scanned` watermark table was the follow-up this docstring
+ * used to propose, on the grounds that `id` — unlike block_time — is safely monotonic with
+ * insertion order (`generatedAlwaysAsIdentity()`), so a backfilled old event gets a NEW id
+ * and would still be picked up. That much is true, and it is still not enough:
+ *
+ * `tokens.is_stablecoin` / `tokens.verified` are CURATION flags, not immutable facts. An
+ * erc20 ingested before it is curated is scanned by this query, matches nothing, and — with
+ * a watermark — advances it past those events. When curation later marks that token a
+ * verified stablecoin, its entire history sits below the watermark and is never revisited:
+ * missing peg rows, permanently, with nothing to re-trigger them. That is exactly the
+ * silent-and-wrong-forever failure the block_time paragraph above rejects, arriving through
+ * a different door. `NOT EXISTS` re-evaluates every run and so self-heals the moment the
+ * flag flips.
+ *
+ * What the flagged cost actually was — fetching every stablecoin event's heap row to read
+ * `block_time` for the DISTINCT — is instead removed by indexing
+ * `chain_events (token_id, block_time)`, so the DISTINCT is served from the index. No new
+ * state, no new failure mode, and the anti-join keeps its self-healing property.
  */
 export async function materializePegSnapshots(db: Db): Promise<number> {
   const res = await db.execute(sql`
