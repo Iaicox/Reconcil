@@ -99,7 +99,7 @@ function queueHolding(state: 'completed' | 'failed' | 'waiting' | 'none') {
 
 const TARGET = { chainId: 1, address: '0xabc', stream: 'native' } as const;
 
-describe('enqueueBackfills — a retained job must not silently swallow the re-add', () => {
+describe('enqueueBackfills — a completed job must not silently swallow the re-add', () => {
   it('clears a COMPLETED job holding the id, then re-adds', async () => {
     // ingestOnce's H7 branch completes the job without advancing the checkpoint (fresh
     // chain: head < finalityDepth). removeOnComplete:1000 then keeps that job around, and
@@ -111,10 +111,13 @@ describe('enqueueBackfills — a retained job must not silently swallow the re-a
     expect(added).toEqual(['backfill:1:0xabc:native']);
   });
 
-  it('clears a FAILED job holding the id (the ADR-008 DLQ retains it by design)', async () => {
+  it('LEAVES a failed job alone — it is the ADR-008 dead-letter record', async () => {
+    // Removing it would delete the only evidence the backfill exhausted its 8 attempts,
+    // and the ~15s onboard tick would then re-add the job forever against a provider that
+    // already rejected it. The fix for that wedge is flipping the checkpoint to `error`.
     const { queue, added, wasRemoved } = queueHolding('failed');
     await enqueueBackfills([TARGET], queue);
-    expect(wasRemoved()).toBe(true);
+    expect(wasRemoved()).toBe(false);
     expect(added).toEqual(['backfill:1:0xabc:native']);
   });
 

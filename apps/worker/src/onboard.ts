@@ -7,27 +7,29 @@
  * line up. Runs as a repeatable worker tick in main.ts; the first `commitPage`
  * flips a checkpoint off the queued set, so this self-empties.
  *
- * Retained-job wedge (FIXED here; the caveat this docstring used to carry).
- * BullMQ dedups `add` against ANY job still holding the id, including one that has
- * already finished — and both retention policies keep finished jobs around:
- * `removeOnFail: false` (the ADR-008 DLQ) and `removeOnComplete: 1000`. Two ways a
+ * Retained-job wedge. BullMQ dedups `add` against ANY job still holding the id, including
+ * one that has already finished — and both retention policies keep finished jobs around:
+ * `removeOnComplete: 1000` and `removeOnFail: false` (the ADR-008 DLQ). Two ways a
  * checkpoint then sits at `queued` with nothing able to move it:
  *
- *   - the page-1 backfill exhausted its attempts, so `commitPage` never ran; the
- *     failed job is retained by design, and every later scan's re-add is deduped
- *     against it. Nothing flips the checkpoint to `error` either, so `ledger_status`
- *     does not surface it.
- *   - the job *succeeded* without advancing anything: `ingestOnce`'s H7 branch skips
- *     the commit when the safe head is at or below the cursor (a fresh chain where
- *     `head < finalityDepth`, or a stale head from a load-balanced node) and returns
- *     the checkpoint's stored status verbatim — still `queued`. The completed job is
- *     then retained for the next 1000 completions, which on a quiet deployment is
- *     indefinitely.
+ *   - FIXED here: the job *succeeded* without advancing anything. `ingestOnce`'s H7
+ *     branch skips the commit when the safe head is at or below the cursor (a fresh chain
+ *     where `head < finalityDepth`, or a stale head from a load-balanced node) and returns
+ *     the checkpoint's stored status verbatim — still `queued`. The completed job is then
+ *     retained for the next 1000 completions, which on a quiet deployment is indefinite.
+ *     `clearCompletedJob` drops it before re-adding.
+ *   - STILL OPEN: the page-1 backfill exhausted its attempts, so `commitPage` never ran.
+ *     The failed job is retained *by design* — it is the dead-letter record — and every
+ *     later scan's re-add is deduped against it. Clearing it here would be the wrong fix
+ *     twice over: it deletes the only evidence of the failure, and the ~15s onboard tick
+ *     would then re-add the job forever against a provider that already rejected it. The
+ *     right fix is the one this caveat has always named — flip the checkpoint to `error`
+ *     on permanent failure so `ledger_status` surfaces it — and it belongs with the
+ *     backfill error-surfacing slice. Recovery today stays operational: clear the DLQ'd job.
  *
- * So a FINISHED job under the id is cleared before re-adding. A job that is waiting,
- * active or delayed is left alone — deduping against work that can still make progress
- * is the whole point of the deterministic id. Continuation pages use auto-ids, so only
- * the id-carrying first job of each kind could wedge this way.
+ * A job that is waiting, active or delayed is left alone — deduping against work that can
+ * still make progress is the whole point of the deterministic id. Continuation pages use
+ * auto-ids, so only the id-carrying first job of each kind could wedge this way.
  */
 import { anchorJobId, backfillJobId, probeJobId } from '@reconcil/core';
 import type { Db } from '@reconcil/db';
@@ -64,19 +66,28 @@ export interface ProbeEnqueuer extends RetainedJobLookup {
 }
 
 /**
- * Drop a FINISHED job holding `jobId`, so the re-add below is not silently deduped
- * against work that can no longer make progress (see the retained-job wedge above).
- * Waiting/active/delayed jobs are left alone — that dedup is the point of the id.
+ * Drop a COMPLETED job holding `jobId`, so the re-add below is not silently deduped
+ * against work that already finished without moving anything.
+ *
+ * Deliberately not failed jobs. `removeOnFail: false` is the ADR-008 §2 dead-letter
+ * record: it is the only evidence a backfill exhausted its 8 attempts, and the onboard
+ * tick runs every ~15s, so clearing it would delete the evidence AND re-add the job
+ * forever — 5760 retries a day against a provider that already rejected it, with nothing
+ * surfaced. The failed-job wedge is real but its fix is the one this docstring's caveat
+ * names (mark the checkpoint `error` so `ledger_status` shows it), which belongs with the
+ * backfill error-surfacing slice, not here.
+ *
+ * Waiting/active/delayed jobs are left alone too — deduping against work that can still
+ * make progress is the whole point of the deterministic id.
  *
  * Best-effort: a job that disappears between the lookup and the remove (its retention
  * window aged out, or another scanner got there first) is exactly the state we wanted,
  * so a failure here must not abort the scan for every other target.
  */
-async function clearFinishedJob(queue: RetainedJobLookup, jobId: string): Promise<void> {
+async function clearCompletedJob(queue: RetainedJobLookup, jobId: string): Promise<void> {
   try {
     const existing = await queue.getJob(jobId);
-    if (!existing) return;
-    if ((await existing.isCompleted()) || (await existing.isFailed())) await existing.remove();
+    if (existing && (await existing.isCompleted())) await existing.remove();
   } catch {
     // Nothing to do: the next scan tries again.
   }
@@ -85,7 +96,7 @@ async function clearFinishedJob(queue: RetainedJobLookup, jobId: string): Promis
 export async function enqueueBackfills(targets: BackfillTarget[], queue: BackfillEnqueuer): Promise<void> {
   for (const t of targets) {
     const jobId = backfillJobId(t.chainId, t.address, t.stream);
-    await clearFinishedJob(queue, jobId);
+    await clearCompletedJob(queue, jobId);
     await queue.add('page', t, { ...dlqJobOptions, jobId });
   }
 }
@@ -93,7 +104,7 @@ export async function enqueueBackfills(targets: BackfillTarget[], queue: Backfil
 export async function enqueueAnchors(targets: AnchorTarget[], queue: AnchorEnqueuer): Promise<void> {
   for (const t of targets) {
     const jobId = anchorJobId(t.chainId, t.address, t.stream);
-    await clearFinishedJob(queue, jobId);
+    await clearCompletedJob(queue, jobId);
     await queue.add('anchor', t, { ...dlqJobOptions, jobId });
   }
 }
@@ -101,7 +112,7 @@ export async function enqueueAnchors(targets: AnchorTarget[], queue: AnchorEnque
 export async function enqueueProbes(targets: ProbeTargetData[], queue: ProbeEnqueuer): Promise<void> {
   for (const t of targets) {
     const jobId = probeJobId(t.chainId, t.address);
-    await clearFinishedJob(queue, jobId);
+    await clearCompletedJob(queue, jobId);
     await queue.add('probe', t, { ...dlqJobOptions, jobId });
   }
 }
