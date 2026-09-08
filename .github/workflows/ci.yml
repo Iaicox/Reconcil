@@ -127,6 +127,10 @@ jobs:
       # Golden-wallet reconciliation (native balance == recorded eth_get_balance) and the
       # DB-derived ground-truth numbers (numbers.itest.ts) — deterministic, no LLM key.
       - run: pnpm --filter @reconcil/evals test:integration
+      # The eval SEEDER's own coverage: ledger_status reads ingestion_checkpoints, and a
+      # seeder that leaves them empty tells every case the tenant has no wallets. Only a
+      # real database shows that, so it cannot live in the hermetic suite. No LLM key.
+      - run: pnpm --filter @reconcil/cli test:integration
 
   # Resolve secret presence into a job output. A job-level `if:` can't reference secrets.*,
   # but a step expression can — so the eval jobs gate on this output and SKIP (grey) when
