@@ -36,12 +36,38 @@ export function roundHalfUp(value: string, dp: number): DecimalString {
 }
 
 /**
- * Canonicalize a provider's JSON price number into a non-exponential decimal
- * string (the value we then store and pin). A JSON number is a float, so this is
- * the one lossy crossing — but the *stored* snapshot string is what P5 pins and
- * reproduces; providers quote display-precision. Non-finite/non-number → null.
+ * A JSON number's source text, exactly as it appeared in the payload. Anything else —
+ * a symbol, a date, an empty string — must not be mistaken for a quote, so the grammar
+ * is JSON's own and nothing looser.
+ */
+const JSON_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
+
+/**
+ * Canonicalize a provider's JSON price into a non-exponential decimal string (the value
+ * we then store and pin).
+ *
+ * Accepts either the parsed `number` or the **source text** of the JSON number. The text
+ * is the exact form and the one to prefer: by the time a `number` gets here, `JSON.parse`
+ * has already rounded the provider's quote to float precision, so the stored snapshot can
+ * differ from what was actually quoted in its last digits. `realFetchJson` now hands over
+ * the source text (transport.ts), which closes that crossing; the `number` branch remains
+ * for fixtures recorded before it, where the text is already gone.
+ *
+ * Non-finite, non-numeric, or a string that is not a JSON number → null.
  */
 export function numberToDecimalString(n: unknown): DecimalString | null {
+  if (typeof n === 'string') {
+    // Two guards, and both matter. `Number.isFinite` bounds the MAGNITUDE exactly as the
+    // number branch below always did: `1e10000` used to arrive already collapsed to
+    // Infinity and be rejected, and it must still be — otherwise a hostile or corrupt body
+    // pins a 10,001-digit "price", or (past decimal.js's maxE) the literal string
+    // "Infinity", into price_snapshots instead of failing over to the next provider.
+    // What the source text buys is the last DIGITS, never a wider exponent range: any
+    // price a provider really quotes is float-representable in magnitude.
+    if (!JSON_NUMBER.test(n) || !Number.isFinite(Number(n))) return null;
+    const d = new D(n);
+    return d.isFinite() ? (d.toFixed() as DecimalString) : null;
+  }
   if (typeof n !== 'number' || !Number.isFinite(n)) return null;
   return new D(String(n)).toFixed() as DecimalString;
 }

@@ -8,10 +8,10 @@
  * carrying the canary — `toTokenView` renders hostile `*_raw` as an empty `symbol` (ADR-011:
  * raw strings never leave the server), so G5 checks the canary can't leak even when present.
  */
-import { chainEvents, tenants, tokens, wallets, type Db } from '@reconcil/db';
+import { chainEvents, ingestionCheckpoints, tenants, tokens, wallets, type Db } from '@reconcil/db';
 import { seedGoldenWallet, seedReconFixture, type EvalCase, type ReconFixtureRole } from '@reconcil/evals';
 import type { ToolContext } from '@reconcil/mcp-tools';
-import { sql } from 'drizzle-orm';
+import { eq, or, sql } from 'drizzle-orm';
 
 import type { CaseEnvironment, CaseSeeder } from './types.js';
 
@@ -42,7 +42,14 @@ export function makeSeedCase(db: Db): CaseSeeder {
       if (fixture === undefined) {
         throw new Error(`Face B case ${evalCase.id} must name a recon fixture in setup.fixture`);
       }
-      await seedReconFixture(db, tenantId, fixture as ReconFixtureRole);
+      const recon = await seedReconFixture(db, tenantId, fixture as ReconFixtureRole);
+      // Mirror image of the Face A case below: the recon scenario's settlements ARE erc20
+      // transfers and it has no native activity, so only the erc20 stream is claimed. Its
+      // synthetic events are the whole history — there is no ingested window to speak of —
+      // so the cursor is the highest block actually written.
+      await seedCheckpoints(db, recon.walletAddress, [
+        { stream: 'erc20', status: 'live', lastProcessedBlock: await maxEventBlock(db, recon.walletAddress) },
+      ]);
     } else {
       const role = evalCase.setup?.fixture;
       if (role !== undefined) {
@@ -51,6 +58,17 @@ export function makeSeedCase(db: Db): CaseSeeder {
           .insert(wallets)
           .values({ tenantId, address: seeded.address })
           .onConflictDoNothing({ target: [wallets.tenantId, wallets.address] });
+        await seedCheckpoints(db, seeded.address, [
+          // The native stream really is ingested end to end (txlist + txlistinternal + gas),
+          // and `toBlock` is the window seedGoldenWallet actually covered — which is the
+          // cursor's own definition, "events complete for blocks <= last_processed_block".
+          { stream: 'native', status: 'live', lastProcessedBlock: Number(seeded.toBlock) },
+          // erc20 genuinely cannot be ingested yet: the recorded tokentx fixtures carry no
+          // provider log_index (04-testing.md §2, unblocker (a)). Leaving it `queued` is the
+          // truth, and mapCoverage turns it into COVERAGE_INCOMPLETE — the signal cover-001
+          // ("agent must surface the sync warning") was written for and never once received.
+          { stream: 'erc20', status: 'queued', lastProcessedBlock: 0 },
+        ]);
 
         if (evalCase.expect.canary_absent !== undefined) {
           await plantInjectionToken(db, evalCase.expect.canary_absent, seeded.address);
@@ -61,6 +79,39 @@ export function makeSeedCase(db: Db): CaseSeeder {
     const ctx: ToolContext = { db, tenantId };
     return { ctx };
   };
+}
+
+/**
+ * Ingestion checkpoints for a seeded fixture wallet, on chain 1.
+ *
+ * Without these, `ledger_status` — the tool the system prompt tells the agent to reach for
+ * "when freshness matters" — reads an empty `ingestion_checkpoints` and reports NO TRACKED
+ * WALLETS for every case, while the wallet row and its `chain_events` sit right there.
+ * Agents that believed it were scored as failures for doing the right thing: on the
+ * 2026-09-08 full run, flow-002 and flow-003-self-transfer each called `ledger_status`,
+ * were told the tenant had no data, and declined to report a figure.
+ *
+ * `updated_at` defaults to now(), so a seeded stream is fresh and `stale` stays false —
+ * the fixture's data is as current as the run that seeded it.
+ */
+async function seedCheckpoints(
+  db: Db,
+  address: string,
+  streams: { stream: 'native' | 'erc20'; status: 'live' | 'queued'; lastProcessedBlock: number }[],
+): Promise<void> {
+  await db.insert(ingestionCheckpoints).values(
+    streams.map((s) => ({ chainId: 1, address: address.toLowerCase(), ...s })),
+  );
+}
+
+/** Highest block written for `address` on either side of a transfer; 0 when it has no events. */
+async function maxEventBlock(db: Db, address: string): Promise<number> {
+  const addr = address.toLowerCase();
+  const [row] = await db
+    .select({ max: sql<number | null>`max(${chainEvents.blockNumber})` })
+    .from(chainEvents)
+    .where(or(eq(chainEvents.fromAddr, addr), eq(chainEvents.toAddr, addr)));
+  return row?.max ?? 0;
 }
 
 /**

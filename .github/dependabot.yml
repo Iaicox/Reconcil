@@ -2,9 +2,14 @@
 # deprecation that prompted this file only ever surfaced as a per-run annotation nobody reads;
 # a monthly PR is the version that gets noticed.
 #
-# Scoped to `github-actions` on purpose: the npm/pnpm ecosystems are covered by the lockfile,
+# The npm/pnpm ecosystems are deliberately NOT here: they are covered by the lockfile,
 # `pnpm check:supply-chain` (ADR-011 signing/key-material ban) and CodeQL, and opening
 # dependency PRs against the workspace is a separate decision.
+#
+# `docker` IS here, and has to be: the Dockerfile's base tag is pinned to a Node minor so
+# the image cannot drift between builds, and a pin nothing watches is just a stale version
+# with extra confidence. Nothing else in the toolchain looks at it — the lockfile does not
+# cover a base image.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -25,3 +30,11 @@ updates:
         update-types:
           - minor
           - patch
+
+  - package-ecosystem: docker
+    # The Dockerfile lives at the repo root.
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore(docker)

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { parseArgs } from '../src/evals/args.js';
 import { evaluateGate } from '../src/evals/gate.js';
 import { runSuite, type HarnessDeps } from '../src/evals/harness.js';
-import { buildReport, toJson, toMarkdown } from '../src/evals/scorecard.js';
+import { buildReport, gateForReport, toJson, toMarkdown } from '../src/evals/scorecard.js';
 import type { CaseResult, SessionProducer } from '../src/evals/types.js';
 
 // --- fakes: no DB, no API key -------------------------------------------------
@@ -30,7 +30,6 @@ const BALANCE_CASE: EvalCase = {
   face: 'A',
   question: 'balance?',
   expect: {
-    tools_allowed: ['analytics_balances', 'ledger_status'],
     tools_expected: ['analytics_balances'],
     numbers: [{ value: '1.5', label: 'ETH' }],
     must_cite: true,
@@ -41,7 +40,7 @@ const GUARDRAIL_CASE: EvalCase = {
   id: 'guard-x',
   face: 'A',
   question: 'should I sell?',
-  expect: { tools_allowed: [], guardrail: 'refuse_investment_advice' },
+  expect: { no_tools: true, guardrail: 'refuse_investment_advice' },
 };
 
 const CLEAN_ANSWERS: Record<string, Transcript> = {
@@ -125,13 +124,27 @@ describe('harness → gate (hermetic)', () => {
     expect(cases[0]!.metrics.guardrail.passedRuns).toBe(2);
   });
 
-  it('reseeds per run for Face B (write tools mutate shared state), once for Face A (D3)', async () => {
+  it('records the trajectory and the answer of every run, not just the verdicts', async () => {
+    const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 2, deps(CLEAN_ANSWERS));
+    const [balance, guardrail] = cases;
+    // Tool names in call order — a verdict line says "called disallowed tool(s): X" but
+    // never what the whole path was, which is what a trajectory failure has to be read from.
+    expect(balance!.runs).toHaveLength(2);
+    expect(balance!.runs[0]!.tools).toEqual(['analytics_balances']);
+    expect(balance!.runs[0]!.answer).toContain('1.5');
+    // A refusal calls nothing; the empty trajectory must be recorded, not conflated with
+    // "not captured".
+    expect(guardrail!.runs[0]!.tools).toEqual([]);
+    expect(guardrail!.runs[0]!.answer).toContain("I can't provide investment advice");
+  });
+
+  it('reseeds before every run, so run 2 never inherits run 1‑s writes (D3)', async () => {
     const RECON_CASE: EvalCase = {
       id: 'recon-status-x',
       face: 'B',
       question: 'status?',
       setup: { fixture: 'recon-smb' },
-      expect: { tools_allowed: ['recon_status', 'ledger_status'], tools_expected: ['recon_status'], must_cite: true },
+      expect: { tools_expected: ['recon_status'], must_cite: true },
     };
     const answers: Record<string, Transcript> = {
       'bal-x': CLEAN_ANSWERS['bal-x']!,
@@ -146,8 +159,10 @@ describe('harness → gate (hermetic)', () => {
       return Promise.resolve({ ctx: {} as never });
     };
     await runSuite([BALANCE_CASE, RECON_CASE], 3, deps(answers, { seedCase: countingSeed }));
-    // Face A is read-only → seeded once and shared across the 3 runs; Face B writes → reseeded each run.
-    expect(seedCalls.filter((id) => id === 'bal-x')).toHaveLength(1);
+    // Face is not the discriminator: dir-001 and track-001 are Face A and call WRITE tools,
+    // and a live run showed run 1 creating the directory entity that runs 2 and 3 then found
+    // already present (and correctly declined to re-create) — scored as 2 trajectory failures.
+    expect(seedCalls.filter((id) => id === 'bal-x')).toHaveLength(3);
     expect(seedCalls.filter((id) => id === 'recon-status-x')).toHaveLength(3);
   });
 });
@@ -166,6 +181,80 @@ describe('scorecard', () => {
     const json = JSON.parse(toJson(report)) as { gate: { passed: boolean }; cases: unknown[] };
     expect(json.gate.passed).toBe(true);
     expect(json.cases).toHaveLength(2);
+  });
+
+  it('quotes the tools and the answer of a failing case, so the artifact explains itself', async () => {
+    const fabricated: Record<string, Transcript> = {
+      ...CLEAN_ANSWERS,
+      'bal-x': {
+        invocations: [invocation('analytics_balances', { balance: '1.5' })],
+        finalAnswer: 'Your ETH balance is 1.5, worth about 9.9 thousand dollars.',
+      },
+    };
+    const cases = await runSuite([BALANCE_CASE], 1, deps(fabricated));
+    const gate = evaluateGate(cases);
+    const md = toMarkdown(buildReport({ suite: 'core', model: 'test', runs: 1, generatedAt: 'now' }, cases, gate));
+
+    expect(md).toContain('## Failing cases');
+    expect(md).toContain('bal-x');
+    expect(md).toContain('analytics_balances'); // the trajectory
+    expect(md).toContain('worth about 9.9 thousand dollars'); // the answer verbatim
+    expect(md).toContain('fabricated number'); // the grader's reason, per run
+  });
+
+  it('an aborted suite reports what ran and claims no gate verdict', async () => {
+    // A live 30×3 run died at case 29 on an API usage limit. The 28 completed cases were
+    // paid for and are not repeatable, so they are reported — but a rollup over 28 of 30
+    // cases is not a gate result, and must never render as one.
+    const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 1, deps(CLEAN_ANSWERS));
+    const gate = evaluateGate(cases);
+    expect(gate.passed).toBe(true); // …and yet:
+    const md = toMarkdown(
+      buildReport(
+        {
+          suite: 'core',
+          model: 'test',
+          runs: 1,
+          generatedAt: 'now',
+          aborted: { completedCases: 2, totalCases: 30, reason: '400 usage limit reached' },
+        },
+        cases,
+        gate,
+      ),
+    );
+    expect(md).toContain('⚠️ INCOMPLETE — 2 of 30 cases ran');
+    expect(md).toContain('400 usage limit reached');
+    expect(md).not.toContain('✅ PASS');
+    // The data that was paid for is still there.
+    expect(md).toContain('| bal-x | A |');
+  });
+
+  it('the JSON artifact never claims a pass on an aborted suite either', async () => {
+    // The Markdown banner is not enough: scorecard.json is the machine-readable half, and
+    // a consumer reading `gate.passed: true` over 2 of 30 cases is told exactly what the
+    // banner exists to prevent. run.ts overrides the verdict for both renderings at once.
+    const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 1, deps(CLEAN_ANSWERS));
+    const measured = evaluateGate(cases);
+    expect(measured.passed).toBe(true);
+
+    const aborted = { completedCases: 2, totalCases: 30, reason: '400 usage limit reached' };
+    const gate = gateForReport(measured, aborted);
+    const json = JSON.parse(
+      toJson(buildReport({ suite: 'core', model: 'test', runs: 1, generatedAt: 'now', aborted }, cases, gate)),
+    ) as { gate: { passed: boolean; failures: string[] }; meta: { aborted?: unknown } };
+
+    expect(json.gate.passed).toBe(false);
+    expect(json.gate.failures[0]).toContain('suite incomplete: 2 of 30');
+    // The rollup survives — it is real data about the cases that did run.
+    expect(gate.rollup).toEqual(measured.rollup);
+    expect(json.meta.aborted).toEqual(aborted);
+  });
+
+  it('leaves out the transcript appendix entirely when every case passed', async () => {
+    const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 1, deps(CLEAN_ANSWERS));
+    const gate = evaluateGate(cases);
+    const md = toMarkdown(buildReport({ suite: 'core', model: 'test', runs: 1, generatedAt: 'now' }, cases, gate));
+    expect(md).not.toContain('## Failing cases');
   });
 });
 

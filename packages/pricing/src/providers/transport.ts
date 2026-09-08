@@ -98,6 +98,28 @@ export function throttled(inner: FetchJson, ms: number): FetchJson {
   };
 }
 
+/**
+ * Parse a provider body, keeping every JSON number as its **source text**.
+ *
+ * `JSON.parse` produces a float, and a provider's quote can carry more precision than a
+ * float holds — so by the time `numberToDecimalString` saw the value, the last digits of
+ * what was actually quoted were already gone, and the snapshot we pin (P5) could differ
+ * from the source. Money is never a `number` (ADR-004); this was the last place a provider
+ * figure crossed through one. The reviver's third argument carries the raw source text for
+ * primitives (Node ≥ 22), so the exact digits survive without re-implementing a parser.
+ *
+ * Applied to response BODIES only. The fixture envelope around them has a numeric
+ * `response.status`, which must stay a number — and does, because fixtures are parsed
+ * plainly (a body recorded through this function is already stored as JSON strings, so
+ * replay is exact without a second reviver; a body recorded before this change replays as
+ * numbers, which numberToDecimalString still accepts).
+ */
+export function parseJsonPreservingNumbers(text: string): unknown {
+  return JSON.parse(text, function reviveExactNumbers(_key: string, value: unknown, context?: { source?: string }) {
+    return typeof value === 'number' && typeof context?.source === 'string' ? context.source : value;
+  }) as unknown;
+}
+
 /** Production transport over global fetch (Node ≥ 22). Non-JSON bodies pass through as text. */
 export function realFetchJson(): FetchJson {
   return async (url) => {
@@ -105,7 +127,7 @@ export function realFetchJson(): FetchJson {
     const text = await res.text();
     let body: unknown;
     try {
-      body = JSON.parse(text) as unknown;
+      body = parseJsonPreservingNumbers(text);
     } catch {
       body = text;
     }

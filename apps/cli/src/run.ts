@@ -23,10 +23,10 @@ import { withTempExportDir } from './evals/export-dir.js';
 import { evaluateGate } from './evals/gate.js';
 import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
-import { buildReport, toJson, toMarkdown } from './evals/scorecard.js';
+import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
-import { METRICS } from './evals/types.js';
+import type { CaseResult, GateResult } from './evals/types.js';
 
 /** DATABASE_URL if provided, else a throwaway container. Returns db + a disposer. */
 async function provisionDb(): Promise<{ db: Db; dispose: () => Promise<void> }> {
@@ -60,6 +60,44 @@ async function provisionDb(): Promise<{ db: Db; dispose: () => Promise<void> }> 
       await container.stop();
     },
   };
+}
+
+/**
+ * Grade, gate and write the scorecard for whatever cases are in hand, returning the output
+ * directory and the verdict that was written. Shared by the normal path and the aborted
+ * one, so a partial run is reported through exactly the same renderer — an `aborted` meta
+ * is the only difference, and it is what stops a partial suite from claiming a gate
+ * verdict it has not earned, in the JSON as well as the Markdown.
+ */
+function writeReport(
+  args: { suite: string; model: string; runs: number; out: string },
+  cases: CaseResult[],
+  resolvedModels: ReadonlySet<string>,
+  aborted?: NonNullable<ReportMeta['aborted']>,
+): { outDir: string; gate: GateResult } {
+  const gate = gateForReport(evaluateGate(cases), aborted);
+  const report = buildReport(
+    {
+      suite: args.suite,
+      model: args.model,
+      // exactOptionalPropertyTypes: omit the key entirely rather than set undefined.
+      ...(resolvedModels.size > 0 ? { resolvedModel: [...resolvedModels].sort().join(', ') } : {}),
+      runs: args.runs,
+      generatedAt: new Date().toISOString(),
+      ...(aborted ? { aborted } : {}),
+    },
+    cases,
+    gate,
+  );
+
+  const outDir = resolve(args.out);
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(outDir, 'scorecard.json'), toJson(report), 'utf8');
+  writeFileSync(join(outDir, 'scorecard.md'), toMarkdown(report), 'utf8');
+  console.error(toMarkdown(report));
+  // Returned rather than recomputed by the caller: the exit code and the artifact must
+  // come from one verdict, or an override like the one above could apply to only one.
+  return { outDir, gate };
 }
 
 /**
@@ -119,15 +157,37 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
       const seedCase = makeSeedCase(db);
 
       console.error(`running ${String(dataset.length)} cases × ${String(args.runs)} run(s) on ${args.model}…`);
-      const cases = await runSuite(dataset, args.runs, {
-        seedCase,
-        produce,
-        makeResolver: dbResolver,
-        onCase: (r) => {
-          const safety = (['citation', 'guardrail', 'injection'] as const).every((m) => !r.metrics[m].applicable || r.metrics[m].passed);
-          console.error(`  ${r.id}: ${safety ? 'ok' : 'SAFETY FAIL'}`);
-        },
-      });
+      // Accumulated as each case completes, so a suite that dies partway still has
+      // something to write. A session can fail on something that is not about the cases at
+      // all — an API usage limit, a dropped connection — and every case up to that point is
+      // paid for and cannot be re-run for free.
+      const completed: CaseResult[] = [];
+      let cases: CaseResult[];
+      try {
+        cases = await runSuite(dataset, args.runs, {
+          seedCase,
+          produce,
+          makeResolver: dbResolver,
+          onCase: (r) => {
+            completed.push(r);
+            const safety = (['citation', 'guardrail', 'injection'] as const).every((m) => !r.metrics[m].applicable || r.metrics[m].passed);
+            console.error(`  ${r.id}: ${safety ? 'ok' : 'SAFETY FAIL'}`);
+          },
+        });
+      } catch (err) {
+        if (completed.length > 0) {
+          const { outDir } = writeReport(args, completed, resolvedModels, {
+            completedCases: completed.length,
+            totalCases: dataset.length,
+            reason: err instanceof Error ? err.message : String(err),
+          });
+          console.error(
+            `\nsuite stopped after ${String(completed.length)}/${String(dataset.length)} cases — ` +
+              `partial scorecard written to ${outDir}`,
+          );
+        }
+        throw err;
+      }
 
       if (resolvedModels.size > 0) {
         console.error(`model resolved to: ${[...resolvedModels].sort().join(', ')}`);
@@ -143,42 +203,11 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
           `${String(usage.cacheCreation)}, output ${String(usage.output)}`,
       );
 
-      const gate = evaluateGate(cases);
-      const report = buildReport(
-        {
-          suite: args.suite,
-          model: args.model,
-          // exactOptionalPropertyTypes: omit the key entirely rather than set undefined.
-          ...(resolvedModels.size > 0 ? { resolvedModel: [...resolvedModels].sort().join(', ') } : {}),
-          runs: args.runs,
-          generatedAt: new Date().toISOString(),
-        },
-        cases,
-        gate,
-      );
-
-      const outDir = resolve(args.out);
-      mkdirSync(outDir, { recursive: true });
-      writeFileSync(join(outDir, 'scorecard.json'), toJson(report), 'utf8');
-      writeFileSync(join(outDir, 'scorecard.md'), toMarkdown(report), 'utf8');
-
-      console.error(toMarkdown(report));
-
-      if (!gate.passed) {
-        // Surface the grader's detail for every applicable metric that failed, so the CI
-        // log explains WHY (e.g. "expected X not found" = rounding, "fabricated Y", wrong
-        // figure) without needing the JSON artifact.
-        console.error('Failing details:');
-        for (const c of cases) {
-          for (const m of METRICS) {
-            const outcome = c.metrics[m];
-            if (!outcome.applicable || outcome.passed) continue;
-            const failing = c.runs.find((r) => !r[m].pass);
-            console.error(`  ${c.id} · ${m}: ${failing?.[m].detail ?? '(failed)'}`);
-          }
-        }
-      }
-
+      // The Markdown ends in the transcript appendix — every failing case's grader reason,
+      // trajectory and answer — so the CI log explains WHY on its own. That replaces the
+      // "Failing details" summary this used to print separately, and it prints for a
+      // failing case even when the suite still clears the 90% gate.
+      const { outDir, gate } = writeReport(args, cases, resolvedModels);
       console.error(`\nreports → ${outDir}`);
       if (!gate.passed) process.exitCode = 1;
     } finally {

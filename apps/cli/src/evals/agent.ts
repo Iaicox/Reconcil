@@ -43,13 +43,53 @@ export interface TokenUsage {
   cacheRead: number;
 }
 
+/** True when a message is an assistant turn that asked for a tool. */
+function requestsTool(message: Anthropic.Beta.BetaMessageParam): boolean {
+  return (
+    message.role === 'assistant' &&
+    Array.isArray(message.content) &&
+    message.content.some((b) => typeof b === 'object' && 'type' in b && b.type === 'tool_use')
+  );
+}
+
+/**
+ * A conversation safe to append the next user turn to.
+ *
+ * The runner normally ends on an assistant message with no tool_use, and appends each
+ * tool_result in the same iteration it pushed the tool_use — but it also stops on
+ * `max_iterations` and on a refusal `stop_reason`, and either can leave the last assistant
+ * message asking for a tool that was never answered. Sending that forward is a hard 400:
+ * every `tool_use` id must be followed by its `tool_result`. Since run.ts now treats an
+ * unhandled throw as an aborted SUITE, one prior turn hitting its iteration cap would cost
+ * every case after it, so the unanswered tail is dropped instead of threaded.
+ */
+export function threadable(messages: Anthropic.Beta.BetaMessageParam[]): Anthropic.Beta.BetaMessageParam[] {
+  const out = [...messages];
+  while (out.length > 0 && requestsTool(out[out.length - 1]!)) out.pop();
+  return out;
+}
+
 export function makeAgentProducer(opts: AgentOptions): SessionProducer {
   return async ({ eval: evalCase, ctx }: SessionInput) => {
-    const invocations: ToolInvocation[] = [];
+    // `let`, because a prior turn's calls are setup rather than trajectory and the array is
+    // swapped out before the graded turn. The sink closes over the binding, not the array.
+    let invocations: ToolInvocation[] = [];
     const runnableTools = buildRunnableTools(ctx, (inv) => invocations.push(inv));
 
-    const runner = opts.client.beta.messages
-      .toolRunner({
+    // A case may name turns asked BEFORE the graded question. trace-001 ("explain how you
+    // arrived at the gas figure from my previous question") had no previous question to
+    // refer to and answered with zero tool calls, 3/3 — unpassable by construction, since
+    // ledger_trace_tool_call needs a tool_call_id that only a previous turn can produce.
+    const turns = [...(evalCase.prior_turns ?? []), evalCase.question];
+    let messages: Anthropic.Beta.BetaMessageParam[] = [];
+    let final: Anthropic.Beta.BetaMessage | undefined;
+
+    for (const [index, turn] of turns.entries()) {
+      // One runner per turn: a runner refuses to be iterated twice ("Cannot iterate over a
+      // consumed stream"), and its max_iterations counts across its whole life. `params`
+      // hands back the accumulated conversation — assistant turns and tool results included
+      // — which is what makes the next turn a continuation rather than a fresh session.
+      const runner = opts.client.beta.messages.toolRunner({
         model: opts.model,
         max_tokens: opts.maxTokens ?? 4096,
         max_iterations: opts.maxIterations ?? 8,
@@ -66,27 +106,35 @@ export function makeAgentProducer(opts: AgentOptions): SessionProducer {
           },
         ],
         tools: runnableTools,
-        messages: [{ role: 'user', content: evalCase.question }],
+        messages: [...messages, { role: 'user', content: turn }],
       });
 
-    // The runner is async-iterable and yields every assistant message, i.e. one per API
-    // call; `runUntilDone()` afterwards returns the last of them. Iterating is the only
-    // way to see per-call usage — the final message alone reports just its own.
-    if (opts.onUsage) {
-      for await (const message of runner) {
-        opts.onUsage({
-          input: message.usage.input_tokens,
-          output: message.usage.output_tokens,
-          cacheCreation: message.usage.cache_creation_input_tokens ?? 0,
-          cacheRead: message.usage.cache_read_input_tokens ?? 0,
-        });
+      // The runner is async-iterable and yields every assistant message, i.e. one per API
+      // call; `runUntilDone()` afterwards returns the last of them. Iterating is the only
+      // way to see per-call usage — the final message alone reports just its own.
+      if (opts.onUsage) {
+        for await (const message of runner) {
+          opts.onUsage({
+            input: message.usage.input_tokens,
+            output: message.usage.output_tokens,
+            cacheCreation: message.usage.cache_creation_input_tokens ?? 0,
+            cacheRead: message.usage.cache_read_input_tokens ?? 0,
+          });
+        }
       }
+      final = await runner.runUntilDone();
+      messages = threadable([...runner.params.messages]);
+      // The graded turn is the last one. A prior turn's tool calls stay in the database
+      // (that is the point — trace-001 has to find one there), but they are not the
+      // trajectory G1 scores or the citations G3 checks.
+      if (index < turns.length - 1) invocations = [];
     }
-    const final = await runner.runUntilDone();
 
-    opts.onResolvedModel?.(final.model);
+    // `turns` always holds at least evalCase.question, so the loop ran and `final` is set.
+    const answered = final!;
+    opts.onResolvedModel?.(answered.model);
 
-    const finalAnswer = final.content
+    const finalAnswer = answered.content
       .map((b) => (b.type === 'text' ? b.text : ''))
       .join('')
       .trim();

@@ -140,46 +140,7 @@ freshness/fold-correctness hardening pass. Where: `packages/ledger/test/ledger.i
 
 ## Pricing
 
-**`numberToDecimalString` loses precision because `JSON.parse` has already destroyed the
-provider's original decimal text.** A provider's JSON price arrives as a JS `number`;
-`JSON.parse` has already rounded it to float precision by the time
-`numberToDecimalString` sees it, so the stored snapshot string can differ in its last
-digit(s) from what the provider actually quoted. Why deferred: not a correctness bug for
-the product's stated precision needs (accounting-grade rounding happens at export, not
-here), and the fix requires a `JSON.parse` reviver threaded through every provider
-adapter — a larger, cross-cutting change. Trigger: a validation-gate interview surfaces a
-real precision complaint, or a provider quotes a price where the float rounding crosses a
-cent boundary that matters to a matched invoice. Where: `packages/pricing/src/decimal.ts`
-(`numberToDecimalString`); the fix would live in each provider's JSON parsing
-(`packages/pricing/src/providers/*.ts`) via a custom reviver. *(sweep)*
-
-**Peg materialization still joins `chain_events` on every run.** `materializePegSnapshots`
-uses a `NOT EXISTS` anti-join against `price_snapshots` so a steady-state run only *inserts*
-work proportional to new activity, but it still *scans* all of `chain_events` each time —
-a watermark table (e.g. `max chain_events.id` already scanned) would avoid the scan
-entirely. Why deferred: the anti-join already removes the actual flagged cost (repeated
-`DISTINCT`-then-conflict-check over full history); a watermark table adds new persistent
-state and a migration for a cost that isn't yet the bottleneck, and a naive `block_time`
-watermark would be actively wrong (backfills insert old-dated rows out of order, so a
-`block_time` cutoff would permanently skip them — see the function's docstring). Trigger:
-`chain_events`'s full-table scan becomes measurably the bottleneck in the price-fill job.
-Where: `packages/pricing/src/snapshot-service.ts` (`materializePegSnapshots`). *(Task 17,
-`chore/pricing-ledger-minors`)*
-
 ## Face B (reconciliation & matching)
-
-**`unmatched_settlements` counts only events with NO confirmed leg, so a partially applied
-event vanishes from the count.** A settlement event that has *some* confirmed leg but
-still has unapplied value left over is excluded from `unmatched_settlements` entirely — it
-only tracks the fully-unmatched case. This is a documented decision, not an oversight: see
-the docstring at the call site. Why deferred: `unmatched_settlements` is defined as "the
-count `recon_suggest_matches` defers to" (its own candidate search can under-report), and
-extending it to a residual (partially-applied) amount is a genuinely different, more
-complex aggregate. Trigger: a validation-gate interview or real usage shows partial-event
-visibility is needed for reconciliation completeness. Where:
-`packages/mcp-tools/src/recon/status-repo.ts` (`computeReconStatus`,
-`unmatchedSettlements`). *(sweep — the decision itself is documented in-code; recorded
-here per the arc's explicit call-out)*
 
 **The subset-search heuristic's known miss-mode: the candidate pool is the ≤ 6
 largest-valued events in the date window, not "any ≤ 6 events."** An exact split whose
@@ -238,13 +199,6 @@ arc's own merge-surface discipline is explained rather than silent. No action ne
 Where: `packages/mcp-tools/src/tools/export-journal-drafts.ts`, on
 `chore/exporters-hardening`. *(Task 16, `chore/exporters-hardening`)*
 
-**`matches.fiat_value` has no DB-level `CHECK (>= 0)`, unlike `amount_applied_raw`/`price`/
-`rate`.** Non-negativity is enforced only at the application layer (the matching engine
-never produces a negative valuation), not at the schema. Trigger: add the constraint the
-next time `schema.sql`/the matches table gets a migration for an unrelated reason — cheap
-to bundle in. Where: `docs/architecture/schema.sql` (`matches.fiat_value`, currently line
-217) and `packages/db/src/schema.ts`. *(Task 16, `chore/exporters-hardening`)*
-
 ## Transport & auth
 
 **`destroy()` on an already-completed response could, in principle, RST a reply that was
@@ -265,40 +219,6 @@ deferred: not attacker-reachable — `allowedHosts` is an injectable test seam, 
 request-controlled value; production always calls `resolveAllowedHosts(cfg)`. Trigger:
 tighten if `HttpDeps` construction is ever exposed to less-trusted callers. Where:
 `apps/mcp-server/src/{http.ts,config.ts}`. *(Task 11, `fix/server-transport`)*
-
-**`http.ts`'s `main()` still lacks the ordered/idempotent/forced-exit shutdown pattern
-`stdio.ts` now has, and a hijacked SSE response bypasses Fastify's own connection
-tracking.** `stdio.ts` gained a proper shutdown sequence in this arc; `http.ts` did not —
-its own slice was deferred rather than folded in, since hijacked-response bookkeeping
-(reply.hijack() takes the raw socket out of Fastify's tracking, so `pool.end()` can sever
-a hijacked stream mid-response during shutdown) is a materially different problem from
-stdio's shutdown. Trigger: build the `http.ts` shutdown slice — this is the load-bearing
-item this arc's Task 11 explicitly named as its own future slice. Where:
-`apps/mcp-server/src/http.ts` (`main`), contrasted with the pattern in
-`apps/mcp-server/src/stdio.ts`. *(Task 11, `fix/server-transport`)*
-
-**API keys have no expiry and no `last_used_at` — a leaked bearer key is valid forever and
-its use is invisible.** The `api_keys` table has `created_at` and `revoked_at` but no
-`expires_at` and no `last_used_at`; revocation is the only way to end a key's life, and
-there is no way to notice a key is being used by someone other than its intended holder
-(or has gone unused and should be rotated). Why deferred: ADR-012 already documents "no
-scopes, no expiry (only revocation)" as an accepted demo-grade trade-off, not a production
-posture — this entry adds the specific `last_used_at` visibility gap, which the ADR does
-not call out. Trigger: this is an explicit ADR-012 gate criterion for the OAuth/
-production-multi-tenant work — build it as part of that milestone, not before. Where:
-`packages/db/src/schema.ts` (`apiKeys`); see
-[ADR-012](../adr/ADR-012-mcp-transport-auth.md) Consequences. *(sweep — ADR-012 already
-covers "no expiry"; `last_used_at` is the gap this entry adds)*
-
-**Fastify is built without `trustProxy`, so the per-IP backstop degrades behind a proxy.**
-`request.ip` is the socket peer, which is the proxy itself once TLS is terminated in front
-of the server — every client then shares one bucket and the unauthenticated backstop added
-in decision 6 of ADR-012 becomes a *global* 600/min rather than a per-client limit. The
-tenant-keyed fairness bucket is unaffected (it keys on the verified tenant, not the IP).
-Trigger: the first deployment that puts a reverse proxy in front of the server — set
-`trustProxy` to the proxy topology at the same time. Where: `apps/mcp-server/src/http.ts`
-(the Fastify constructor) and its `onRequest` limiter.
-*(landing sweep — uncovered by the whole-arc review, not on the task ledger)*
 
 ## Exporters
 
@@ -374,15 +294,20 @@ bisect` crossing that commit will hit a red build. Recorded so a future bisect i
 mistaken for a real regression. Where: `packages/recon/tsconfig.json`, at commit range
 `eaabbfd..f6a6871` on `chore/supply-chain-config`. *(Task 15, `chore/supply-chain-config`)*
 
-**The prod Docker image isn't slim (ships the full source tree plus devDependencies, no
-`pnpm prune --prod`), and its `node:22-slim` base floats on the major tag.** `pnpm prune
---prod` was tried and rejected in-slice: it aborts without a TTY in this workspace and,
-once forced, strips hoisted prod dependencies (e.g. `pg`) that a workspace app still needs
-at runtime — see the Dockerfile's own comment. Trigger: revisit sizing via `pnpm deploy
---prod` (a documented later size optimization) once image size becomes an actual
-deployment concern; pin the base image tag whenever the next `node:22` → `node:23`-class
-bump is planned rather than floating into it silently. Where: `Dockerfile`. *(Task 15,
-`chore/supply-chain-config`)*
+**The prod Docker image isn't slim** — it ships the full source tree plus devDependencies,
+with no `pnpm prune --prod`. That was tried and rejected in-slice: it aborts without a TTY
+in this workspace and, once forced, strips hoisted prod dependencies (e.g. `pg`) that a
+workspace app still needs at runtime — see the Dockerfile's own comment. Trigger: revisit
+sizing via `pnpm deploy --prod` (a documented later size optimization) once image size
+becomes an actual deployment concern. Where: `Dockerfile`. *(Task 15,
+`chore/supply-chain-config`; the base-tag half of this entry is closed — see below)*
+
+> The other half — "its `node:22-slim` base floats on the major tag" — is **fixed** (PR #66).
+> The tag pins the minor and Dependabot gained the `docker` ecosystem so the pin is
+> maintained rather than aging. Not pinned to `.nvmrc`'s 22.13, which is a trap worth
+> knowing: that image bundles a corepack whose signing keys predate npm's rotation, so
+> `pnpm fetch` dies on "Cannot find matching keyid" before downloading anything. `.nvmrc`
+> and `engines` are floors, not ceilings.
 
 **`site`'s `next lint` script emits a deprecation warning on every run.** A second,
 unrelated fact bundled into the same ledger line as the Dockerfile item above (both were
@@ -413,21 +338,6 @@ exception if a second such script appears. Where: `package.json:23` (root
 `@reconcil/ingestion` devDependency), `scripts/capture-internal-txs.ts`; the rule itself
 is in `.dependency-cruiser.cjs`. *(Task 15, `chore/supply-chain-config` — OPEN AUDIT ITEM,
 explicitly carried to this slice)*
-
-**The prod image ships the eval runner, so `apps/cli` carries `@testcontainers/postgresql`
-as a runtime dependency.** It sits in `dependencies`, not `devDependencies`, and correctly
-so: `apps/cli/src/run.ts` calls `new PostgreSqlContainer(...).start()` on the runtime path
-taken when `DATABASE_URL` is unset. The real defect is upstream of the manifest — the eval
-runner has no business being in the production image at all. Trigger: the slim-image slice;
-moving the dependency without moving the runner would only break the runner. Where:
-`apps/cli/package.json`, `apps/cli/src/run.ts`.
-*(landing sweep — two reviewers disagreed about this manifest; recorded, not "fixed")*
-
-**A freshly onboarded chain can sit at `queued` indefinitely.** With no checkpoint yet the
-ingestion status stays `queued`, and nothing advances it if the first tick fails before a
-checkpoint row is written. Trigger: onboarding a new chain in production. Where:
-`packages/ingestion` (checkpoint creation on the first tick).
-*(landing sweep — uncovered by the whole-arc review, not on the task ledger)*
 
 **The `integration` job fails intermittently on a `57P01` while every test passes — cause
 still unknown.** The job dies on an unhandled `57P01 terminating connection due to
@@ -470,9 +380,42 @@ lockfile regeneration — diff the result against the branch intended lock, neve
 that the install succeeds. Where: `pnpm-lock.yaml`.
 *(landing sweep — a real regression, caught by review and fixed in #62)*
 
+**`flow-002`'s `tools_expected` over-specifies: two tools legitimately answer its question.**
+It asks for "the net USDC flow (received minus sent) over the last quarter" and demands
+`analytics_flows`. On the 2026-09-08 run the agent called `analytics_stablecoin_movements`
+instead — "token flows restricted to verified stablecoins, with per-peg subtotals", which
+for a *stablecoin* flow question is at least as good a choice — answered correctly, cited
+it, and surfaced the coverage caveat. G1 scored it a miss. This is the same class the
+allowlist removal already addressed one level down: `tools_expected` is a hard "must call
+every one of these", and there is no way to say "either of these two is right". Not fixed
+here because an `any-of` notion is a real schema decision, not a tail-end edit: it needs a
+name, validation (an any-of set of one is a plain expectation; overlapping with
+`writes_allowed` is a contradiction), and a pass through the other 29 cases to see where
+else it applies. Note the case cannot produce a real figure either way — erc20 events
+still cannot reach `chain_events` (04-testing.md §2, unblocker a) — so its value today is
+purely the trajectory. Trigger: the next eval slice with budget for a re-measure. Where:
+`packages/evals/fixtures/evals/core-30.yaml` (`flow-002`),
+`packages/evals/src/dataset.ts` (`expectSchema`), `packages/evals/src/graders/trajectory.ts`.
+*(landing sweep — surfaced 2026-09-08 when seeding the checkpoints changed this case's
+failure from "no wallets tracked" to a genuine tool choice)*
+
+**No eval fixture has a labelled wallet, or a second one.** `seedGoldenWallet` seeds one
+address per fixture role and the seeder tracks it unlabelled, so a case cannot refer to a
+wallet by name. Two cases were written as if it could: bal-001 asked for "the ops wallet"
+and the agent correctly answered that no such wallet exists (3 runs of 3, 2026-09-08), and
+flow-003-self-transfer asks to exclude "moves between my own wallets" when there is only one
+wallet, so the trap it is named for is not actually set and the case passes without testing
+anything. Both questions have been reworded; a `setup.wallets` field that declared the
+intent and was read by nobody has been removed rather than left describing a capability that
+does not exist. Trigger: a fixture capture that records a second wallet for the smb-stables
+role (and a directory entity labelling both), after which the self-transfer and
+label-resolution cases can be restored. Where: `apps/cli/src/evals/seed-case.ts`,
+`packages/evals/src/seed.ts`, `packages/evals/fixtures/evals/core-30.yaml`.
+*(landing sweep — found by the first scorecard that carried transcripts, 2026-09-08)*
+
 ## Reconciling the count
 
-This register holds **49 entries**. The source ledger
+This register holds **42 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
@@ -506,8 +449,32 @@ literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`min
   the whole-arc review (Fastify `trustProxy`, `apps/cli` testcontainers, the fresh-chain
   `queued` path) and two from the merge itself (the `integration` container contention,
   and the lockfile-regeneration hazard that silently reverted four security bumps).
+- **+2**: two further *(landing sweep)* entries, added 2026-09-08 — the eval fixtures having
+  no labelled or second wallet, and `ledger_status` reading an `ingestion_checkpoints` table
+  the eval seeder never fills. It was invisible until the scorecard began carrying
+  transcripts: the verdict line said "missing expected tool", and only the answer said the
+  wallet the question named does not exist.
 
-32 − 1 + 5 + 4 + 4 + 5 = **49**, matching this document.
+- **−10**: ten entries were CLOSED by PR #66 and removed. In register order: the
+  `numberToDecimalString` precision crossing; the peg-materialization scan (resolved by
+  indexing `chain_events (token_id, block_time)` rather than the watermark the entry
+  proposed — that would have skipped a token's history whenever curation flipped its
+  `is_stablecoin`/`verified` flag, so the rejection reasoning now lives in the function's
+  docstring); `unmatched_settlements` losing partly-applied events; the missing
+  `matches.fiat_value` CHECK; `http.ts`'s shutdown pattern; API-key expiry and
+  `last_used_at`; Fastify `trustProxy`; the eval runner shipping in the prod image; the
+  fresh-chain `queued` path (whose stated cause was wrong — the checkpoint row and the
+  re-scan both existed; the wedge was BullMQ deduping the re-add against a RETAINED
+  finished job); and `ledger_status` reading an `ingestion_checkpoints` table the eval
+  seeder never filled. The Dockerfile base-tag entry was split rather than removed: its
+  float-on-major half is fixed, its not-slim half stands.
+
+- **+1**: one entry ADDED by the same PR, and only visible because of it — flow-002 asking
+  for a figure two tools legitimately produce. Seeding the checkpoints changed that case
+  from failing on "no wallets tracked" to failing on a genuine tool choice, which is a
+  different gap wearing the same red mark.
+
+32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 = **42**, matching this document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation

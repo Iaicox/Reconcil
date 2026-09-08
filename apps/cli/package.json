@@ -10,6 +10,7 @@
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "lint": "eslint src test",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "dev": "tsx src/main.ts",
     "evals": "tsx src/run.ts"
   },

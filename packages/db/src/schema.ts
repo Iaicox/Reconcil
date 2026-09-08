@@ -108,6 +108,11 @@ export const apiKeys = pgTable(
     label: text('label'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    // Both nullable with no default, so every key minted before this migration keeps
+    // working exactly as it did. NULL expires_at = the non-expiring key ADR-012 originally
+    // described; NULL last_used_at = minted but never presented.
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   },
   (t) => [
     foreignKey({
@@ -202,8 +207,12 @@ export const chainEvents = pgTable(
     index('chain_events_to_idx').on(t.toAddr, t.blockTime),
     // Integrity checks and coverage math per chain height.
     index('chain_events_block_idx').on(t.chainId, t.blockNumber),
-    // Token-level scans (stablecoin movement queries, spam audits).
-    index('chain_events_token_idx').on(t.tokenId),
+    // Token-level scans (stablecoin movement queries, spam audits), and the peg
+    // materialization's `DISTINCT (token_id, block_time::date)` over every verified
+    // stablecoin's events — with block_time in the index that DISTINCT is served from the
+    // index instead of fetching each event's heap row. `token_id` alone is a prefix of
+    // this, so it replaces the single-column index rather than joining it.
+    index('chain_events_token_time_idx').on(t.tokenId, t.blockTime),
   ],
 );
 
@@ -466,6 +475,11 @@ export const matches = pgTable(
       foreignColumns: [fxRates.id],
     }),
     check('matches_amount_applied_raw_check', sql`amount_applied_raw > 0`),
+    // Non-negativity was an application invariant only — the matching engine never
+    // produces a negative valuation, but nothing stopped one being written. `>= 0`, not
+    // `> 0`: a zero-value leg is legitimate (a peg-valued transfer can round to nothing at
+    // the fiat scale), unlike a zero `amount_applied_raw`.
+    check('matches_fiat_value_check', sql`fiat_value >= 0`),
     check('matches_status_check', sql`status IN ('suggested', 'confirmed', 'rejected')`),
     check('matches_matched_by_check', sql`matched_by IN ('auto', 'agent', 'manual')`),
     check('matches_confidence_check', sql`confidence BETWEEN 0 AND 1`),

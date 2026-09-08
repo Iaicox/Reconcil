@@ -22,6 +22,20 @@
       "when": 1785963610328,
       "tag": "0002_seed_curated_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788837148193,
+      "tag": "0003_fat_magma",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788843016231,
+      "tag": "0004_silky_rocket_racer",
+      "breakpoints": true
     }
   ]
 }

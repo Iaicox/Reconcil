@@ -48,6 +48,15 @@ export interface ReconStatusResult {
   records: { open: number; partially_matched: number; matched: number; overpaid: number; void: number };
   openAmounts: { currency: string; value: string }[];
   unmatchedSettlements: { count: number; sample: { chainId: number; txHash: string; logIndex: number }[] };
+  /**
+   * Settlements with SOME confirmed leg but unapplied value left over. Deliberately a
+   * separate figure rather than a widening of `unmatchedSettlements`: that one is
+   * contractually "the count `recon_suggest_matches` defers to", and a partly-applied event
+   * is not a candidate suggest would offer. Without this the two are indistinguishable from
+   * outside — a settlement drops out of the unmatched count the moment its first leg is
+   * confirmed, however much of it is still unaccounted for.
+   */
+  partiallyAppliedSettlements: { count: number; sample: { chainId: number; txHash: string; logIndex: number }[] };
   overpayments: { recordId: string; externalRef: string; excess: string; currency: string }[];
   /** The resolved settlement wallet set — the caller derives coverage/freshness over it. */
   addresses: string[];
@@ -105,8 +114,10 @@ export async function computeReconStatus(
         recordId: r.recordId, externalRef: r.externalRef, excess: r.excess, currency: r.currency,
       }));
 
-      // 4. Unmatched settlements: verified-token transfers touching the tenant's
-      //    (client-scoped) wallets, in period, with no confirmed leg. Zero wallets → none.
+      // 4. Settlement coverage: verified-token transfers touching the tenant's
+      //    (client-scoped) wallets, in period, split by how much of each has been applied —
+      //    none at all (unmatched) vs. some but not all (partially applied). Zero wallets →
+      //    neither. The two share one scope so they cannot drift apart.
       const walletRows = await tx
         .select({ address: wallets.address, clientId: wallets.clientId })
         .from(wallets)
@@ -115,9 +126,10 @@ export async function computeReconStatus(
       const addresses = [...new Set(scoped.map((w) => w.address))];
 
       let unmatchedSettlements: ReconStatusResult['unmatchedSettlements'] = { count: 0, sample: [] };
+      let partiallyAppliedSettlements: ReconStatusResult['partiallyAppliedSettlements'] = { count: 0, sample: [] };
       if (addresses.length > 0) {
         const window = period !== undefined ? periodRange(period) : undefined;
-        const settlementScope = and(
+        const inScope = and(
           // Exactly one endpoint in scope: inbound + outbound settlements, internal excluded.
           externalCondition(addresses, 'both'),
           transferKinds(), // erc20/native transfers only (gas etc. excluded)
@@ -128,29 +140,50 @@ export async function computeReconStatus(
           // close it — correctly, it is genuinely unmatched. Volatile settlements count until confirmed.
           eq(tokens.verified, true),
           window !== undefined ? timeBetween(window.from, window.to) : undefined,
-          sql`not exists (select 1 from ${matches} where ${matches.chainEventId} = ${chainEvents.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed')`,
         );
 
-        const countRows = await tx
-          .select({ count: sql<number>`count(*)::int` })
-          .from(chainEvents)
-          .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
-          .where(settlementScope);
-        const sampleRows = await tx
-          .select({ chainId: chainEvents.chainId, txHash: chainEvents.txHash, logIndex: chainEvents.logIndex })
-          .from(chainEvents)
-          .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
-          .where(settlementScope)
-          .orderBy(chainEvents.blockTime, chainEvents.id)
-          .limit(10);
+        // "Has at least one confirmed leg", as an EXISTS the planner can turn into a
+        // semi/anti-join and short-circuit on the first hit. The unmatched figure keeps the
+        // NOT EXISTS form it has always had — rewriting it as `sum(...) = 0` would have
+        // traded an anti-join for a correlated aggregate re-executed per candidate row, so
+        // the new figure would have made the existing one slower.
+        const hasConfirmedLeg = sql`exists (select 1 from ${matches} where ${matches.chainEventId} = ${chainEvents.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed')`;
+        // Σ of this event's confirmed legs, in token base units (ADR-004: the comparison
+        // stays in NUMERIC(78,0) SQL — uint256 does not survive a round trip through JS).
+        // Referenced once, and only on the partial branch, which is the only one that needs
+        // an amount rather than a yes/no.
+        const appliedRaw = sql`coalesce((select sum(${matches.amountAppliedRaw}) from ${matches} where ${matches.chainEventId} = ${chainEvents.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed'), 0)`;
 
-        unmatchedSettlements = {
-          count: countRows[0]?.count ?? 0,
-          sample: sampleRows.map((e) => ({ chainId: e.chainId, txHash: e.txHash, logIndex: e.logIndex })),
+        // The two are disjoint by construction: nothing applied vs. some-but-not-all
+        // applied.
+        const summarize = async (
+          scope: ReturnType<typeof and>,
+        ): Promise<{ count: number; sample: { chainId: number; txHash: string; logIndex: number }[] }> => {
+          const countRows = await tx
+            .select({ count: sql<number>`count(*)::int` })
+            .from(chainEvents)
+            .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
+            .where(scope);
+          const sampleRows = await tx
+            .select({ chainId: chainEvents.chainId, txHash: chainEvents.txHash, logIndex: chainEvents.logIndex })
+            .from(chainEvents)
+            .innerJoin(tokens, eq(tokens.id, chainEvents.tokenId))
+            .where(scope)
+            .orderBy(chainEvents.blockTime, chainEvents.id)
+            .limit(10);
+          return {
+            count: countRows[0]?.count ?? 0,
+            sample: sampleRows.map((e) => ({ chainId: e.chainId, txHash: e.txHash, logIndex: e.logIndex })),
+          };
         };
+
+        unmatchedSettlements = await summarize(and(inScope, sql`not ${hasConfirmedLeg}`));
+        partiallyAppliedSettlements = await summarize(
+          and(inScope, sql`${hasConfirmedLeg} and ${appliedRaw} < ${chainEvents.amountRaw}`),
+        );
       }
 
-      return { records, openAmounts, unmatchedSettlements, overpayments, addresses };
+      return { records, openAmounts, unmatchedSettlements, partiallyAppliedSettlements, overpayments, addresses };
     },
     { isolationLevel: 'repeatable read' },
   );

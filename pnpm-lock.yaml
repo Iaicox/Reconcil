@@ -57,6 +57,9 @@ importers:
       '@reconcil/ingestion':
         specifier: workspace:*
         version: link:packages/ingestion
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.1
       dependency-cruiser:
         specifier: ^18.1.0
         version: 18.1.0

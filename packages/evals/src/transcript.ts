@@ -48,11 +48,60 @@ export function canonicalDecimal(raw: string): string | null {
 }
 
 /**
+ * Blank the spans that are not figures, so `extractNumbers` never reads one as a quantity:
+ *
+ *  - full 0x-hex runs (addresses, tx hashes);
+ *  - ISO dates with an optional time (`2026-06-30`, `2026-06-30T12:34:56.789Z`);
+ *  - digits glued to the end of a word (`ERC-20`, `ERC20`, `sha256`). A live cover-001 run
+ *    answered "the ERC-20 stream is still queued" and was scored as a fabricated −20: the
+ *    hyphen belongs to the standard's name, not to a sign, and the 20 was never a
+ *    quantity. Only a digit run ADJACENT to letters is masked, so a standalone figure —
+ *    always preceded by whitespace, punctuation or start — is untouched, and a unit
+ *    written the other way round ("1.5ETH") still reads as 1.5.
+ *
+ * Shared, so `extractNumbers` and the failure-message excerpt in numeric.ts cannot
+ * disagree about what counts as a number — the excerpt has to point at the same token the
+ * check rejected. `blank` decides whether a span collapses (tokenising) or keeps its width
+ * (index-preserving excerpts). Fixed repetition counts and single bounded character
+ * classes throughout, no nested quantifiers ⇒ ReDoS-safe.
+ */
+export function maskNonFigureSpans(text: string, blank: (match: string) => string): string {
+  return text
+    .replace(/0x[0-9a-fA-F]+/g, blank)
+    .replace(isoDatePattern(), blank)
+    .replace(/[A-Za-z]+-?\d[\d.]*/g, blank);
+}
+
+/**
+ * A fresh ISO-date matcher each call. Built rather than shared as a module constant: a
+ * `/g` regex carries `lastIndex`, and one object used from two call sites is a stateful
+ * trap for no gain.
+ */
+const isoDatePattern = (): RegExp =>
+  /\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?/g;
+
+/**
+ * The ISO dates appearing in `text`. `maskNonFigureSpans` removes these from the ANSWER
+ * (a date is not a figure the agent has to source); numeric.ts uses this to do the
+ * opposite on the PROVIDED side, where a date the tool returned legitimately supplies the
+ * components of that same date written out in prose. One pattern, so the two cannot drift.
+ */
+export function isoDatesIn(text: string): string[] {
+  return [...text.matchAll(isoDatePattern())].map((m) => m[0]);
+}
+
+/**
  * Decimal-number tokens in free text, canonicalised + deduped. A leading `-` is a sign
- * only when not preceded by a digit or dot (the `(?<![\d.])` guard), so an ISO date
- * ("2026-06-30") yields 2026/6/30 rather than 2026/-6/-30, and a range ("1.5-2.5") does
- * not invent a negative. The pattern is bounded (the lookbehind is zero-width, no nested
- * quantifier over an overlapping class), so it is ReDoS-safe.
+ * only when not preceded by a digit or dot (the `(?<![\d.])` guard), so a range ("1.5-2.5")
+ * does not invent a negative. The pattern is bounded (the lookbehind is zero-width, no
+ * nested quantifier over an overlapping class), so it is ReDoS-safe.
+ *
+ * Date-shaped literals are removed before tokenising, on both sides of G2: a date is a
+ * period, not a figure, and its components are not claims the agent has to source. Left in,
+ * "the USDC balance as of 2026-06-30" contributed a 6 and a 30 that no tool result had to
+ * provide, and G2 reported them as fabricated (live bal-001). This covers a date the answer
+ * writes date-shaped; a date rendered in prose ("July 17, 2026") is still tokenised, which
+ * is what the `referenceDate` whitelist in numeric.ts remains for.
  *
  * Full 0x-hex runs (addresses, tx hashes) are stripped first, so their incidental digits
  * never register as figures — on either side of the anti-fabrication check. A hash the
@@ -69,7 +118,7 @@ export function canonicalDecimal(raw: string): string | null {
  * classes, no overlapping quantifiers.
  */
 export function extractNumbers(text: string): Set<string> {
-  const scrubbed = text.replace(/0x[0-9a-fA-F]+/g, ' ');
+  const scrubbed = maskNonFigureSpans(text, () => ' ');
   const out = new Set<string>();
   for (const m of scrubbed.matchAll(/(?<![\d.])-?\d[\d,]*(?:\.\d+)?/g)) {
     const c = canonicalDecimal(m[0]);

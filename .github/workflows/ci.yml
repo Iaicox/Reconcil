@@ -10,9 +10,11 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    # Weekly ecosystem-drift canary for the deterministic jobs only. `evals-full` is
-    # deliberately NOT on this trigger: it is 30 cases x 3 runs of live LLM traffic, and
-    # running it against an unchanged `main` bought nothing while draining the API budget.
+    # Weekly ecosystem-drift canary for the jobs that cost nothing to run — the
+    # deterministic ones plus `e2e-smoke` (see its own comment: it needs no API key, and
+    # went its whole life un-run). `evals-full` is deliberately NOT on this trigger: it is
+    # 30 cases x 3 runs of live LLM traffic, and running it against an unchanged `main`
+    # bought nothing while draining the API budget.
     - cron: '0 6 * * 1' # Mondays (UTC)
   workflow_dispatch:
     inputs:
@@ -69,6 +71,11 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint
+      # The root `scripts/` and `.dependency-cruiser.cjs` belong to no workspace package, so
+      # neither turbo task above reaches them: CI ran them (below) without ever checking
+      # them. `tsconfig.scripts.json` and a root eslint block close that.
+      - run: pnpm typecheck:scripts
+      - run: pnpm lint:scripts
       - run: pnpm depcruise
       # ADR-011 transitive guard: depcruise skips node_modules, so scan the full lockfile
       # for signing/key-material packages (needs only the lockfile + cruiser config).
@@ -120,6 +127,10 @@ jobs:
       # Golden-wallet reconciliation (native balance == recorded eth_get_balance) and the
       # DB-derived ground-truth numbers (numbers.itest.ts) — deterministic, no LLM key.
       - run: pnpm --filter @reconcil/evals test:integration
+      # The eval SEEDER's own coverage: ledger_status reads ingestion_checkpoints, and a
+      # seeder that leaves them empty tells every case the tenant has no wallets. Only a
+      # real database shows that, so it cannot live in the hermetic suite. No LLM key.
+      - run: pnpm --filter @reconcil/cli test:integration
 
   # Resolve secret presence into a job output. A job-level `if:` can't reference secrets.*,
   # but a step expression can — so the eval jobs gate on this output and SKIP (grey) when
@@ -198,11 +209,18 @@ jobs:
 
   # Pre-release E2E smoke (04-testing.md §1, bottom pyramid layer): brings up the REAL
   # compose stack (docker-compose.yml + Dockerfile image), connects a stdio MCP client, and
-  # asserts three tool calls' envelopes — proof the P10 self-host story boots. Manual only
-  # (workflow_dispatch): never per-PR, so it adds zero recurring CI cost. No API key. Docker
-  # is present on ubuntu-latest; the smoke tears the stack down (`compose down -v`) itself.
+  # asserts three tool calls' envelopes — proof the P10 self-host story boots. Never per-PR,
+  # so it adds zero per-change CI cost. No API key. Docker is present on ubuntu-latest; the
+  # smoke tears the stack down (`compose down -v`) itself.
+  #
+  # ALSO on the weekly canary, not dispatch only. This job had never executed once before
+  # 2026-09-07 — the dispatch that ran it was the first workflow_dispatch in the repository's
+  # history, and it failed: the documented `cp .env.example .env && docker compose up` path
+  # had been broken by an env-schema change with nothing watching it. A self-host story that
+  # is only ever checked when someone remembers to check it is a story that rots silently,
+  # and this is the one job that proves P10. It is free, so the weekly run costs nothing.
   e2e-smoke:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_e2e
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_e2e)
     runs-on: ubuntu-latest
     # waitForSchema self-caps at 120s, but `up --build` / the tool calls / `down -v` don't;
     # a hung docker/stdio would otherwise ride the 360-min default. Happy path is ~5-10 min.

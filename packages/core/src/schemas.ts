@@ -874,6 +874,12 @@ export const reconStatusOutput = z
     records: recordStatusCountsSchema,
     open_amounts: z.array(z.object({ currency: z.string(), value: decimalString }).strict()),
     unmatched_settlements: eventRefSummarySchema,
+    // Settlements with SOME confirmed leg and unapplied value left over. Additive rather
+    // than a widening of `unmatched_settlements`, which is contractually "the count
+    // recon_suggest_matches defers to" — a partly-applied event is not a candidate suggest
+    // would offer, so folding it in would break that relationship. Additive ⇒ no
+    // schema_version bump (§10: breaking changes bump it; a new key does not).
+    partially_applied_settlements: eventRefSummarySchema,
     overpayments: z.array(
       z
         .object({

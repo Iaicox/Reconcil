@@ -190,6 +190,53 @@ describe('buildHttpApp — two-layer rate limit (Critical fix: IP backstop + ten
     await app.close();
   });
 
+  // Layer 1 keys on `request.ip`, and what `request.ip` believes is decided entirely by
+  // trustProxy. Both directions matter, which is why both are pinned here.
+  it('ignores X-Forwarded-For by default, so a spoofed one cannot buy a fresh bucket', async () => {
+    const app = await buildHttpApp({
+      db: {} as unknown as Db,
+      logger: silentLogger,
+      authenticate: () => Promise.resolve(null),
+      ipRateLimit: { max: 1, timeWindow: '1 minute' },
+      // trustProxy deliberately not set — the shipped default.
+    });
+    const fromClaimedIp = (ip: string) => app.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': ip, authorization: 'Bearer x' },
+      payload: rpc,
+    });
+
+    expect((await fromClaimedIp('10.0.0.1')).statusCode).toBe(401); // consumes the allowance
+    // A different claimed IP, same socket peer: the header is not believed, so this is
+    // the same bucket and the backstop still trips.
+    expect((await fromClaimedIp('10.0.0.2')).statusCode).toBe(429);
+    await app.close();
+  });
+
+  it('believes X-Forwarded-For once trustProxy is on — the reason it is opt-in, not the default', async () => {
+    const app = await buildHttpApp({
+      db: {} as unknown as Db,
+      logger: silentLogger,
+      authenticate: () => Promise.resolve(null),
+      ipRateLimit: { max: 1, timeWindow: '1 minute' },
+      trustProxy: true,
+    });
+    const fromClaimedIp = (ip: string) => app.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': ip, authorization: 'Bearer x' },
+      payload: rpc,
+    });
+
+    expect((await fromClaimedIp('10.0.0.1')).statusCode).toBe(401);
+    // Now each claimed IP is its own bucket — correct behind a proxy you control, and an
+    // open door if anything untrusted can reach the port. Hence the operator states the
+    // topology (config.ts resolveTrustProxy) rather than this being switched on for them.
+    expect((await fromClaimedIp('10.0.0.2')).statusCode).toBe(401);
+    await app.close();
+  });
+
   it('no-auth requests are keyed by IP — the 401 they draw still counts against that bucket', async () => {
     const app = await buildHttpApp({
       db: {} as unknown as Db,
