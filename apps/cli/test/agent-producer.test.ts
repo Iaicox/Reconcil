@@ -2,7 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { ToolContext } from '@reconcil/mcp-tools';
 import { describe, expect, it } from 'vitest';
 
-import { makeAgentProducer, REFERENCE_DATE } from '../src/evals/agent.js';
+import { makeAgentProducer, threadable, REFERENCE_DATE } from '../src/evals/agent.js';
 
 /**
  * A stand-in for `client.beta.messages.toolRunner`. Our producer only needs `params` (the
@@ -88,5 +88,34 @@ describe('makeAgentProducer', () => {
       runIndex: 0,
     });
     expect(resolved).toEqual(['claude-opus-4-8-fake']);
+  });
+});
+
+describe('threadable', () => {
+  const text = (t: string) => ({ role: 'assistant' as const, content: [{ type: 'text' as const, text: t }] });
+  const asksTool = { role: 'assistant' as const, content: [{ type: 'tool_use' as const, id: 'tu_1', name: 'x', input: {} }] };
+  const answersTool = {
+    role: 'user' as const,
+    content: [{ type: 'tool_result' as const, tool_use_id: 'tu_1', content: 'ok' }],
+  };
+
+  it('leaves a normally-ended conversation alone', () => {
+    const convo = [{ role: 'user' as const, content: 'q' }, asksTool, answersTool, text('done')];
+    expect(threadable(convo)).toEqual(convo);
+  });
+
+  it('drops a trailing tool_use nothing answered — appending a user turn after it is a 400', () => {
+    // The runner stops on max_iterations and on a refusal stop_reason, either of which can
+    // leave the last assistant message asking for a tool that never got its result. Since
+    // an unhandled throw now aborts the whole SUITE, one capped prior turn would cost every
+    // case after it.
+    const convo = [{ role: 'user' as const, content: 'q' }, answersTool, asksTool];
+    expect(threadable(convo)).toEqual([{ role: 'user' as const, content: 'q' }, answersTool]);
+  });
+
+  it('keeps dropping while the tail is still unanswered', () => {
+    expect(threadable([{ role: 'user' as const, content: 'q' }, asksTool, asksTool])).toEqual([
+      { role: 'user' as const, content: 'q' },
+    ]);
   });
 });

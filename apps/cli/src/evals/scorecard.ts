@@ -45,6 +45,27 @@ export function buildReport(meta: ReportMeta, cases: CaseResult[], gate: GateRes
   return { meta, gate, cases };
 }
 
+/**
+ * The verdict a report may state. Unchanged for a suite that finished; for one that did
+ * not, `passed` is forced false with the reason first in `failures`.
+ *
+ * The Markdown banner alone was not enough: `scorecard.json` is the machine-readable half,
+ * and a consumer reading `gate.passed: true` over 28 of 30 cases is told precisely what
+ * the banner exists to prevent. The rollup is kept — it is real data about the cases that
+ * did run — but it is not a verdict.
+ */
+export function gateForReport(measured: GateResult, aborted?: ReportMeta['aborted']): GateResult {
+  if (!aborted) return measured;
+  return {
+    ...measured,
+    passed: false,
+    failures: [
+      `suite incomplete: ${String(aborted.completedCases)} of ${String(aborted.totalCases)} cases ran — ${aborted.reason}`,
+      ...measured.failures,
+    ],
+  };
+}
+
 export function toJson(report: Report): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }

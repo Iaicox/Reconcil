@@ -23,10 +23,10 @@ import { withTempExportDir } from './evals/export-dir.js';
 import { evaluateGate } from './evals/gate.js';
 import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
-import { buildReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
+import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
-import type { CaseResult } from './evals/types.js';
+import type { CaseResult, GateResult } from './evals/types.js';
 
 /** DATABASE_URL if provided, else a throwaway container. Returns db + a disposer. */
 async function provisionDb(): Promise<{ db: Db; dispose: () => Promise<void> }> {
@@ -64,16 +64,18 @@ async function provisionDb(): Promise<{ db: Db; dispose: () => Promise<void> }> 
 
 /**
  * Grade, gate and write the scorecard for whatever cases are in hand, returning the output
- * directory. Shared by the normal path and the aborted one, so a partial run is reported
- * through exactly the same renderer — an `aborted` meta is the only difference, and it is
- * what stops a partial suite from printing a gate verdict it has not earned.
+ * directory and the verdict that was written. Shared by the normal path and the aborted
+ * one, so a partial run is reported through exactly the same renderer — an `aborted` meta
+ * is the only difference, and it is what stops a partial suite from claiming a gate
+ * verdict it has not earned, in the JSON as well as the Markdown.
  */
 function writeReport(
   args: { suite: string; model: string; runs: number; out: string },
   cases: CaseResult[],
   resolvedModels: ReadonlySet<string>,
   aborted?: NonNullable<ReportMeta['aborted']>,
-): string {
+): { outDir: string; gate: GateResult } {
+  const gate = gateForReport(evaluateGate(cases), aborted);
   const report = buildReport(
     {
       suite: args.suite,
@@ -85,7 +87,7 @@ function writeReport(
       ...(aborted ? { aborted } : {}),
     },
     cases,
-    evaluateGate(cases),
+    gate,
   );
 
   const outDir = resolve(args.out);
@@ -93,7 +95,9 @@ function writeReport(
   writeFileSync(join(outDir, 'scorecard.json'), toJson(report), 'utf8');
   writeFileSync(join(outDir, 'scorecard.md'), toMarkdown(report), 'utf8');
   console.error(toMarkdown(report));
-  return outDir;
+  // Returned rather than recomputed by the caller: the exit code and the artifact must
+  // come from one verdict, or an override like the one above could apply to only one.
+  return { outDir, gate };
 }
 
 /**
@@ -172,7 +176,7 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
         });
       } catch (err) {
         if (completed.length > 0) {
-          const outDir = writeReport(args, completed, resolvedModels, {
+          const { outDir } = writeReport(args, completed, resolvedModels, {
             completedCases: completed.length,
             totalCases: dataset.length,
             reason: err instanceof Error ? err.message : String(err),
@@ -203,9 +207,9 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
       // trajectory and answer — so the CI log explains WHY on its own. That replaces the
       // "Failing details" summary this used to print separately, and it prints for a
       // failing case even when the suite still clears the 90% gate.
-      const outDir = writeReport(args, cases, resolvedModels);
+      const { outDir, gate } = writeReport(args, cases, resolvedModels);
       console.error(`\nreports → ${outDir}`);
-      if (!evaluateGate(cases).passed) process.exitCode = 1;
+      if (!gate.passed) process.exitCode = 1;
     } finally {
       await dispose();
     }

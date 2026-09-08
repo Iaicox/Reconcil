@@ -43,6 +43,32 @@ export interface TokenUsage {
   cacheRead: number;
 }
 
+/** True when a message is an assistant turn that asked for a tool. */
+function requestsTool(message: Anthropic.Beta.BetaMessageParam): boolean {
+  return (
+    message.role === 'assistant' &&
+    Array.isArray(message.content) &&
+    message.content.some((b) => typeof b === 'object' && 'type' in b && b.type === 'tool_use')
+  );
+}
+
+/**
+ * A conversation safe to append the next user turn to.
+ *
+ * The runner normally ends on an assistant message with no tool_use, and appends each
+ * tool_result in the same iteration it pushed the tool_use — but it also stops on
+ * `max_iterations` and on a refusal `stop_reason`, and either can leave the last assistant
+ * message asking for a tool that was never answered. Sending that forward is a hard 400:
+ * every `tool_use` id must be followed by its `tool_result`. Since run.ts now treats an
+ * unhandled throw as an aborted SUITE, one prior turn hitting its iteration cap would cost
+ * every case after it, so the unanswered tail is dropped instead of threaded.
+ */
+export function threadable(messages: Anthropic.Beta.BetaMessageParam[]): Anthropic.Beta.BetaMessageParam[] {
+  const out = [...messages];
+  while (out.length > 0 && requestsTool(out[out.length - 1]!)) out.pop();
+  return out;
+}
+
 export function makeAgentProducer(opts: AgentOptions): SessionProducer {
   return async ({ eval: evalCase, ctx }: SessionInput) => {
     // `let`, because a prior turn's calls are setup rather than trajectory and the array is
@@ -97,7 +123,7 @@ export function makeAgentProducer(opts: AgentOptions): SessionProducer {
         }
       }
       final = await runner.runUntilDone();
-      messages = [...runner.params.messages];
+      messages = threadable([...runner.params.messages]);
       // The graded turn is the last one. A prior turn's tool calls stay in the database
       // (that is the point — trace-001 has to find one there), but they are not the
       // trajectory G1 scores or the citations G3 checks.

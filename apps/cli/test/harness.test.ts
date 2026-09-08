@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { parseArgs } from '../src/evals/args.js';
 import { evaluateGate } from '../src/evals/gate.js';
 import { runSuite, type HarnessDeps } from '../src/evals/harness.js';
-import { buildReport, toJson, toMarkdown } from '../src/evals/scorecard.js';
+import { buildReport, gateForReport, toJson, toMarkdown } from '../src/evals/scorecard.js';
 import type { CaseResult, SessionProducer } from '../src/evals/types.js';
 
 // --- fakes: no DB, no API key -------------------------------------------------
@@ -227,6 +227,27 @@ describe('scorecard', () => {
     expect(md).not.toContain('✅ PASS');
     // The data that was paid for is still there.
     expect(md).toContain('| bal-x | A |');
+  });
+
+  it('the JSON artifact never claims a pass on an aborted suite either', async () => {
+    // The Markdown banner is not enough: scorecard.json is the machine-readable half, and
+    // a consumer reading `gate.passed: true` over 2 of 30 cases is told exactly what the
+    // banner exists to prevent. run.ts overrides the verdict for both renderings at once.
+    const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 1, deps(CLEAN_ANSWERS));
+    const measured = evaluateGate(cases);
+    expect(measured.passed).toBe(true);
+
+    const aborted = { completedCases: 2, totalCases: 30, reason: '400 usage limit reached' };
+    const gate = gateForReport(measured, aborted);
+    const json = JSON.parse(
+      toJson(buildReport({ suite: 'core', model: 'test', runs: 1, generatedAt: 'now', aborted }, cases, gate)),
+    ) as { gate: { passed: boolean; failures: string[] }; meta: { aborted?: unknown } };
+
+    expect(json.gate.passed).toBe(false);
+    expect(json.gate.failures[0]).toContain('suite incomplete: 2 of 30');
+    // The rollup survives — it is real data about the cases that did run.
+    expect(gate.rollup).toEqual(measured.rollup);
+    expect(json.meta.aborted).toEqual(aborted);
   });
 
   it('leaves out the transcript appendix entirely when every case passed', async () => {
