@@ -212,6 +212,21 @@ numbers set grows; that is stricter than 90% by design, never looser. The datase
 **30 cases** — 24 Face A plus the 6 numbers-free Face B recon cases (import → suggest → confirm →
 status → journal) — and the "≥ 27/30" target applies to it.
 
+**Measured 2026-09-08 (30 cases, 1 run, opus-4.8): GATE PASS.** G1 28/30 (93.3%),
+G2 3/3, G3 25/25, G4 3/3, G5 2/2. The gate had been green once ever before this, and the
+threshold was never why: every failure it had been reporting was a defect in the harness or
+the dataset — an exhaustive tool allowlist that scored an extra *read* as a failure, a
+refusal grader that matched the model restating the question it declined, a case seeded once
+and shared across runs that could not survive its own write, and a question referring to a
+previous turn that never happened. With those fixed, ≥90% is met without being loosened, so
+it stays where it is. The two remaining G1 failures share one cause and one known-gaps
+entry: `ledger_status` reads `ingestion_checkpoints`, which the eval seeder never fills, so
+an agent that checks freshness is told the tenant has no data and correctly declines.
+
+Note the measurement is at `--runs 1`, so "by majority" was not exercised; a case that is
+flaky rather than broken reads as a coin flip there. The next full 30×3 is the one that
+settles the majority half.
+
 Failing the gate blocks the OSS demo publication, by definition of "done" for week 5.
 
 ## 7. CI (GitHub Actions)
