@@ -51,6 +51,12 @@ export function installShutdown(opts: ShutdownOptions): (signal: string) => Prom
     } catch (err) {
       logger.error('shutdown error', { err: serializeError(err) });
       exit(1);
+    } finally {
+      // In production `process.exit` never returns, so this is unreachable there — but
+      // `exit` is injectable, and with any other implementation the timer would still fire
+      // after a clean shutdown and report a timeout that did not happen. The seam this
+      // file exists to provide would be the only caller it ever misled.
+      clearTimeout(force);
     }
   };
 

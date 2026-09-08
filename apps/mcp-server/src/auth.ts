@@ -70,17 +70,26 @@ export async function resolveTenantByBearer(db: Db, presentedKey: string): Promi
 
   const cutoff = new Date(Date.now() - LAST_USED_REFRESH_MS);
   if (row.lastUsedAt === null || row.lastUsedAt < cutoff) {
-    // Guarded in SQL as well as in the branch above: two concurrent requests can both read
-    // a stale stamp, and the predicate keeps the second one from being a pointless write.
-    await db
-      .update(apiKeys)
-      .set({ lastUsedAt: sql`now()` })
-      .where(
-        and(
-          eq(apiKeys.keyHash, keyHash),
-          or(isNull(apiKeys.lastUsedAt), lt(apiKeys.lastUsedAt, cutoff)),
-        ),
-      );
+    try {
+      // Guarded in SQL as well as in the branch above: two concurrent requests can both
+      // read a stale stamp, and the predicate keeps the second one from being a pointless
+      // write.
+      await db
+        .update(apiKeys)
+        .set({ lastUsedAt: sql`now()` })
+        .where(
+          and(
+            eq(apiKeys.keyHash, keyHash),
+            or(isNull(apiKeys.lastUsedAt), lt(apiKeys.lastUsedAt, cutoff)),
+          ),
+        );
+    } catch {
+      // Best-effort bookkeeping, deliberately swallowed. Authentication was read-only
+      // before this column existed and must stay that way: a lock-contended row, an
+      // exhausted pool or a read-only standby would otherwise turn a key that the SELECT
+      // above already verified into a 500. Nothing is lost — the stamp stays stale, so the
+      // next request retries it.
+    }
   }
   return row.tenantId;
 }

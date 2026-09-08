@@ -98,3 +98,28 @@ describe('installShutdown', () => {
     expect(process.listenerCount('SIGINT') + process.listenerCount('SIGTERM')).toBe(before + 2);
   });
 });
+
+describe('installShutdown — the forced-exit timer', () => {
+  it('is cleared once the close settles, so a clean shutdown reports no timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const codes: number[] = [];
+      const { logger, errors } = recordingLogger();
+      const shutdown = installShutdown({
+        logger,
+        close: () => Promise.resolve(),
+        exit: (c) => codes.push(c),
+        timeoutMs: 10_000,
+      });
+
+      await shutdown('SIGTERM');
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      // Without clearTimeout this is [0, 1] plus a spurious timeout line.
+      expect(codes).toEqual([0]);
+      expect(errors).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
