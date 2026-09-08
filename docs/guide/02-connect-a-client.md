@@ -95,6 +95,25 @@ x6aeJY_0JShJ4xwnFqeF-4QCZSwpMRrA38V7kCyhFrM
 The plaintext is printed **once** on stdout (logs go to stderr, so `| head -1` is clean).
 Only its SHA-256 is stored. Lose it and you mint a new one; there is no recovery.
 
+By default the key lasts until you revoke it. Add `--expires-in-days N` to give it a
+shorter life — worth doing for anything you paste into a machine you do not control:
+
+```bash
+docker compose run --rm -T mcp-server \
+  node apps/mcp-server/dist/keygen.js self-host "ci" --expires-in-days 30
+```
+
+An expired key gets the same bare `401` as an unknown one, so a client cannot tell the
+difference between "wrong key" and "the key ran out" — mint a fresh one. The server also
+records `last_used_at` (refreshed at most every 5 minutes), so you can see which keys are
+still in use and which are safe to revoke:
+
+```bash
+docker compose exec -T postgres \
+  psql -U postgres -d reconcil -c \
+  'SELECT label, created_at, expires_at, last_used_at, revoked_at FROM api_keys ORDER BY created_at'
+```
+
 ### Point a client at it
 
 ```bash

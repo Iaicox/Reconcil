@@ -81,5 +81,25 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
 - Demo paths (Claude Code stdio/HTTP, Desktop stdio, CLI agent) all work at MVP.
 - claude.ai web connectors explicitly do not work until OAuth lands — known, documented,
   planned.
-- Bearer keys are demo-grade: no scopes, no expiry (only revocation). Acceptable for a
-  gated demo; not for production multi-tenant (gate criterion for the OAuth work).
+- Bearer keys are demo-grade: **no scopes**. Acceptable for a gated demo; not for
+  production multi-tenant (gate criterion for the OAuth work).
+
+  **Amended 2026-09-08 — expiry and last-used tracking.** This originally read "no expiry
+  (only revocation)". Revocation alone means a leaked key is valid forever and its use is
+  invisible: there is no way to notice a key being used by someone other than its holder,
+  and no way to identify one that has gone unused and should be rotated. Both are now
+  possible, without changing the posture for anyone who does not opt in:
+
+  - `api_keys.expires_at` — nullable, no default. NULL is the non-expiring key this ADR
+    originally described, so every key minted before the change behaves exactly as it did;
+    `keygen --expires-in-days N` is how a key gets a shorter life. An expired key resolves
+    to the same `null` as an unknown or revoked one, and the caller answers a bare 401:
+    expiry deliberately does **not** get its own status, because a distinguishable response
+    would tell a prober that a key exists and merely ran out.
+  - `api_keys.last_used_at` — nullable, refreshed at most once per `LAST_USED_REFRESH_MS`
+    (5 minutes). Stamping every request would put a write on the hot path of every
+    authenticated call, and "is this key still in use, and roughly when was it last seen"
+    does not need per-request resolution.
+
+  This narrows the gap the OAuth milestone still has to close (scopes, rotation, real
+  identity) rather than closing it — the keys remain demo-grade.

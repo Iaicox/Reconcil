@@ -46,6 +46,63 @@ describe('auth — transport → tenant boundary', () => {
     await pool.query('UPDATE api_keys SET revoked_at = now() WHERE key_hash = $1', [hashKey(key)]);
     expect(await resolveTenantByBearer(db, key)).toBeNull();
   });
+
+  it('an expired key is rejected, and is indistinguishable from an unknown one', async () => {
+    await ensureSelfHostTenant(db, 'self-host', 'Self-hosted');
+    const key = await mintKey(db, 'self-host', 'itest', 30);
+    expect(await resolveTenantByBearer(db, key)).not.toBeNull();
+
+    await pool.query("UPDATE api_keys SET expires_at = now() - interval '1 second' WHERE key_hash = $1", [hashKey(key)]);
+    // Same null the unknown-key path returns: the caller answers a bare 401 either way, so
+    // a probe cannot learn that a key exists and merely ran out.
+    expect(await resolveTenantByBearer(db, key)).toBeNull();
+    expect(await resolveTenantByBearer(db, 'not-a-real-key')).toBeNull();
+  });
+
+  it('a key minted with no expiry never expires — existing keys are unaffected', async () => {
+    const tenantId = await ensureSelfHostTenant(db, 'self-host', 'Self-hosted');
+    const key = await mintKey(db, 'self-host', 'itest');
+
+    const { rows } = await pool.query<{ expires_at: Date | null }>(
+      'SELECT expires_at FROM api_keys WHERE key_hash = $1',
+      [hashKey(key)],
+    );
+    expect(rows[0]!.expires_at).toBeNull();
+    expect(await resolveTenantByBearer(db, key)).toBe(tenantId);
+  });
+
+  it('mintKey refuses a non-positive lifetime rather than minting a dead key', async () => {
+    await ensureSelfHostTenant(db, 'self-host', 'Self-hosted');
+    await expect(mintKey(db, 'self-host', 'itest', 0)).rejects.toThrow(/positive number of days/);
+    await expect(mintKey(db, 'self-host', 'itest', -1)).rejects.toThrow(/positive number of days/);
+  });
+
+  it('stamps last_used_at on first use, then throttles instead of writing per request', async () => {
+    await ensureSelfHostTenant(db, 'self-host', 'Self-hosted');
+    const key = await mintKey(db, 'self-host', 'itest');
+    const stamp = async (): Promise<Date | null> => {
+      const { rows } = await pool.query<{ last_used_at: Date | null }>(
+        'SELECT last_used_at FROM api_keys WHERE key_hash = $1',
+        [hashKey(key)],
+      );
+      return rows[0]!.last_used_at;
+    };
+
+    expect(await stamp()).toBeNull(); // minted, never presented
+    await resolveTenantByBearer(db, key);
+    const first = await stamp();
+    expect(first).not.toBeNull();
+
+    // A second call moments later must NOT write again — otherwise every authenticated
+    // request carries an UPDATE, which is what the throttle exists to avoid.
+    await resolveTenantByBearer(db, key);
+    expect((await stamp())!.getTime()).toBe(first!.getTime());
+
+    // Once the stamp is older than the refresh window, the next use moves it.
+    await pool.query("UPDATE api_keys SET last_used_at = now() - interval '1 hour' WHERE key_hash = $1", [hashKey(key)]);
+    await resolveTenantByBearer(db, key);
+    expect((await stamp())!.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
 });
 
 describe('mcp-server — tool call through createServer persists provenance (C2)', () => {
