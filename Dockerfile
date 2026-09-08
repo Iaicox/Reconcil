@@ -21,6 +21,19 @@ RUN pnpm fetch
 COPY . .
 RUN pnpm install --frozen-lockfile --offline
 RUN pnpm build
+# Drop the eval runner HERE, in the builder, so the runtime stage's COPY never sees it.
+# Deleting it after the COPY instead would only add a whiteout layer: the bytes would still
+# sit in the layer below, reachable through `docker save` / `docker history`, and the image
+# would be no smaller. It has to exist during install+build (the workspace lockfile covers
+# it) and is needed by nothing afterwards — the image runs mcp-server and worker, and
+# nothing in compose, the guide or the README invokes anything from apps/cli.
+#
+# Why it must not ship: the runner drives live LLM traffic and, when DATABASE_URL is unset,
+# starts a throwaway Postgres CONTAINER — which is why apps/cli legitimately carries
+# @testcontainers/postgresql in `dependencies`, and why that manifest kept drawing review
+# comments. The manifest was never the defect; shipping the runner was. (The package itself
+# still sits in the shared pnpm store until the deferred `pnpm deploy --prod` slice.)
+RUN rm -rf apps/cli
 # NOTE: no `pnpm prune --prod` — in this workspace it both aborts without a TTY
 # (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY) and, once forced, strips hoisted
 # prod deps (e.g. pg) that a workspace app still needs at runtime. We ship the
@@ -32,17 +45,9 @@ WORKDIR /app
 COPY --from=builder /app /app
 # NOTE: still ships sources + devDependencies from the builder stage (see the
 # `pnpm prune --prod` note above) — a full prod-slim rebuild (`--prod` install
-# / dist-only copy) is a deliberately deferred separate slice.
-#
-# The eval runner is dropped here. It is a development tool that drives live LLM traffic
-# and, when DATABASE_URL is unset, starts a throwaway Postgres CONTAINER — which is why
-# apps/cli legitimately carries @testcontainers/postgresql in `dependencies` and why that
-# manifest kept drawing review comments. The manifest was never the defect; shipping the
-# runner was. Nothing in compose, the guide or the README runs anything from apps/cli, so
-# the image simply does not carry it. (The package itself still sits in the shared pnpm
-# store until the deferred `pnpm deploy --prod` slice; this removes the runner, not the
-# last byte of its dependency.)
-RUN rm -rf /app/apps/cli
+# / dist-only copy) is a deliberately deferred separate slice. The eval runner is already
+# gone at this point — removed in the builder, so it is absent from this layer rather than
+# hidden behind a whiteout.
 # node:22.22-slim ships a pre-created `node` user (uid 1000). `/app` is root-owned
 # from the COPY above (world-readable, so `node` can still read + exec it); the
 # one path either command writes to at runtime is the exports dir (close-pack /
