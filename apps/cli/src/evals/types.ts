@@ -25,6 +25,21 @@ export interface Grade extends GradeResult {
 /** All five grader verdicts for a single (case, run). */
 export type RunGrades = Record<Metric, Grade>;
 
+/**
+ * One run: how it graded, plus what the model actually did. The verdict alone does not
+ * say why — "called disallowed tool(s): analytics_list_events" hides the rest of the path,
+ * and "no tool invocations to cite" hides the answer that was given instead. Without this
+ * a red gate could only be investigated by paying for another run, so the trajectory and
+ * the final answer are part of the report artifact.
+ */
+export interface RunResult {
+  grades: RunGrades;
+  /** Tool names in call order, duplicates kept — the trajectory itself, not a set. */
+  tools: string[];
+  /** The final answer, verbatim. The Markdown scorecard excerpts it; the JSON keeps it whole. */
+  answer: string;
+}
+
 /** Aggregated verdict for one metric across a case's runs. */
 export interface MetricOutcome {
   applicable: boolean;
@@ -38,7 +53,7 @@ export interface MetricOutcome {
 export interface CaseResult {
   id: string;
   face: 'A' | 'B';
-  runs: RunGrades[];
+  runs: RunResult[];
   metrics: Record<Metric, MetricOutcome>;
 }
 

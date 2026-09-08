@@ -5,11 +5,11 @@
  * a fake session producer with no API key in the hermetic `test` job, and against the
  * real Tool Runner + Postgres in `evals-*`.
  */
-import type { EvalCase } from '@reconcil/evals';
+import { calledTools, type EvalCase } from '@reconcil/evals';
 
 import { aggregateCase } from './gate.js';
 import { gradeTranscript } from './grade.js';
-import type { CaseResult, CaseSeeder, ResolverFactory, RunGrades, SessionProducer } from './types.js';
+import type { CaseResult, CaseSeeder, ResolverFactory, RunResult, SessionProducer } from './types.js';
 
 export interface HarnessDeps {
   /** Truncate + seed the fixture for this case; returns a tenant-scoped ctx. */
@@ -35,14 +35,20 @@ export async function runSuite(
     // settlement already consumed and confirm would fail; each run needs a clean scenario.
     // seedCase truncates first, so re-seeding per run is safe (D3, 04-testing.md §5).
     let env = await deps.seedCase(evalCase);
-    const runGrades: RunGrades[] = [];
+    const runResults: RunResult[] = [];
     for (let runIndex = 0; runIndex < runs; runIndex++) {
       if (runIndex > 0 && evalCase.face === 'B') env = await deps.seedCase(evalCase);
       const transcript = await deps.produce({ eval: evalCase, ctx: env.ctx, runIndex });
       const resolver = await deps.makeResolver(env.ctx, transcript);
-      runGrades.push(gradeTranscript(transcript, evalCase.expect, resolver));
+      // The transcript is kept alongside the verdicts, not discarded with the session —
+      // it is the only record of what the model did, and a paid run is not repeatable.
+      runResults.push({
+        grades: gradeTranscript(transcript, evalCase.expect, resolver),
+        tools: calledTools(transcript),
+        answer: transcript.finalAnswer,
+      });
     }
-    const result = aggregateCase(evalCase.id, evalCase.face, runGrades);
+    const result = aggregateCase(evalCase.id, evalCase.face, runResults);
     results.push(result);
     deps.onCase?.(result);
   }

@@ -26,7 +26,6 @@ import { dbResolver } from './evals/resolver.js';
 import { buildReport, toJson, toMarkdown } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
-import { METRICS } from './evals/types.js';
 
 /** DATABASE_URL if provided, else a throwaway container. Returns db + a disposer. */
 async function provisionDb(): Promise<{ db: Db; dispose: () => Promise<void> }> {
@@ -162,22 +161,11 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
       writeFileSync(join(outDir, 'scorecard.json'), toJson(report), 'utf8');
       writeFileSync(join(outDir, 'scorecard.md'), toMarkdown(report), 'utf8');
 
+      // The Markdown now ends in the transcript appendix — every failing case's grader
+      // reason, trajectory and answer — so the CI log explains WHY on its own. That
+      // replaces the "Failing details" summary this used to print separately, and it
+      // prints for a failing case even when the suite still clears the 90% gate.
       console.error(toMarkdown(report));
-
-      if (!gate.passed) {
-        // Surface the grader's detail for every applicable metric that failed, so the CI
-        // log explains WHY (e.g. "expected X not found" = rounding, "fabricated Y", wrong
-        // figure) without needing the JSON artifact.
-        console.error('Failing details:');
-        for (const c of cases) {
-          for (const m of METRICS) {
-            const outcome = c.metrics[m];
-            if (!outcome.applicable || outcome.passed) continue;
-            const failing = c.runs.find((r) => !r[m].pass);
-            console.error(`  ${c.id} · ${m}: ${failing?.[m].detail ?? '(failed)'}`);
-          }
-        }
-      }
 
       console.error(`\nreports → ${outDir}`);
       if (!gate.passed) process.exitCode = 1;

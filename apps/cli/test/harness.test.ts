@@ -125,6 +125,20 @@ describe('harness → gate (hermetic)', () => {
     expect(cases[0]!.metrics.guardrail.passedRuns).toBe(2);
   });
 
+  it('records the trajectory and the answer of every run, not just the verdicts', async () => {
+    const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 2, deps(CLEAN_ANSWERS));
+    const [balance, guardrail] = cases;
+    // Tool names in call order — a verdict line says "called disallowed tool(s): X" but
+    // never what the whole path was, which is what a trajectory failure has to be read from.
+    expect(balance!.runs).toHaveLength(2);
+    expect(balance!.runs[0]!.tools).toEqual(['analytics_balances']);
+    expect(balance!.runs[0]!.answer).toContain('1.5');
+    // A refusal calls nothing; the empty trajectory must be recorded, not conflated with
+    // "not captured".
+    expect(guardrail!.runs[0]!.tools).toEqual([]);
+    expect(guardrail!.runs[0]!.answer).toContain("I can't provide investment advice");
+  });
+
   it('reseeds per run for Face B (write tools mutate shared state), once for Face A (D3)', async () => {
     const RECON_CASE: EvalCase = {
       id: 'recon-status-x',
@@ -166,6 +180,32 @@ describe('scorecard', () => {
     const json = JSON.parse(toJson(report)) as { gate: { passed: boolean }; cases: unknown[] };
     expect(json.gate.passed).toBe(true);
     expect(json.cases).toHaveLength(2);
+  });
+
+  it('quotes the tools and the answer of a failing case, so the artifact explains itself', async () => {
+    const fabricated: Record<string, Transcript> = {
+      ...CLEAN_ANSWERS,
+      'bal-x': {
+        invocations: [invocation('analytics_balances', { balance: '1.5' })],
+        finalAnswer: 'Your ETH balance is 1.5, worth about 9.9 thousand dollars.',
+      },
+    };
+    const cases = await runSuite([BALANCE_CASE], 1, deps(fabricated));
+    const gate = evaluateGate(cases);
+    const md = toMarkdown(buildReport({ suite: 'core', model: 'test', runs: 1, generatedAt: 'now' }, cases, gate));
+
+    expect(md).toContain('## Failing cases');
+    expect(md).toContain('bal-x');
+    expect(md).toContain('analytics_balances'); // the trajectory
+    expect(md).toContain('worth about 9.9 thousand dollars'); // the answer verbatim
+    expect(md).toContain('fabricated number'); // the grader's reason, per run
+  });
+
+  it('leaves out the transcript appendix entirely when every case passed', async () => {
+    const cases = await runSuite([BALANCE_CASE, GUARDRAIL_CASE], 1, deps(CLEAN_ANSWERS));
+    const gate = evaluateGate(cases);
+    const md = toMarkdown(buildReport({ suite: 'core', model: 'test', runs: 1, generatedAt: 'now' }, cases, gate));
+    expect(md).not.toContain('## Failing cases');
   });
 });
 

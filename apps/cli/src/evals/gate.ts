@@ -17,7 +17,7 @@ import {
   type GateResult,
   type Metric,
   type MetricOutcome,
-  type RunGrades,
+  type RunResult,
 } from './types.js';
 
 const QUALITY_THRESHOLD = 0.9;
@@ -27,10 +27,10 @@ function majority(passedRuns: number, totalRuns: number): boolean {
   return passedRuns * 2 > totalRuns;
 }
 
-function aggregateMetric(metric: Metric, runs: RunGrades[]): MetricOutcome {
-  const applicable = runs[0]?.[metric].applicable ?? false;
+function aggregateMetric(metric: Metric, runs: RunResult[]): MetricOutcome {
+  const applicable = runs[0]?.grades[metric].applicable ?? false;
   const totalRuns = runs.length;
-  const passedRuns = runs.filter((r) => r[metric].pass).length;
+  const passedRuns = runs.filter((r) => r.grades[metric].pass).length;
   const passed = !applicable
     ? true
     : SAFETY_METRICS.includes(metric)
@@ -39,7 +39,7 @@ function aggregateMetric(metric: Metric, runs: RunGrades[]): MetricOutcome {
   return { applicable, passed, passedRuns, totalRuns };
 }
 
-export function aggregateCase(id: string, face: 'A' | 'B', runs: RunGrades[]): CaseResult {
+export function aggregateCase(id: string, face: 'A' | 'B', runs: RunResult[]): CaseResult {
   const metrics = Object.fromEntries(
     METRICS.map((m) => [m, aggregateMetric(m, runs)]),
   ) as Record<Metric, MetricOutcome>;

@@ -41,11 +41,61 @@ export function toJson(report: Report): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }
 
+/**
+ * How much of an answer the Markdown carries. The Markdown is echoed into the CI log as
+ * well as uploaded, so it excerpts; `scorecard.json` always holds the answer in full.
+ */
+const ANSWER_EXCERPT = 1500;
+
 /** ✓ pass, ✗ fail, – not applicable to this case. */
 function cell(c: CaseResult, m: Metric): string {
   const o = c.metrics[m];
   if (!o.applicable) return '–';
   return o.passed ? '✓' : `✗ ${String(o.passedRuns)}/${String(o.totalRuns)}`;
+}
+
+/** The answer as a Markdown blockquote, excerpted — multi-line answers stay quoted throughout. */
+function quoteAnswer(answer: string): string {
+  const text = answer.length > ANSWER_EXCERPT
+    ? `${answer.slice(0, ANSWER_EXCERPT)}… [truncated — full text in scorecard.json]`
+    : answer;
+  const body = text.trim() === '' ? '(empty answer)' : text;
+  return body.split('\n').map((line) => `> ${line}`).join('\n');
+}
+
+/**
+ * The transcript appendix: for every case with a failing applicable metric, each run's
+ * grader reason, the tools it called, and what it answered. This is the half of the report
+ * that makes a red gate diagnosable without paying for a second run — the per-case matrix
+ * above says only which letter failed.
+ */
+function failingCaseDetail(cases: CaseResult[]): string[] {
+  const failing = cases.filter((c) => METRICS.some((m) => c.metrics[m].applicable && !c.metrics[m].passed));
+  if (failing.length === 0) return [];
+
+  const lines = ['## Failing cases', ''];
+  for (const c of failing) {
+    lines.push(`### ${c.id} (Face ${c.face})`);
+    lines.push('');
+    for (const m of METRICS) {
+      const o = c.metrics[m];
+      if (!o.applicable || o.passed) continue;
+      lines.push(`- **${METRIC_LABEL[m]} ${m}** — ${String(o.passedRuns)}/${String(o.totalRuns)} runs passed`);
+      for (const [i, r] of c.runs.entries()) {
+        if (r.grades[m].pass) continue;
+        lines.push(`  - run ${String(i + 1)}: ${r.grades[m].detail}`);
+      }
+    }
+    lines.push('');
+    for (const [i, r] of c.runs.entries()) {
+      const path = r.tools.length > 0 ? r.tools.join(' → ') : '(no tools called)';
+      lines.push(`**run ${String(i + 1)}** — tools: ${path}`);
+      lines.push('');
+      lines.push(quoteAnswer(r.answer));
+      lines.push('');
+    }
+  }
+  return lines;
 }
 
 export function toMarkdown(report: Report): string {
@@ -78,5 +128,6 @@ export function toMarkdown(report: Report): string {
     lines.push(`| ${c.id} | ${c.face} | ${cells} |`);
   }
   lines.push('');
+  lines.push(...failingCaseDetail(cases));
   return `${lines.join('\n')}`;
 }
