@@ -380,6 +380,25 @@ lockfile regeneration — diff the result against the branch intended lock, neve
 that the install succeeds. Where: `pnpm-lock.yaml`.
 *(landing sweep — a real regression, caught by review and fixed in #62)*
 
+**`flow-002`'s `tools_expected` over-specifies: two tools legitimately answer its question.**
+It asks for "the net USDC flow (received minus sent) over the last quarter" and demands
+`analytics_flows`. On the 2026-09-08 run the agent called `analytics_stablecoin_movements`
+instead — "token flows restricted to verified stablecoins, with per-peg subtotals", which
+for a *stablecoin* flow question is at least as good a choice — answered correctly, cited
+it, and surfaced the coverage caveat. G1 scored it a miss. This is the same class the
+allowlist removal already addressed one level down: `tools_expected` is a hard "must call
+every one of these", and there is no way to say "either of these two is right". Not fixed
+here because an `any-of` notion is a real schema decision, not a tail-end edit: it needs a
+name, validation (an any-of set of one is a plain expectation; overlapping with
+`writes_allowed` is a contradiction), and a pass through the other 29 cases to see where
+else it applies. Note the case cannot produce a real figure either way — erc20 events
+still cannot reach `chain_events` (04-testing.md §2, unblocker a) — so its value today is
+purely the trajectory. Trigger: the next eval slice with budget for a re-measure. Where:
+`packages/evals/fixtures/evals/core-30.yaml` (`flow-002`),
+`packages/evals/src/dataset.ts` (`expectSchema`), `packages/evals/src/graders/trajectory.ts`.
+*(landing sweep — surfaced 2026-09-08 when seeding the checkpoints changed this case's
+failure from "no wallets tracked" to a genuine tool choice)*
+
 **No eval fixture has a labelled wallet, or a second one.** `seedGoldenWallet` seeds one
 address per fixture role and the seeder tracks it unlabelled, so a case cannot refer to a
 wallet by name. Two cases were written as if it could: bal-001 asked for "the ops wallet"
@@ -396,7 +415,7 @@ label-resolution cases can be restored. Where: `apps/cli/src/evals/seed-case.ts`
 
 ## Reconciling the count
 
-This register holds **41 entries**. The source ledger
+This register holds **42 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
@@ -450,7 +469,12 @@ literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`min
   seeder never filled. The Dockerfile base-tag entry was split rather than removed: its
   float-on-major half is fixed, its not-slim half stands.
 
-32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 = **41**, matching this document.
+- **+1**: one entry ADDED by the same PR, and only visible because of it — flow-002 asking
+  for a figure two tools legitimately produce. Seeding the checkpoints changed that case
+  from failing on "no wallets tracked" to failing on a genuine tool choice, which is a
+  different gap wearing the same red mark.
+
+32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 = **42**, matching this document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation

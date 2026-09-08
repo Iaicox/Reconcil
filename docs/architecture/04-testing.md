@@ -219,12 +219,23 @@ the dataset — an exhaustive tool allowlist that scored an extra *read* as a fa
 refusal grader that matched the model restating the question it declined, a case seeded once
 and shared across runs that could not survive its own write, and a question referring to a
 previous turn that never happened. With those fixed, ≥90% is met without being loosened, so
-it stays where it is. The two remaining G1 failures share one cause and one known-gaps
-entry: `ledger_status` reads `ingestion_checkpoints`, which the eval seeder never fills, so
-an agent that checks freshness is told the tenant has no data and correctly declines.
+it stays where it is. The two remaining G1 failures shared one cause: `ledger_status` reads
+`ingestion_checkpoints`, which the eval seeder never filled, so an agent that checked
+freshness was told the tenant had no data and correctly declined.
 
-Note the measurement is at `--runs 1`, so "by majority" was not exercised; a case that is
-flaky rather than broken reads as a coin flip there. The next full 30×3 is the one that
+**Re-measured 2026-09-08 after seeding those checkpoints: G1 29/30 (96.7%), G3 25/25,
+G4 3/3, G5 2/2.** `flow-003-self-transfer` passes. `flow-002` still does not, but for a
+different reason, which is the point of measuring rather than assuming: the agent now sees
+the wallet and answers the "net USDC flow" question with `analytics_stablecoin_movements`
+— *flows restricted to verified stablecoins* — where the case demands `analytics_flows`.
+Two tools legitimately answer that question and `tools_expected` cannot say so; that is now
+its own known-gaps entry, not a model failure. G2 read 2/3 on that run because of a grader
+defect the same run exposed — "the **ERC-20** stream is still queued" scored as a
+fabricated −20 — fixed immediately after and confirmed green by `evals-smoke`, which
+carries `cover-001`.
+
+Note both measurements are at `--runs 1`, so "by majority" was not exercised; a case that
+is flaky rather than broken reads as a coin flip there. The next full 30×3 is the one that
 settles the majority half.
 
 Failing the gate blocks the OSS demo publication, by definition of "done" for week 5.
