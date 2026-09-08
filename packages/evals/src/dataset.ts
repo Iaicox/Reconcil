@@ -73,15 +73,26 @@ const expectSchema = z
     { message: 'a tool cannot be both expected and merely writes_allowed' },
   );
 
-const setupSchema = z
-  .object({ fixture: z.string().min(1), wallets: z.array(z.string()).optional() })
-  .strict();
+// `wallets` used to sit here. It was validated and then read by nobody: the seeder tracks
+// whatever single wallet the fixture role seeds, and no fixture has a labelled or a second
+// wallet. bal-001 asked for "the ops wallet" and the agent correctly answered that no such
+// wallet exists, 3 runs of 3. A field that only ever describes is worse than no field, so
+// it is gone; multi-wallet fixtures are a known gap (09-known-gaps.md), not a declaration.
+const setupSchema = z.object({ fixture: z.string().min(1) }).strict();
 
 export const evalCaseSchema = z
   .object({
     id: z.string().min(1),
     face: z.enum(['A', 'B']),
     question: z.string().min(1),
+    /**
+     * User turns asked and answered BEFORE the graded question, for a case whose question
+     * only means something in a conversation — "how did you arrive at the gas figure from
+     * my previous question". Each is a real agent turn against the same session and
+     * database, so the tool_calls it makes are persisted and referable; only the graded
+     * turn's own invocations are graded (agent.ts).
+     */
+    prior_turns: z.array(z.string().min(1)).optional(),
     setup: setupSchema.optional(),
     expect: expectSchema,
   })

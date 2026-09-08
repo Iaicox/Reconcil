@@ -470,9 +470,23 @@ lockfile regeneration — diff the result against the branch intended lock, neve
 that the install succeeds. Where: `pnpm-lock.yaml`.
 *(landing sweep — a real regression, caught by review and fixed in #62)*
 
+**No eval fixture has a labelled wallet, or a second one.** `seedGoldenWallet` seeds one
+address per fixture role and the seeder tracks it unlabelled, so a case cannot refer to a
+wallet by name. Two cases were written as if it could: bal-001 asked for "the ops wallet"
+and the agent correctly answered that no such wallet exists (3 runs of 3, 2026-09-08), and
+flow-003-self-transfer asks to exclude "moves between my own wallets" when there is only one
+wallet, so the trap it is named for is not actually set and the case passes without testing
+anything. Both questions have been reworded; a `setup.wallets` field that declared the
+intent and was read by nobody has been removed rather than left describing a capability that
+does not exist. Trigger: a fixture capture that records a second wallet for the smb-stables
+role (and a directory entity labelling both), after which the self-transfer and
+label-resolution cases can be restored. Where: `apps/cli/src/evals/seed-case.ts`,
+`packages/evals/src/seed.ts`, `packages/evals/fixtures/evals/core-30.yaml`.
+*(landing sweep — found by the first scorecard that carried transcripts, 2026-09-08)*
+
 ## Reconciling the count
 
-This register holds **49 entries**. The source ledger
+This register holds **50 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
@@ -506,8 +520,12 @@ literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`min
   the whole-arc review (Fastify `trustProxy`, `apps/cli` testcontainers, the fresh-chain
   `queued` path) and two from the merge itself (the `integration` container contention,
   and the lockfile-regeneration hazard that silently reverted four security bumps).
+- **+1**: one further *(landing sweep)* entry, added 2026-09-08 — the eval fixtures having
+  no labelled or second wallet. It was invisible until the scorecard began carrying
+  transcripts: the verdict line said "missing expected tool", and only the answer said the
+  wallet the question named does not exist.
 
-32 − 1 + 5 + 4 + 4 + 5 = **49**, matching this document.
+32 − 1 + 5 + 4 + 4 + 5 + 1 = **50**, matching this document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation

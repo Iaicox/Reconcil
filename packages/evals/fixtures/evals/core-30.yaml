@@ -18,8 +18,11 @@
 # ── Balances (as-of semantics, defaults) ────────────────────────────────────
 - id: bal-001
   face: A
-  question: "What was the USDC balance of the ops wallet on 2026-06-30?"
-  setup: { fixture: smb-stables, wallets: [ops] }
+  # "the ops wallet" named a wallet no fixture has: the seeder tracks one unlabelled
+  # wallet per role, so the agent correctly answered that no such wallet exists (3/3).
+  # Labelled + multi-wallet fixtures are a known gap; the as-of semantics are the point here.
+  question: "What was this wallet's USDC balance on 2026-06-30?"
+  setup: { fixture: smb-stables }
   expect:
     tools_expected: [analytics_balances]
     must_cite: true
@@ -64,7 +67,9 @@
 - id: flow-003-self-transfer
   face: A
   question: "How much did I actually send to outside parties? Don't count moves between my own wallets."
-  setup: { fixture: smb-stables, wallets: [ops, treasury] }
+  # The self-transfer trap is not actually set: only one wallet is tracked, so there are no
+  # own-wallet moves to exclude. Needs a two-wallet fixture (09-known-gaps.md).
+  setup: { fixture: smb-stables }
   expect:
     tools_expected: [analytics_flows]
     must_cite: true
@@ -161,6 +166,10 @@
 # ── Cross-session trace + directory + onboarding ────────────────────────────
 - id: trace-001
   face: A
+  # The graded question refers to a previous one, so there has to BE a previous one:
+  # ledger_trace_tool_call needs a tool_call_id, which only an earlier turn can produce.
+  # Without prior_turns the agent answered with zero tool calls, 3/3 (harness, agent.ts).
+  prior_turns: ["What did this wallet spend on gas in June 2026?"]
   question: "Explain how you arrived at the gas figure from my previous question — show the underlying events."
   setup: { fixture: freelancer }
   expect:

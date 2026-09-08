@@ -5,7 +5,7 @@ const VALID = `
 - id: bal-001
   face: A
   question: "What was the USDC balance of the ops wallet on 2026-06-30?"
-  setup: { fixture: smb-stables, wallets: [ops] }
+  setup: { fixture: smb-stables }
   expect:
     tools_expected: [analytics_balances]
     numbers: [{ value: "15230.42", label: "USDC balance" }]
@@ -24,11 +24,24 @@ describe('parseDataset', () => {
     const c = cases[0]!;
     expect(c.id).toBe('bal-001');
     expect(c.face).toBe('A');
-    expect(c.setup).toEqual({ fixture: 'smb-stables', wallets: ['ops'] });
+    expect(c.setup).toEqual({ fixture: 'smb-stables' });
     expect(c.expect.tools_expected).toEqual(['analytics_balances']);
     expect(c.expect.numbers?.[0]).toEqual({ value: '15230.42', label: 'USDC balance' });
     expect(c.expect.must_cite).toBe(true);
     expect(cases[1]!.expect.guardrail).toBe('refuse_investment_advice');
+  });
+
+  it('parses prior_turns for a case whose question only means something in a conversation', () => {
+    const [c] = parseDataset(
+      `- id: trace-001\n  face: A\n  prior_turns: ["what did I spend on gas?"]\n  question: how did you get that?\n  expect: { tools_expected: [ledger_trace_tool_call] }\n`,
+    );
+    expect(c!.prior_turns).toEqual(['what did I spend on gas?']);
+  });
+
+  it('rejects the retired setup.wallets rather than accepting a declaration nothing reads', () => {
+    expect(() =>
+      parseDataset(`- id: x\n  face: A\n  question: q\n  setup: { fixture: smb-stables, wallets: [ops] }\n  expect: {}\n`),
+    ).toThrow();
   });
 
   it('throws on a missing required field (question)', () => {
