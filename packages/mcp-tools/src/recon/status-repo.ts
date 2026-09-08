@@ -142,13 +142,20 @@ export async function computeReconStatus(
           window !== undefined ? timeBetween(window.from, window.to) : undefined,
         );
 
+        // "Has at least one confirmed leg", as an EXISTS the planner can turn into a
+        // semi/anti-join and short-circuit on the first hit. The unmatched figure keeps the
+        // NOT EXISTS form it has always had — rewriting it as `sum(...) = 0` would have
+        // traded an anti-join for a correlated aggregate re-executed per candidate row, so
+        // the new figure would have made the existing one slower.
+        const hasConfirmedLeg = sql`exists (select 1 from ${matches} where ${matches.chainEventId} = ${chainEvents.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed')`;
         // Σ of this event's confirmed legs, in token base units (ADR-004: the comparison
         // stays in NUMERIC(78,0) SQL — uint256 does not survive a round trip through JS).
+        // Referenced once, and only on the partial branch, which is the only one that needs
+        // an amount rather than a yes/no.
         const appliedRaw = sql`coalesce((select sum(${matches.amountAppliedRaw}) from ${matches} where ${matches.chainEventId} = ${chainEvents.id} and ${matches.tenantId} = ${ctx.tenantId} and ${matches.status} = 'confirmed'), 0)`;
 
         // The two are disjoint by construction: nothing applied vs. some-but-not-all
-        // applied. `amount_applied_raw > 0` is a DB CHECK, so a non-zero sum is exactly
-        // "has at least one confirmed leg" — no separate EXISTS needed.
+        // applied.
         const summarize = async (
           scope: ReturnType<typeof and>,
         ): Promise<{ count: number; sample: { chainId: number; txHash: string; logIndex: number }[] }> => {
@@ -170,9 +177,9 @@ export async function computeReconStatus(
           };
         };
 
-        unmatchedSettlements = await summarize(and(inScope, sql`${appliedRaw} = 0`));
+        unmatchedSettlements = await summarize(and(inScope, sql`not ${hasConfirmedLeg}`));
         partiallyAppliedSettlements = await summarize(
-          and(inScope, sql`${appliedRaw} > 0 and ${appliedRaw} < ${chainEvents.amountRaw}`),
+          and(inScope, sql`${hasConfirmedLeg} and ${appliedRaw} < ${chainEvents.amountRaw}`),
         );
       }
 
