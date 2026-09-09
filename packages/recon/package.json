@@ -20,7 +20,7 @@
   "dependencies": {
     "@reconcil/core": "workspace:*",
     "@reconcil/db": "workspace:*",
-    "csv-parse": "^5.5.0"
+    "csv-parse": "^7.0.2"
   },
   "devDependencies": {
     "@types/node": "catalog:",
