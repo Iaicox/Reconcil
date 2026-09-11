@@ -24,7 +24,7 @@ catalog:
   pg: ^8.22.0
   tsx: ^4.19.0
   typescript: ~6.0.3
-  vitest: ^4.1.0
+  vitest: ^4.1.11
   zod: ^4.0.0
 
 minimumReleaseAgeExclude:
