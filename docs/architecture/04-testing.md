@@ -304,6 +304,22 @@ Secrets policy: `ANTHROPIC_API_KEY` only in `evals-*`; provider keys never neede
 (fixtures only). An `evals-preflight` job resolves secret presence into an output the eval
 jobs gate on, so a missing key makes them **skip** (grey), never fail red.
 
+**Exit codes — "the gate failed" and "the gate could not run" are different answers.** The
+runner exits **1** when the suite ran and missed the gate, and **2** when it could not run at
+all: the account out of credit, a rejected or unpermitted key, rate limiting, an overloaded
+API. Both are red — mapping an unrunnable gate to a pass, or to a silent skip, is how a
+suite stops running and nobody notices — but a 2 says the branch is not implicated and no
+amount of reading the diff will help. It prints one line and a hint instead of the error
+object. The classification is deliberately narrow and asymmetric (`evals/runnability.ts`):
+a misread gate failure gets dismissed as "not my problem", while a misread environment
+fault merely gets investigated, so a `400` counts only for the billing shape — every other
+`400` is a request this code built wrong, which is exactly what the gate is for — and a
+`500` is not classified at all.
+
+This exists because of a real run: on 2026-09-13 `evals-smoke` went red with a 40-line
+`BadRequestError` dump whose content was one sentence, "Your credit balance is too low".
+Nothing in the CI summary separated that from a model regression on the branch under review.
+
 Gate cadence — deliberate: the live gate runs **pre-merge on the PR** (`evals-smoke`) and
 **on demand** (`evals-full`), **not** on push to `main` and **not** nightly. So the
 demo-readiness gate is a per-PR signal plus an explicit pre-demo run, not a per-`main`-push
