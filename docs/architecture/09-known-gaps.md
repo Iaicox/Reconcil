@@ -212,8 +212,11 @@ fixing found the description understated one half and overstated the other.
 `realpath`, then `stat`, then `readFile` — so the 8 MB size cap measured one inode and the
 read consumed whatever the path pointed at by then. That is not a theoretical window: it is
 a straightforward bypass of the only thing standing between a hostile `file_path` and an
-unbounded read. Now a single `open`, with `fh.stat()` and `fh.readFile()` on that
-descriptor, so check and use cannot refer to different files. `fh.stat().isFile()` also
+unbounded read. Now a single `open`, with `fh.stat()` and a BOUNDED read on that same
+descriptor — deliberately not `fh.readFile()`, which follows to EOF: the stat is a snapshot,
+so a writer appending to the same inode between the two would still have walked past the
+cap. The read fills a buffer sized from the stat'd size (one byte over, so growth is
+detectable) and never exceeds the cap. `fh.stat().isFile()` also
 refuses a FIFO/socket/device node, which reports size 0 and would otherwise sail past the
 cap and stream without bound. The export write path gained its own second look:
 `realpathAncestorWithinBase` can only vouch for segments that existed at validation time, so

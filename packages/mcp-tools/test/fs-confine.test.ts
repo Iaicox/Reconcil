@@ -1,5 +1,8 @@
 /**
- * `realpathDirWithinBase` — the write path's SECOND confinement look, after `mkdir -p`.
+ * `realpathWithinBase` as the write path's SECOND confinement look, after `mkdir -p`.
+ * (It was briefly wrapped in a `realpathDirWithinBase` helper that collapsed the
+ * unresolvable/escaped discriminant this module exists to keep distinct, for no gain over
+ * calling it directly.)
  *
  * `realpathAncestorWithinBase` runs before the directory exists, so it can only vouch for
  * the deepest ancestor present at that moment. Every segment created afterwards was never
@@ -13,7 +16,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { realpathDirWithinBase } from '../src/fs-confine.js';
+import { realpathWithinBase } from '../src/fs-confine.js';
 
 let root: string;
 let base: string;
@@ -46,25 +49,28 @@ const symlinksWork = await (async (): Promise<boolean> => {
   }
 })();
 
-describe('realpathDirWithinBase', () => {
+describe('realpathWithinBase — the post-mkdir look on the write path', () => {
   it('accepts a real directory inside the base, returning the resolved path to write through', async () => {
     const dir = join(base, 'a', 'b');
     await mkdir(dir, { recursive: true });
-    expect(await realpathDirWithinBase(base, dir)).toBe(await realpath(dir));
+    expect(await realpathWithinBase(base, dir)).toEqual({ ok: true, realTarget: await realpath(dir) });
   });
 
   it('accepts the base itself', async () => {
-    expect(await realpathDirWithinBase(base, base)).toBe(await realpath(base));
+    expect(await realpathWithinBase(base, base)).toEqual({ ok: true, realTarget: await realpath(base) });
   });
 
   it('rejects a directory that does not exist — removed underneath us is not writable', async () => {
-    expect(await realpathDirWithinBase(base, join(base, 'never-created'))).toBeNull();
+    // The discriminant the dropped wrapper used to collapse: 'unresolvable' (removed
+    // underneath us) is a different fact from 'escaped' (below), and only one of them means
+    // somebody tried something.
+    expect(await realpathWithinBase(base, join(base, 'never-created'))).toEqual({ ok: false, reason: 'unresolvable' });
   });
 
   it('rejects a sibling whose path merely shares the base prefix', async () => {
     const evil = join(root, 'exports-evil');
     await mkdir(evil, { recursive: true });
-    expect(await realpathDirWithinBase(base, evil)).toBeNull();
+    expect(await realpathWithinBase(base, evil)).toEqual({ ok: false, reason: 'escaped' });
   });
 
   it.runIf(symlinksWork)('rejects a symlink planted under the base that points outside it', async () => {
@@ -77,7 +83,7 @@ describe('realpathDirWithinBase', () => {
     const planted = join(base, 'run-uuid');
     await symlink(outside, planted, 'dir');
 
-    expect(await realpathDirWithinBase(base, planted)).toBeNull();
+    expect(await realpathWithinBase(base, planted)).toEqual({ ok: false, reason: 'escaped' });
   });
 
   it.runIf(symlinksWork)('accepts a symlink under the base that points back inside it', async () => {
@@ -88,7 +94,7 @@ describe('realpathDirWithinBase', () => {
 
     // …and it hands back the RESOLVED target, not the link, so the caller writes into the
     // real directory rather than re-traversing the symlink on every file.
-    expect(await realpathDirWithinBase(base, link)).toBe(await realpath(real));
+    expect(await realpathWithinBase(base, link)).toEqual({ ok: true, realTarget: await realpath(real) });
   });
   it.runIf(symlinksWork)('rejects a target reached through a symlinked SEGMENT of the path, anchored at the root', async () => {
     // The shape that defeats a self-anchored check, and the reason callers must pass the
@@ -106,8 +112,8 @@ describe('realpathDirWithinBase', () => {
 
     // Anchored at the narrowed base — what the first version did — this WRONGLY passes:
     // both sides resolve into <root>/outside.
-    expect(await realpathDirWithinBase(narrowed, target)).not.toBeNull();
+    expect(await realpathWithinBase(narrowed, target)).toMatchObject({ ok: true });
     // Anchored at the root, the escape is visible.
-    expect(await realpathDirWithinBase(base, target)).toBeNull();
+    expect(await realpathWithinBase(base, target)).toEqual({ ok: false, reason: 'escaped' });
   });
 });

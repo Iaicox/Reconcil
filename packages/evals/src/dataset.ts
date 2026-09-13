@@ -123,15 +123,13 @@ const expectSchema = z
   .refine((e) => (e.tools_any_of ?? []).every((t) => !WRITE_TOOLS.has(t)), {
     message: 'tools_any_of may only name read tools — a disjunction over writes would sanction every member',
   })
-  // An accepted ANSWER and a merely PERMITTED write are different claims about the same
-  // call; asserting both says the case does and does not care which tool answered.
-  .refine(
-    (e) => {
-      const allowed = new Set(e.writes_allowed ?? []);
-      return (e.tools_any_of ?? []).every((t) => !allowed.has(t));
-    },
-    { message: 'tools_any_of may not name a tool that is merely writes_allowed' },
-  );
+;
+
+// There is deliberately NO "tools_any_of ∩ writes_allowed" rule. It would be unreachable:
+// writes_allowed may only name write tools and tools_any_of may only name read tools, so
+// the intersection is empty for anything that gets that far. One was written, and the test
+// that named it passed on the read-tools rule instead — a rule that cannot fire, guarded by
+// a test that cannot prove it does.
 
 // `wallets` used to sit here. It was validated and then read by nobody: the seeder tracks
 // whatever single wallet the fixture role seeds, and no fixture has a labelled or a second

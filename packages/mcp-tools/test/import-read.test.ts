@@ -7,7 +7,7 @@
  * read — `readFile()` follows to EOF, so a writer appending to the same inode between the
  * stat and the read would still have walked past it.
  */
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -70,7 +70,6 @@ describe('readImportFile — byte cap', () => {
   it('rejects a DIRECTORY at the path rather than treating it as a zero-byte file', async () => {
     // The non-regular-file guard. A directory is the portable stand-in for the FIFO/socket
     // case: those also report size 0, sail past the cap, and then stream without bound.
-    const { mkdir } = await import('node:fs/promises');
     await mkdir(join(dir, 'adir'));
     await expect(readImportFile('adir')).rejects.toThrow(ToolError);
   });

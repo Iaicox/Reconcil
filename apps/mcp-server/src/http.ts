@@ -195,10 +195,22 @@ export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   // The empty case is ruled out by the TYPE (`HttpDeps.allowedHosts`, below); this is the
   // backstop for a JS caller the compiler never saw. An empty list does not make the check
   // strict — the SDK guards it with `length > 0`, so it turns DNS-rebinding protection OFF.
-  if (deps.allowedHosts?.some((h) => h.trim() === '') === true || deps.allowedHosts?.length === 0) {
-    throw new Error('allowedHosts must name at least one non-empty host — omit it to use the defaults');
+  //
+  // Trimmed, and the TRIMMED value is what gets forwarded. The SDK compares the raw Host
+  // header against these strings exactly, so a padded ' good.example:8484 ' would pass a
+  // validation that trims and then match nothing at all — every request rejected, for a
+  // config that looked accepted. `resolveAllowedHosts` normalizes for this reason; the
+  // injected seam has to agree with it rather than merely be checked against it.
+  let allowedHosts: [string, ...string[]];
+  if (deps.allowedHosts === undefined) {
+    allowedHosts = resolveAllowedHosts({ PORT: DEFAULT_PORT });
+  } else {
+    const [first, ...rest] = deps.allowedHosts.map((h) => h.trim());
+    if (first === undefined || first === '' || rest.some((h) => h === '')) {
+      throw new Error('allowedHosts must name at least one non-empty host — omit it to use the defaults');
+    }
+    allowedHosts = [first, ...rest];
   }
-  const allowedHosts = deps.allowedHosts ?? resolveAllowedHosts({ PORT: DEFAULT_PORT });
   const ipRateLimitPolicy = deps.ipRateLimit ?? { max: 600, timeWindow: '1 minute' };
   const tenantRateLimitPolicy = deps.tenantRateLimit ?? { max: 120, timeWindow: '1 minute' };
   // Built as a typed value rather than spread inline: a union-typed `trustProxy` in an

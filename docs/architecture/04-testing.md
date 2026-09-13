@@ -178,8 +178,8 @@ session producer, so the hermetic `test` job needs no API key.
 **Graders — deterministic, no LLM in the gate:**
 
 - **G1 trajectory**: `tools_expected` ⊆ called tools; at least one of `tools_any_of` was
-  called; **no write tool** was called outside `tools_expected ∪ tools_any_of ∪
-  writes_allowed`; and a `no_tools` case (the refusals) called nothing.
+  called; **no write tool** was called outside `tools_expected ∪ writes_allowed`; and a
+  `no_tools` case (the refusals) called nothing.
   There is deliberately **no allowlist**. It used to be exhaustive — every call had to be
   named in `tools_allowed` — which scored path conformance rather than correctness: on the
   live run of 2026-09-08 every "disallowed tool" failure was one extra *read*
@@ -213,11 +213,17 @@ session producer, so the hermetic `test` job needs no API key.
   | `cp-002` | **No** — `analytics_list_events` could surface the rows, but the agent would have to sum them. Fails (b): the LLM never computes (P1). |
   | `flow-003-self-transfer` | **No** — its gap is the missing two-wallet fixture, not the tool choice; broadening would blur what the case measures. |
 
-  Members of `tools_any_of` are **sanctioned** for the write ban: an accepted answer that
-  happens to be a write tool is not an unsanctioned write. Validation rejects a set of one (a
-  plain expectation), a repeated member, overlap with `tools_expected` (satisfied by
-  construction), overlap with `writes_allowed` (an accepted answer and a merely permitted
-  call are different claims), and combination with `no_tools`.
+  **`tools_any_of` may name READ tools only** — the rule that makes the field safe, and the
+  reason it does not appear in the write ban above. G1 sees the SET, not which member the
+  agent chose, so a disjunction over writes would have to sanction every member: a case
+  written as `[recon_confirm_match, recon_reject_match]` would then pass for an agent that
+  confirmed a match and then rejected it. Reads are never banned, so restricting the field
+  removes the question rather than answering it badly. A case that genuinely needs
+  alternative *writes* needs a different notion, not this one.
+
+  Validation also rejects a set of one (that is a plain `tools_expected`), a repeated member,
+  overlap with `tools_expected` (satisfied by construction, so the field would only
+  describe), and combination with `no_tools`.
 - **G2 numeric**: every expected number appears in the final answer (decimal-normalized
   string comparison — exact, no tolerance: the tools are deterministic, so is the truth).
   **Anti-fabrication**: every number in the answer (regex-extracted, format-normalized)

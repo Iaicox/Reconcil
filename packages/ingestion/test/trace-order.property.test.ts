@@ -82,6 +82,23 @@ describe('compareTraceIds is a consistent comparator', () => {
     );
   });
 
+  it('separates numbers that a float would collapse — the reason this is not Number()', () => {
+    // 2^53 and 2^53+1 are the same IEEE double. The comparison is digit-based, so they are
+    // not the same trace label, and the sentinel derived from their order stays distinct.
+    expect(Number('9007199254740993')).toBe(Number('9007199254740992')); // the trap
+    expect(compareTraceIds('9007199254740993', '9007199254740992')).toBeGreaterThan(0);
+    expect(compareTraceIds('9007199254740992', '9007199254740993')).toBeLessThan(0);
+  });
+
+  it('ignores leading zeros when comparing magnitude, at any length', () => {
+    expect(compareTraceIds('0000000009', '10')).toBeLessThan(0);
+    expect(compareTraceIds('00042', '42')).toBeLessThan(0); // equal as numbers, split by the label tiebreak
+    // Equal as numbers, so the whole-label tiebreak decides — and it is the raw string, so
+    // the shorter label sorts first. Pinned because '0' vs '00' is the shape where a
+    // leading-zero skip that ran off the end would read one of them as empty.
+    expect(compareTraceIds('0', '00')).toBeLessThan(0);
+  });
+
   it('does not read non-decimal notations as numbers', () => {
     // Number('0x10') is 16 and Number('1e3') is 1000 — neither is a trace-id segment,
     // and treating them as numeric put them in the wrong class.

@@ -19,6 +19,31 @@ const INTERNAL_SENTINEL_BASE = -1000;
 const DECIMAL_SEGMENT = /^[0-9]+$/;
 
 /**
+ * Numeric order of two all-digit strings, without parsing either. `BigInt(x)` was correct
+ * (a `Number` would collapse distinct labels past 2^53 onto one float) but it heap-allocates
+ * twice per comparison inside a sort's inner loop, run per parent-tx group on every ingested
+ * page — for labels that are one to three digits in practice. Skip leading zeros, then more
+ * digits means larger, and on equal length the digit strings compare lexicographically in
+ * exactly numeric order. Same total order, no allocation, and "007" === "7" is now the
+ * stated rule rather than a side effect of BigInt equality.
+ */
+function compareDecimalDigits(a: string, b: string): number {
+  let ia = 0;
+  let ib = 0;
+  while (ia < a.length - 1 && a.charCodeAt(ia) === 0x30) ia += 1;
+  while (ib < b.length - 1 && b.charCodeAt(ib) === 0x30) ib += 1;
+  const la = a.length - ia;
+  const lb = b.length - ib;
+  if (la !== lb) return la < lb ? -1 : 1;
+  for (let i = 0; i < la; i += 1) {
+    const ca = a.charCodeAt(ia + i);
+    const cb = b.charCodeAt(ib + i);
+    if (ca !== cb) return ca < cb ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
  * Order two trace labels segment by segment. Exported for its own property test.
  *
  * This must be a CONSISTENT comparator (a strict weak ordering), because `sort` is only
@@ -47,12 +72,10 @@ export function compareTraceIds(a: string, b: string): number {
     const numA = DECIMAL_SEGMENT.test(xa);
     const numB = DECIMAL_SEGMENT.test(xb);
     if (numA && numB) {
-      // Compare as BigInt, not Number: a pathological label longer than 2^53 would
-      // otherwise collapse distinct segments onto one float. "007" and "7" are the same
-      // number and fall through to the next segment, which is what equality should mean here.
-      const na = BigInt(xa);
-      const nb = BigInt(xb);
-      if (na !== nb) return na < nb ? -1 : 1;
+      const cmp = compareDecimalDigits(xa, xb);
+      if (cmp !== 0) return cmp;
+      // Equal as numbers ("007" vs "7"): fall through to the next segment. The whole-label
+      // tiebreak at the bottom is what separates them if every segment ties.
       continue;
     }
     if (numA !== numB) return numA ? -1 : 1;

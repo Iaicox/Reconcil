@@ -21,6 +21,20 @@ describe('selectSmokeDataset', () => {
     expect(() => selectSmokeDataset(all, SMOKE_IDS)).toThrow(/missing: recon-status-001/);
   });
 
+  it('a duplicate that exactly offsets a missing id does NOT read as a clean match', () => {
+    // The count trap: `dataset.length === ids.size` is satisfied by the WRONG six. Here
+    // cover-001 appears twice and recon-status-001 is renamed away, so the filter yields
+    // exactly 6 entries — the smoke would run one case twice, never run the Face B case,
+    // and report 6/6. Same class as a duplicate in the id list, one layer out.
+    const all = [
+      fakeCase('cover-001'), fakeCase('cover-001'), fakeCase('flow-001'),
+      fakeCase('gas-001'), fakeCase('guard-001'), fakeCase('inj-001'),
+    ];
+    expect(all.filter((c) => SMOKE_IDS.has(c.id))).toHaveLength(SMOKE_IDS.size); // the trap
+    expect(() => selectSmokeDataset(all, SMOKE_IDS)).toThrow(/missing: recon-status-001/);
+    expect(() => selectSmokeDataset(all, SMOKE_IDS)).toThrow(/duplicate ids in dataset\): cover-001/);
+  });
+
   it('throws naming every missing id when several drift at once', () => {
     const all = [fakeCase('cover-001')];
     expect(() => selectSmokeDataset(all, SMOKE_IDS)).toThrow(

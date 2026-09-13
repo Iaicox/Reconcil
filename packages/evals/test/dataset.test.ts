@@ -136,18 +136,6 @@ describe('parseDataset', () => {
     ).toThrow(/only name read tools/i);
   });
 
-  it('throws when a tool is both an accepted answer and merely writes_allowed', () => {
-    expect(() =>
-      parseDataset(
-        `- id: x
-  face: A
-  question: q
-  expect: { tools_any_of: [recon_confirm_match, recon_reject_match], writes_allowed: [recon_confirm_match] }
-`,
-      ),
-    ).toThrow(/tools_any_of/i);
-  });
-
   it('throws when no_tools is combined with tools_any_of', () => {
     expect(() =>
       parseDataset(

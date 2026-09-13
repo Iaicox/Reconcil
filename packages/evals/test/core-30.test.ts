@@ -20,7 +20,12 @@ describe('core-30 dataset', () => {
     expect(faceB.length).toBeGreaterThanOrEqual(6);
     // Every Face B case seeds the recon-smb scenario, and the five recon tools are all exercised.
     expect(faceB.every((c) => c.setup?.fixture === 'recon-smb')).toBe(true);
-    const exercised = new Set(faceB.flatMap((c) => c.expect.tools_expected ?? []));
+    // Both fields, for the same reason the "names the tool(s) it expects" invariant below
+    // sums them: a Face B case broadened to tools_any_of would otherwise drop out of this
+    // coverage check, and the five-tool assertion would fail for the wrong reason.
+    const exercised = new Set(
+      faceB.flatMap((c) => [...(c.expect.tools_expected ?? []), ...(c.expect.tools_any_of ?? [])]),
+    );
     for (const t of ['recon_import_invoices', 'recon_suggest_matches', 'recon_confirm_match', 'recon_status', 'export_journal_drafts']) {
       expect(exercised.has(t)).toBe(true);
     }

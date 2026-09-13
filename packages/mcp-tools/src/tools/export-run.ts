@@ -16,7 +16,7 @@ import { isZero, type RenderedExport, type RenderedFile } from '@reconcil/export
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
-import { realpathAncestorWithinBase, realpathDirWithinBase, resolveWithinBase } from '../fs-confine.js';
+import { realpathAncestorWithinBase, realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
 import { runWriteTool } from '../write-tx.js';
 import type { CloseData } from './close-pack-data.js';
 
@@ -90,6 +90,12 @@ export async function writeExportFiles(
   exportId: string,
   rendered: readonly RenderedFile[],
 ): Promise<{ dir: string; files: { name: string; path: string; sha256: string }[] }> {
+  // Root captured ONCE and threaded through. `exportRoot()` reads the environment, and the
+  // post-mkdir check below must be anchored to the same root `baseDir` validated against —
+  // a second read could see a different RECONCIL_EXPORT_DIR (the export tests mutate it),
+  // making the re-check either vacuous against a wider root or a spurious INTERNAL against
+  // a narrower one.
+  const root = exportRoot();
   const dir = join(await baseDir(outDir), exportId);
 
   const files: { name: string; path: string; sha256: string }[] = [];
@@ -98,13 +104,15 @@ export async function writeExportFiles(
     // Anchored at the EXPORT ROOT, not at the out_dir-narrowed base. Anchoring at the base
     // makes the check self-referential and unable to detect the very escape it is for:
     // with out_dir 'june/close' and a symlink planted at <root>/june, realpath resolves
-    // BOTH sides through that symlink — realBase '/etc/close', realTarget
-    // '/etc/close/<uuid>' — and the prefix test passes. The root is the one path an
-    // attacker inside the export tree cannot move.
-    const realDir = await realpathDirWithinBase(exportRoot(), dir);
-    if (realDir === null) {
+    // BOTH sides through that symlink — realBase '/elsewhere/close', realTarget
+    // '/elsewhere/close/<uuid>' — and the prefix test passes. The root is the one path an
+    // attacker inside the export tree cannot move. (Verified: the base-anchored form wrote
+    // outside the root in a Linux container; see the branch's second review round.)
+    const check = await realpathWithinBase(root, dir);
+    if (!check.ok) {
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
     }
+    const realDir = check.realTarget;
     for (const f of rendered) {
       // Written through the RESOLVED directory — that is the security property. REPORTED
       // under the logical one: an export root that is itself a symlink or bind-mount

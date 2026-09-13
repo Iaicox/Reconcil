@@ -19,7 +19,12 @@ import { realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
  *  configurable at runtime and testable). */
 export function maxFileBytes(): number {
   const raw = Number(process.env.RECONCIL_IMPORT_MAX_BYTES);
-  return Number.isFinite(raw) && raw > 0 ? raw : 8_000_000;
+  // Safe-integer and upper-bounded, not merely finite-and-positive: the cap sizes a Buffer,
+  // and a fractional or absurd value (1e10) makes `Buffer.allocUnsafe` throw
+  // ERR_OUT_OF_RANGE — inside the try below, where it would be caught and reported as a bad
+  // `file_path`, diagnosing an operator's misconfiguration as hostile caller input.
+  const ceiling = 512 * 1024 * 1024;
+  return Number.isSafeInteger(raw) && raw > 0 && raw <= ceiling ? raw : 8_000_000;
 }
 
 /** Resolved import base dir, or null when `file_path` import is not configured. */
@@ -95,17 +100,22 @@ export async function readImportFile(filePath: string): Promise<string> {
 
     // Bounded read, not `fh.readFile()`. The stat above is a snapshot: a co-resident writer
     // can append to the SAME inode between it and the read, and readFile follows to EOF, so
-    // the cap would still be advisory for exactly the planted-file case it exists for. Read
-    // at most cap+1 bytes into a fixed buffer — the extra byte is what distinguishes "filled
-    // the budget exactly" from "there was more", without ever allocating more than the cap.
-    const buf = Buffer.allocUnsafe(cap + 1);
+    // the cap would still be advisory for exactly the planted-file case it exists for.
+    //
+    // The buffer is sized from the FILE, not from the cap — sizing it `cap + 1` made a
+    // 45-byte invoice CSV allocate 8 MB (above Buffer.poolSize, so a fresh un-pooled
+    // ArrayBuffer per call, multiplied by concurrent imports). The one spare byte is what
+    // makes growth observable: filling it means the file is no longer the file that was
+    // measured, which is the co-resident-writer case and not something to return silently
+    // truncated.
+    const buf = Buffer.allocUnsafe(stats.size + 1);
     let read = 0;
     for (;;) {
       const { bytesRead } = await fh.read(buf, read, buf.length - read, null);
       if (bytesRead === 0) break;
       read += bytesRead;
-      if (read > cap) {
-        throw new ToolError('INVALID_INPUT', `file exceeds the ${String(cap)}-byte import limit`);
+      if (read > stats.size) {
+        throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
       }
     }
     return buf.subarray(0, read).toString('utf8');
