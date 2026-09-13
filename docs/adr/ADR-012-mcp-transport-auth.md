@@ -83,23 +83,31 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
      that needs `openat`/`O_NOFOLLOW` per segment, which Node's promises API does not
      expose.
 
-   What the implementation actually does now, since two steps grew to several: prefix check →
-   `realpath` of the deepest existing ancestor → single-path-segment checks on every
-   caller-supplied component (`exportId`, each rendered file name) → `mkdir -p` → `realpath`
-   of the finished directory, required to equal `realpath(root)` joined with the path that
-   was ASKED for → writes through the resolved directory with `{ flag: 'wx' }` → cleanup of
-   anything this call created.
+   What the implementation actually does now, since two steps grew to several: prefix check
+   → `realpath` of the deepest existing ancestor → single-path-segment checks on every
+   caller-supplied component (`exportId`, each rendered file name) → `mkdir -p` → a walk from
+   the export ROOT down to the finished directory refusing any segment that is a link →
+   writes through the resolved directory with `{ flag: 'wx' }` → cleanup of anything this
+   call created.
 
-   That last anchor has been wrong twice, and what makes it right is worth stating: the
-   comparison must be against something the caller cannot move. Anchored at the
-   out_dir-narrowed BASE it was blind to a link in any out_dir segment, because both sides
-   of the equality resolved through that same link — with `<root>/june` pointing at
-   `<root>/tenant-b`, an export asked for under `june/close` was accepted while its bytes
-   landed in tenant-b and every reported path said june. Anchored at the ROOT plus the
-   RELATIVE path, the two reasons `realpath` can differ from the asked-for path separate
-   cleanly: the export root itself being a link or bind-mount (macOS `/var` → `/private/var`
-   — benign, relative part unchanged) versus a link inside the root redirecting a segment
-   (the relative part is exactly what changes). The deeper question — whether a confinement this shaped should
+   That post-creation step took three attempts, and what it asks is the part worth recording.
+   The property wanted is "nothing redirected this path after it was validated", and the two
+   earlier spellings both tried to encode it as a comparison between PATHS. Anchored at the
+   out_dir-narrowed base, both operands resolved through the planted link and the check was
+   blind to it: with `<root>/june` pointing at `<root>/tenant-b`, an export asked for under
+   `june/close` was accepted while its bytes landed in tenant-b and every reported path said
+   june. Re-anchored at `realpath(root)` plus the relative path it saw that — but compared a
+   caller-spelled string against a realpath'd one, so a second export under `June/Close`
+   after a first under `june/close` was REFUSED on a case-insensitive filesystem, a valid
+   request broken on the main success path.
+
+   Walking the segments and refusing a link asks the question directly. `lstat` reports the
+   entry rather than its target (Windows junctions included), and path spelling is resolved
+   by the OS, so casing stops being part of the answer. The export root's OWN link-ness is
+   not examined: a symlinked or bind-mounted root (macOS `/var` → `/private/var`) is the
+   operator's configuration, not a redirect of the caller's path.
+
+   The deeper question — whether a confinement this shaped should
    be built out of `realpath` at all — is recorded in `09-known-gaps.md` for the ADR sweep.
 
 ## Alternatives considered

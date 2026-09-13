@@ -272,6 +272,20 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     }
   });
 
+  it('accepts a differently-CASED out_dir for a directory that already exists', async () => {
+    // The regression the previous anchor introduced on the main success path: it compared a
+    // caller-spelled path against a realpath'd one, so on a case-insensitive filesystem
+    // (Windows, default macOS) a second export under 'June/Close' after a first under
+    // 'june/close' was refused as INTERNAL — a request that was entirely valid. Walking the
+    // segments asks about LINKS and lets the OS resolve spelling, so casing is not part of
+    // the answer.
+    const first = await writeExportFiles('export_close_pack', join('june', 'close'), 'uuid-1', [file]);
+    await expect(readFile(first.files[0]!.path, 'utf8')).resolves.toBe(file.content);
+
+    const second = await writeExportFiles('export_close_pack', join('June', 'Close'), 'uuid-2', [file]);
+    await expect(readFile(second.files[0]!.path, 'utf8')).resolves.toBe(file.content);
+  });
+
   it('still writes normally when no link is in the way — the guard is not refusing everything', async () => {
     const { dir, files } = await writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [file]);
     expect(dir).toBe(join(root, 'june', 'close', 'run-uuid'));

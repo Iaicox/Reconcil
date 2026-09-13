@@ -10,8 +10,8 @@
  * exist yet). Callers own the domain-specific `ToolError` (message/hint differ per tool) —
  * this module never throws. Dependency-free (fs/promises + path only).
  */
-import { realpath } from 'node:fs/promises';
-import { basename, dirname, resolve, sep } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
  * Is `name` a single, ordinary path segment — something that can be `join`ed onto a
@@ -79,6 +79,45 @@ async function realpathExistingAncestor(path: string): Promise<string> {
       dir = parent;
     }
   }
+}
+
+/**
+ * Is every segment from `base` down to `target` a real directory entry — no link anywhere
+ * on the way?
+ *
+ * This is the post-creation question, and it took three tries to state correctly. The
+ * property wanted is "nothing redirected this path after we validated it", and the two
+ * earlier spellings both got it wrong by comparing PATHS:
+ *
+ *  - anchored at the out_dir-narrowed base, both sides of the comparison resolved through
+ *    the planted link, so it could not see an escape at all;
+ *  - anchored at `realpath(root)` plus the relative path, it saw the escape but compared a
+ *    caller-spelled string against a realpath'd one — so on a case-insensitive filesystem
+ *    (Windows, default macOS) a second export under `June/Close` after a first under
+ *    `june/close` was REFUSED, a legitimate request broken on the main success path.
+ *
+ * Walking the segments asks the question directly instead of encoding it in a string
+ * comparison. `lstat` reports the entry itself rather than its target, Windows junctions
+ * included (`isSymbolicLink()` is true for them), and path spelling is resolved by the OS,
+ * so casing stops being part of the answer. A link ANYWHERE between base and target — the
+ * out_dir segments and the per-export directory alike — is refused.
+ *
+ * `base` itself is not examined: the export root being a symlink or a bind-mount (macOS
+ * `/var` → `/private/var`) is the operator's own configuration, not a redirect of the
+ * caller's path.
+ */
+export async function isLinkFreeDescendant(base: string, target: string): Promise<boolean> {
+  const rel = relative(base, target);
+  if (rel === '') return true;
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false;
+
+  let current = base;
+  for (const segment of rel.split(sep)) {
+    current = join(current, segment);
+    const entry = await lstat(current).catch(() => null);
+    if (entry === null || entry.isSymbolicLink()) return false;
+  }
+  return true;
 }
 
 /**

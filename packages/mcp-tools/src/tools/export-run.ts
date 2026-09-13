@@ -7,7 +7,7 @@
  * register a row) but never destructive. Shared by both Face A export tools.
  */
 import { mkdir, open, realpath, rm, rmdir } from 'node:fs/promises';
-import { join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
@@ -16,7 +16,7 @@ import { isZero, type RenderedExport, type RenderedFile } from '@reconcil/export
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
-import { isSinglePathSegment, realpathAncestorWithinBase, realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
+import { isLinkFreeDescendant, isSinglePathSegment, realpathAncestorWithinBase, resolveWithinBase } from '../fs-confine.js';
 import { runWriteTool } from '../write-tx.js';
 import type { CloseData } from './close-pack-data.js';
 
@@ -132,37 +132,18 @@ export async function writeExportFiles(
 
   try {
     await mkdir(dir, { recursive: true });
-    // Two questions, not one. (a) Is the finished directory still inside the export ROOT?
-    // Anchoring that at the out_dir-narrowed base instead makes the check self-referential
-    // and blind to the escape it exists for: with out_dir 'june/close' and a link planted
-    // at <root>/june, realpath resolves BOTH sides through it and the prefix test passes.
-    // (Verified: the base-anchored form wrote outside the root in a Linux container.)
-    // (b) Is it the SAME directory that was validated? Containment alone allows a link
-    // planted during the mkdir window to redirect the write ELSEWHERE INSIDE the root —
-    // another tenant's export folder — while the exports row and the tool response still
-    // report the logical out_dir path, leaving an audit trail that points at a directory
-    // holding none of the bytes. Equality against realpath(base)/exportId answers both.
-    // `expected` is built from the ROOT plus the path we ASKED for, never from re-resolving
-    // an intermediate we do not control.
+    // Is anything on the way from the export ROOT down to this directory a link?
     //
-    // Building it from `realpath(base)` was self-satisfying above the leaf, and a probe
-    // against the built package proved it: with `<root>/june` a link to `<root>/tenant-b`
-    // and `<root>/tenant-b/close` real, out_dir 'june/close' passed BOTH layers — the
-    // pre-mkdir ancestor check (the link resolves inside the root, so it is not an escape)
-    // and this equality (both sides resolve through the same link) — and the bytes landed
-    // in tenant-b while `dir`, `files[].path` and the `exports` row all said june.
-    //
-    // Anchoring on `realpath(root) + the relative path` separates the two things that make
-    // `realDir` differ from `dir`: the export ROOT itself being a link or bind-mount
-    // (macOS /var → /private/var — benign, and the relative part is unchanged, so this
-    // still matches), versus a link INSIDE the root redirecting a segment (the relative
-    // part is exactly what changes, so it no longer matches).
-    const [realRoot, check] = await Promise.all([
-      realpath(root).catch(() => null),
-      realpathWithinBase(root, dir),
+    // That is the whole post-creation question, and asking it directly replaced two
+    // path-comparison spellings that each got it wrong in a different direction (see
+    // `isLinkFreeDescendant`). The root is the anchor because it is the one path a writer
+    // inside the export tree cannot move; the root's OWN link-ness is the operator's
+    // configuration and deliberately not examined.
+    const [linkFree, resolved] = await Promise.all([
+      isLinkFreeDescendant(root, dir),
+      realpath(dir).catch(() => null),
     ]);
-    const expected = realRoot === null ? null : join(realRoot, relative(root, dir));
-    if (!check.ok || expected === null || check.realTarget !== expected) {
+    if (!linkFree || resolved === null) {
       // `mkdir -p` already ran, so a link planted in that window may have got a real
       // directory created behind it. Best-effort, and it removes AT MOST THE LEAF: a
       // non-recursive rmdir cannot take back the intermediate levels `mkdir -p` created,
@@ -170,13 +151,10 @@ export async function writeExportFiles(
       // (ENOTDIR). No contents ever land there — that is what the check buys — so this is
       // tidying, not containment, and failing to tidy must never mask the refusal.
       await rmdir(dir).catch(() => { /* a link, or levels above it — not reclaimable here */ });
-      // The escaped/unresolvable discriminant is kept as the CAUSE (server-side only; the
-      // model still sees the generic INTERNAL, C6). "Somebody planted a link under the
-      // export root" and "the directory vanished mid-write" are the same message otherwise.
-      const why = !check.ok ? check.reason : 'redirected within the export root';
-      throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, new Error(`export dir confinement failed: ${why}`));
+      throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined,
+        new Error(`export dir confinement failed: ${linkFree ? 'unresolvable' : 'a path segment is a link'}`));
     }
-    const realDir = check.realTarget;
+    const realDir = resolved;
     // Independent writes, one round of I/O. Written through the RESOLVED directory — that
     // is the security property. REPORTED under the logical one: an export root that is
     // itself a symlink or bind-mount (macOS /var → /private/var) would otherwise hand the
