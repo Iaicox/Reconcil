@@ -25,8 +25,8 @@ import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
 import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
-import { EXIT_CANNOT_RUN, reportFailure } from './evals/runnability.js';
-import { UsageError } from './evals/usage-error.js';
+import { EXIT_CANNOT_RUN, reportAndExit, reportFailure, unrunnableLines } from './evals/runnability.js';
+import { UsageError, findDuplicates } from './evals/usage-error.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
 import type { CaseResult, GateResult } from './evals/types.js';
 
@@ -111,13 +111,20 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   const args = parseArgs(argv);
 
   if (!process.env['ANTHROPIC_API_KEY']) {
-    // EXIT_CANNOT_RUN, not 1. A missing key is strictly MORE environmental than the rejected
-    // key (401) that classifyUnrunnable already maps to 2 — exiting 1 here would tell a
-    // reader applying the documented rule that the gate ran and found a regression.
-    console.error('eval gate COULD NOT RUN: ANTHROPIC_API_KEY is unset, and the eval agent is the only thing that needs it');
-    console.error('  → set the secret (or run the deterministic suites instead), then re-run the job');
-    process.exitCode = EXIT_CANNOT_RUN;
-    return;
+    // Through reportAndExit, not console.error + exitCode by hand. That is the third
+    // reporting site this module grew, and the one it does not share is the one that drifts
+    // — the exit-code contract was already false for `cli evals` for two rounds because a
+    // format lived in two places. It also picks up the stderr-flush discipline for free.
+    return reportAndExit(
+      EXIT_CANNOT_RUN,
+      unrunnableLines(
+        {
+          reason: 'ANTHROPIC_API_KEY is unset, and the eval agent is the only thing that needs it',
+          hint: 'set the secret (or run the deterministic suites instead), then re-run the job',
+        },
+        'eval gate',
+      ),
+    );
   }
 
   // parseArgs validated args.suite is a known DATASETS key.
@@ -136,13 +143,27 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
     // nothing after the colon — an error naming nothing, under a hint that says "fix the
     // invocation".
     const missing = args.cases.filter((id) => !all.some((c) => c.id === id));
-    const seen = new Set<string>();
-    const repeated = [...new Set(args.cases.filter((id) => (seen.has(id) ? true : (seen.add(id), false))))];
+    const repeated = findDuplicates(args.cases);
     const detail = [
       missing.length > 0 ? `unknown case id(s): ${missing.join(', ')}` : undefined,
       repeated.length > 0 ? `repeated case id(s): ${repeated.join(', ')}` : undefined,
     ].filter((x): x is string => x !== undefined).join(' — ');
-    throw new UsageError(detail);
+    // A THIRD way the counts can disagree: the dataset itself carrying a duplicate id (the
+    // loader does not enforce uniqueness — only core-30.test.ts does). Then nothing is
+    // missing and nothing is repeated in the ARGUMENT, and `detail` is empty — an error
+    // naming nothing, which is the defect this block was rewritten to fix.
+    throw new UsageError(
+      detail === ''
+        ? `--cases matched ${String(selected.length)} case(s) for ${String(args.cases.length)} id(s) — the dataset has a duplicate id`
+        : detail,
+    );
+  }
+  // `--smoke --cases gas-001` validated the ids, could hard-fail on them, and then ran the
+  // six smoke cases instead — a narrowing option quietly running something else, on the
+  // command that spends money. Refused rather than guessed at: intersecting them would make
+  // `--smoke` mean something different depending on what else was passed.
+  if (args.smoke && args.cases.length > 0) {
+    throw new UsageError('--smoke and --cases both select cases — pass one or the other');
   }
   const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : selected;
 

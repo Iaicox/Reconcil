@@ -261,44 +261,38 @@ auth-path latency ever becomes a measured concern. Where: `apps/mcp-server/src/a
 
 ## Exporters
 
-**ADR-012 d7 describes a two-step confinement and promises more than Node can deliver; the
-implementation is now nine steps and a weaker guarantee.** Raised 2026-09-13 alongside the
-ADR-005 d2 entry above, by the same signal — a decision whose stated invariant is not what
-the implementation actually provides. Recorded, not acted on: it belongs with the ADR sweep,
-not in the branch that surfaced it.
+**Whether `realpath`-based confinement is the right shape at all.** The ACCURACY half of this
+entry is closed: ADR-012 d7 and `02-mcp-contracts.md` were amended 2026-09-13 to say what the
+implementation actually does and guarantees. Filing it as "belongs with the ADR sweep, not
+the branch that surfaced it" was wrong — the deviation was introduced by that same branch,
+and CLAUDE.md's rule ("deviating from an ADR requires editing that ADR") has no later-is-fine
+clause. The branch amended ADR-005 d2 for its behaviour change while deferring this one; that
+inconsistency is what review caught.
 
-d7 says `out_dir` is "resolved as a subpath under it, prefix-checked, then `realpath`-rechecked
-past symlinks", and that an escape "is `INVALID_INPUT`, never a write outside the configured
-base". After this branch the write path does: prefix check → realpath of the deepest existing
-ancestor → `mkdir -p` → realpath of the FINISHED directory anchored at the ROOT, requiring
-equality with `realpath(base)/exportId` → single-segment checks on `exportId` and each
-`f.name` → `{ flag: 'wx' }` → cleanup of partial writes → `rmdir` of the orphan on refusal.
+What remains is the design question. Five review rounds went into this path, each adding a
+mechanism: prefix check → realpath of the deepest existing ancestor → single-segment checks
+on every caller-supplied component → `mkdir -p` → realpath of the finished directory,
+anchored at the ROOT and required to equal `realpath(base)/exportId` → `{ flag: 'wx' }` →
+cleanup of partial writes → `rmdir` of the orphan on refusal. Each was found by review, not
+chosen by design, and each narrows a window the previous one left.
 
-Two mismatches, neither of them a hole:
+The residue is structural rather than a missing tenth step. `realpath` answers "where does
+this path point RIGHT NOW", and every use of that answer happens afterwards — so a
+check-then-use built on it narrows the window and never closes it: `mkdir -p` still creates a
+directory behind a link planted mid-call, and the write that follows the check is a second
+lookup of a path the check has already released. Closing it properly wants
+`openat`/`O_NOFOLLOW` per segment, where the file descriptor IS the check — which Node's
+promises API does not expose (`fs.open` takes no `dirfd`). The real options are a native
+addon, a child process, or accepting the residue.
 
-- **Error contract.** d7 names one escape class and assigns it `INVALID_INPUT`. That still
-  holds for the cases it names (`..`, an absolute path outside the root — caught before
-  anything is created). But the classes discovered since — a link planted during the `mkdir`
-  window, and a redirect to a different location *inside* the root — return `INTERNAL`,
-  because by then the caller's argument has already been validated and the fault is not
-  theirs. d7 does not mention either class, so a reader implementing to it would map them
-  wrongly.
-- **"Never a write outside the configured base."** `mkdir -p` runs before the post-creation
-  check can fire, so a link planted in that window does get a real DIRECTORY created behind
-  it outside the root (no contents ever land there, and it is best-effort `rmdir`'d). The
-  absolute phrasing is not achievable in Node: closing it needs `openat`/`O_NOFOLLOW`
-  per segment, which the promises API does not expose. The honest form is "no export CONTENT
-  is ever written outside the root", plus the residual named.
-
-Why this matters beyond tidiness: five review rounds went into this path, each adding a
-mechanism d7 does not describe. A decision that under-describes what was built stops being
-the thing a reviewer can check an implementation against — which is how the mechanisms came
-to be designed in review, one finding at a time, rather than decided once.
-
-Trigger: the ADR sweep (see the ADR-005 entry). Where: `docs/adr/ADR-012-mcp-transport-auth.md`
-(decision 7), `docs/architecture/02-mcp-contracts.md` (the matching `out_dir` paragraph),
-`packages/mcp-tools/src/tools/export-run.ts`, `packages/mcp-tools/src/fs-confine.ts`.
-*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13 — raised, not acted on)*
+Accepting it is the right call today and the ADR now says so plainly. But the reasoning
+deserves to be a decision made once rather than an accumulation of nine findings. Trigger:
+the ADR sweep (see the ADR-005 entry), or sooner if the export root is ever shared with a
+less-trusted co-tenant — which is the threat model under which the residue stops being
+acceptable. Where: `packages/mcp-tools/src/tools/export-run.ts`,
+`packages/mcp-tools/src/fs-confine.ts`, ADR-012 d7.
+*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13 — accuracy half closed the same
+day, design half open)*
 
 **Residual TOCTOU between `realpath` and `open` (narrowed, not closed).** The original entry
 said "Export I/O reads the path before its `realpath` re-check", and re-reading it while

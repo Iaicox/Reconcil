@@ -9,7 +9,6 @@
  * `agent/core.ts`. Both commands below delegate to the exact same entrypoint the package
  * scripts use — `main.ts` is a thin argv router, not a second implementation.
  */
-import { reportFailure } from './evals/runnability.js';
 import { DEFAULT_MODEL } from './model.js';
 
 const usage = `reconcil CLI
@@ -39,9 +38,14 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
+main().catch(async (err: unknown) => {
   // Labelled 'cli', not 'eval gate': this catch sees `repl` too, and the eval vocabulary
   // ("so no case ever ran", "re-run the job") is wrong for a command that runs no cases in
   // no job. The classification itself is shared — a rejected key is a rejected key.
-  void reportFailure('cli', err);
+  // Imported HERE, on the failure path only. runnability.ts pulls in @anthropic-ai/sdk at
+  // top level, and a static import re-created exactly what splitting UsageError out was
+  // meant to stop: `reconcil` with no arguments loading the whole SDK graph to print a
+  // usage string. The docstring in usage-error.ts states that property; this keeps it true.
+  const { reportFailure } = await import('./evals/runnability.js');
+  await reportFailure('cli', err);
 });

@@ -39,9 +39,22 @@ describe('parseArgs', () => {
     // The expensive failure: an empty `cases` means "no filter", so `--cases` with the value
     // forgotten ran 30 x 3 of live traffic instead of the handful being investigated — the
     // same outcome the unknown-flag guard prevents, reached through the narrowing option.
-    expect(() => parseArgs(['--cases'])).toThrow(/at least one case id/);
+    // Two distinct causes, two distinct messages: no token at all vs a token with no ids in
+    // it. Pinned separately so a change to one cannot quietly start covering the other.
+    expect(() => parseArgs(['--cases'])).toThrow(/--cases needs a value/);
     expect(() => parseArgs(['--cases', ''])).toThrow(/at least one case id/);
     expect(() => parseArgs(['--cases', ' , , '])).toThrow(/at least one case id/);
+  });
+
+  it('refuses a value flag that swallowed the NEXT flag', () => {
+    // `--out --smoke` consumed `--smoke` as the value of `--out`: smoke stayed off, runs
+    // stayed 3, and the run became the full 30 x 3 while writing reports into a directory
+    // named "--smoke". Every value flag, not just --cases, which was the one that got the
+    // guard first.
+    for (const flag of ['--out', '--model', '--suite', '--runs', '--cases']) {
+      expect(() => parseArgs([flag, '--smoke']), flag).toThrow(/needs a value/);
+      expect(() => parseArgs([flag]), flag).toThrow(/needs a value/);
+    }
   });
 
   it('accepts a real --cases list, trimmed', () => {

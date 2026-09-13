@@ -33,6 +33,20 @@ export function parseArgs(argv: string[]): Args {
   const args: Args = { suite: 'core', runs: 3, smoke: false, cases: [], model: DEFAULT_MODEL, out: 'eval-reports' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    /**
+     * Take the next token as this flag's value, refusing a missing one or another flag.
+     *
+     * `--out --smoke` used to consume `--smoke` as the value of `--out`: smoke stayed off,
+     * runs stayed 3, and the command ran the full 30 x 3 of live traffic while writing
+     * reports into a directory named "--smoke". `--runs` with the value forgotten fell back
+     * to the 3-run default just as silently. That is the same expensive outcome the
+     * unknown-flag guard exists to prevent, reached through the flags beside it.
+     */
+    const value = (flag: string): string => {
+      const v = argv[++i];
+      if (v === undefined || v.startsWith('--')) throw new UsageError(`${flag} needs a value`);
+      return v;
+    };
     if (a === '--smoke') args.smoke = true;
     else if (a === '--cases') {
       // A missing or blank value used to leave `cases` empty, which means "no filter" —
@@ -40,14 +54,14 @@ export function parseArgs(argv: string[]): Args {
       // the handful the operator meant to investigate. That is the same outcome this
       // parser's unknown-flag guard exists to prevent, reached through the option whose
       // whole purpose is to narrow the run.
-      const ids = (argv[++i] ?? '').split(',').map((c) => c.trim()).filter(Boolean);
+      const ids = value('--cases').split(',').map((c) => c.trim()).filter(Boolean);
       if (ids.length === 0) throw new UsageError('--cases needs at least one case id');
       args.cases = ids;
     }
-    else if (a === '--suite') args.suite = argv[++i] ?? args.suite;
-    else if (a === '--runs') args.runs = Number(argv[++i] ?? args.runs);
-    else if (a === '--model') args.model = argv[++i] ?? args.model;
-    else if (a === '--out') args.out = argv[++i] ?? args.out;
+    else if (a === '--suite') args.suite = value('--suite');
+    else if (a === '--runs') args.runs = Number(value('--runs'));
+    else if (a === '--model') args.model = value('--model');
+    else if (a === '--out') args.out = value('--out');
     // `run` (`evals run …`) and the bare `--` pnpm forwards (`evals -- --smoke`) are no-ops.
     else if (a === 'run' || a === '--') continue;
     else throw new UsageError(`unknown argument: ${String(a)}`);

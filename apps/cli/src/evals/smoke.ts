@@ -10,6 +10,8 @@
  */
 import type { EvalCase } from '@reconcil/evals';
 
+import { findDuplicates } from './usage-error.js';
+
 /**
  * The ids, as an ARRAY. A `new Set([...])` literal absorbs a duplicate silently, and
  * `selectSmokeDataset` compares against `ids.size` — so a typo repeating one id would
@@ -19,17 +21,6 @@ import type { EvalCase } from '@reconcil/evals';
  */
 const SMOKE_ID_LIST = ['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001', 'recon-status-001'] as const;
 
-/** Ids appearing more than once, in first-seen order, each reported once. */
-function findDuplicates(list: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const dupes = new Set<string>();
-  for (const id of list) {
-    if (seen.has(id)) dupes.add(id);
-    else seen.add(id);
-  }
-  return [...dupes];
-}
-
 /**
  * Build the id set, refusing a list that repeats one. Exported so the guard can be
  * exercised: inlined as an IIFE it was unreachable by construction — SMOKE_ID_LIST is a
@@ -38,6 +29,11 @@ function findDuplicates(list: readonly string[]): string[] {
  * execute is a guard nobody knows still works.
  */
 export function buildSmokeIds(list: readonly string[]): ReadonlySet<string> {
+  // Empty is the module header's other stated nightmare — "silently run ZERO cases and
+  // report PASS" — and the duplicate guard inherited the hole from the length check it
+  // replaced: an empty set makes `missing` and `unexpected` both empty, so
+  // selectSmokeDataset returns [] and the gate passes over nothing.
+  if (list.length === 0) throw new Error('smoke id list is empty — that would run zero cases and report a pass');
   const dupes = findDuplicates(list);
   if (dupes.length > 0) {
     throw new Error(`smoke id list contains duplicate id(s): ${dupes.join(', ')}`);

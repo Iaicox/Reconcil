@@ -14,3 +14,19 @@
 export class UsageError extends Error {
   override readonly name = 'UsageError';
 }
+
+/**
+ * Values appearing more than once, in first-seen order, each reported once.
+ *
+ * Here rather than in smoke.ts because both callers are about reporting a bad invocation,
+ * and this module is the one they can both reach without pulling in the Anthropic SDK.
+ */
+export function findDuplicates(list: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const id of list) {
+    if (seen.has(id)) dupes.add(id);
+    else seen.add(id);
+  }
+  return [...dupes];
+}

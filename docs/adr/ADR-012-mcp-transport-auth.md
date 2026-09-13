@@ -1,7 +1,9 @@
 # ADR-012: MCP transport & auth — stdio for self-host, streamable HTTP + bearer for hosted; OAuth post-gate
 
 **Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-08-06 (transport-level
-defense in depth — decision 6; model-controlled write roots — decision 7)
+defense in depth — decision 6; model-controlled write roots — decision 7) ·
+2026-09-13 (decision 7: the error contract has two halves, and the no-write-outside
+guarantee is about content, not directories)
 
 ## Context
 
@@ -63,8 +65,34 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    root (`RECONCIL_EXPORT_DIR`, default `<cwd>/exports`): resolved as a subpath under it,
    prefix-checked, then `realpath`-rechecked past symlinks (`fs-confine.ts`, shared with
    `recon_import_invoices`' `file_path` confinement against `RECONCIL_IMPORT_DIR`). An
-   escape (`..` traversal, an absolute path outside the root) is `INVALID_INPUT`, never a
-   write outside the configured base (H2 audit finding).
+   escape the caller *supplied* (`..` traversal, an absolute path outside the root) is
+   `INVALID_INPUT`, refused before anything is created (H2 audit finding).
+
+   *Amended 2026-09-13.* Two things this originally said are not what the implementation
+   can deliver, and both were found by review rather than by design:
+
+   - **The error contract has two halves, not one.** The escapes above are the caller's
+     argument and stay `INVALID_INPUT`. But a link planted *between* validation and use —
+     and a redirect to a different location *inside* the root — are refused as `INTERNAL`:
+     by then the caller's argument has already passed, the fault is not theirs, and telling
+     the model its `out_dir` is bad would be false. The server-side cause records which.
+   - **"Never a write outside the configured base" was too strong.** No export CONTENT is
+     ever written outside the root — that is the guarantee, and it holds. But `mkdir -p`
+     runs before the post-creation check can fire, so a link planted in that window does get
+     a real DIRECTORY created behind it (best-effort `rmdir`'d, at most the leaf). Closing
+     that needs `openat`/`O_NOFOLLOW` per segment, which Node's promises API does not
+     expose.
+
+   What the implementation actually does now, since two steps grew to several: prefix check →
+   `realpath` of the deepest existing ancestor → single-path-segment checks on every
+   caller-supplied component (`exportId`, each rendered file name) → `mkdir -p` → `realpath`
+   of the finished directory, anchored at the ROOT and required to EQUAL
+   `realpath(base)/exportId` → writes through the resolved directory with `{ flag: 'wx' }` →
+   cleanup of anything partially written. Anchoring that re-check at the out_dir-narrowed
+   base instead of the root was a real hole, verified writing outside the root in a Linux
+   container before it was fixed; equality rather than containment closes the
+   redirect-within-root case. The deeper question — whether a confinement this shaped should
+   be built out of `realpath` at all — is recorded in `09-known-gaps.md` for the ADR sweep.
 
 ## Alternatives considered
 
