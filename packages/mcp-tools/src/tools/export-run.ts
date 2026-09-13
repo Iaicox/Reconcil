@@ -101,13 +101,6 @@ export async function writeExportFiles(
   exportId: string,
   rendered: readonly RenderedFile[],
 ): Promise<{ dir: string; files: { name: string; path: string; sha256: string }[] }> {
-  // Root read ONCE and passed into both users. `exportRoot()` reads the environment, and
-  // the post-mkdir check below must be anchored to the same root `baseDir` validated
-  // against; two independent reads could see a different RECONCIL_EXPORT_DIR (the export
-  // tests mutate it), making the re-check either vacuous against a wider root or a spurious
-  // INTERNAL against a narrower one. Passing it in is what enforces that — relying on the
-  // two calls sharing a synchronous tick would be an invariant the next `await` breaks
-  // silently.
   // `exportId` becomes a path segment, so it is confined like any other caller-supplied
   // component. Every production caller passes randomUUID(), but this is an exported seam
   // and `writeExportFiles(tool, 'june/close', '../../elsewhere', …)` would otherwise land
@@ -142,8 +135,11 @@ export async function writeExportFiles(
     // another tenant's export folder — while the exports row and the tool response still
     // report the logical out_dir path, leaving an audit trail that points at a directory
     // holding none of the bytes. Equality against realpath(base)/exportId answers both.
-    const baseCheck = await realpathWithinBase(root, base);
-    const check = await realpathWithinBase(root, dir);
+    // Independent questions, one round of I/O.
+    const [baseCheck, check] = await Promise.all([
+      realpathWithinBase(root, base),
+      realpathWithinBase(root, dir),
+    ]);
     const expected = baseCheck.ok ? join(baseCheck.realTarget, exportId) : null;
     if (!check.ok || expected === null || check.realTarget !== expected) {
       // `mkdir -p` already ran, so a link planted in that window may have got a real
@@ -161,6 +157,14 @@ export async function writeExportFiles(
     }
     const realDir = check.realTarget;
     for (const f of rendered) {
+      // Same one-line guard as `exportId`, for the same reason: this is an exported seam,
+      // and a name like '../manifest.json' writes outside the per-export directory the
+      // check above just validated — while `files[].path` still reports it as inside.
+      // `wx` is no help there: the traversed target is a fresh name. Today every name is
+      // renderer-generated, which is an argument about callers, not about the seam.
+      if (f.name !== basename(f.name)) {
+        throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
+      }
       // Written through the RESOLVED directory — that is the security property. REPORTED
       // under the logical one: an export root that is itself a symlink or bind-mount
       // (macOS /var → /private/var) would otherwise hand the operator, and the exports

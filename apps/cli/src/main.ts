@@ -9,6 +9,9 @@
  * `agent/core.ts`. Both commands below delegate to the exact same entrypoint the package
  * scripts use — `main.ts` is a thin argv router, not a second implementation.
  */
+import { inspect } from 'node:util';
+
+import { EXIT_CANNOT_RUN, classifyUnrunnable, reportAndExit, unrunnableLines } from './evals/runnability.js';
 import { DEFAULT_MODEL } from './model.js';
 
 const usage = `reconcil CLI
@@ -39,6 +42,13 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error('cli failed:', err);
-  process.exit(1);
+  // Same classification as run.ts's own entrypoint. `cli evals` reaches runEvals through
+  // here, so leaving this path raw made 04-testing.md's exit-code contract false for one of
+  // the two documented routes — and left it dumping the 40-line object that contract exists
+  // to remove.
+  const unrunnable = classifyUnrunnable(err);
+  void reportAndExit(
+    unrunnable !== null ? EXIT_CANNOT_RUN : 1,
+    unrunnable !== null ? unrunnableLines(unrunnable) : [`cli failed: ${inspect(err, { depth: 5 })}`],
+  );
 });

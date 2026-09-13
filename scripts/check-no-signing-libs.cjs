@@ -178,9 +178,18 @@ function main() {
 
   if (violated) {
     if (cannotRun) console.error('(note: at least one lockfile could not be scanned — the list above may be incomplete)');
-    process.exit(1);
+    // `process.exitCode`, not `process.exit()`. In CI stderr is a pipe, so on POSIX writes
+    // are asynchronous and `process.exit()` calls reallyExit without draining libuv's queue
+    // — the tail of the violation list, including the partial-scan note above, can be lost.
+    // That would leave exactly the ambiguity this exit-code split exists to remove. Nothing
+    // runs after main(), so setting the code and returning terminates just as promptly.
+    process.exitCode = 1;
+    return;
   }
-  if (cannotRun) process.exit(2);
+  if (cannotRun) {
+    process.exitCode = 2;
+    return;
+  }
   console.log('supply-chain ok: no signing/key-material packages in the dependency tree.');
 }
 

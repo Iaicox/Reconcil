@@ -25,21 +25,16 @@ export function maxFileBytes(): number {
   // discarded a legitimate `RECONCIL_IMPORT_MAX_BYTES=1000000000` without a word and then
   // rejected a 40 MB file naming a limit nobody had configured.
   //
-  // The cap does bound an allocation (the read buffer is sized from a stat the cap has
-  // already bounded), so a value Node cannot allocate is a real misconfiguration — but it
-  // is refused LOUDLY at read time (`readImportFile`) rather than quietly replaced here.
-  // Silently honouring less than what was asked for is the failure mode worth avoiding in
-  // both directions.
+  // No upper clamp at all. The cap does not size anything — the read buffer is sized from
+  // the file's own stat — so an "effectively unlimited" value is servable for every file
+  // small enough to read, and refusing it here would kill the tool for a configuration that
+  // works. The file being too large to allocate IS refused, loudly, at read time.
   return Number.isFinite(raw) && raw > 0 ? raw : 8_000_000;
 }
 
-/**
- * The largest cap that can actually be served. `Buffer.allocUnsafe` throws above
- * `buffer.constants.MAX_LENGTH`, and that throw lands in the generic catch below, where it
- * would surface as "file_path could not be read" — an operator's environment variable
- * diagnosed as a hostile caller path.
- */
-const MAX_SERVABLE_CAP = bufferConstants.MAX_LENGTH - 1;
+/** The largest file this can read into one buffer — `Buffer.allocUnsafe(size + 1)` throws
+ *  above `buffer.constants.MAX_LENGTH`. */
+const MAX_SERVABLE_SIZE = bufferConstants.MAX_LENGTH - 1;
 
 /** Resolved import base dir, or null when `file_path` import is not configured. */
 export function importBaseDir(): string | null {
@@ -137,16 +132,6 @@ export async function readImportFile(filePath: string): Promise<string> {
   }
   try {
     const cap = maxFileBytes();
-    if (cap > MAX_SERVABLE_CAP) {
-      // Not an INVALID_INPUT: nothing the caller did is wrong, and telling the model its
-      // file_path is bad would be a lie. INTERNAL with a cause the operator can find.
-      throw new ToolError(
-        'INTERNAL',
-        'the import size limit is misconfigured',
-        undefined,
-        new Error(`RECONCIL_IMPORT_MAX_BYTES=${String(cap)} exceeds the largest allocatable buffer (${String(MAX_SERVABLE_CAP)})`),
-      );
-    }
     const stats = await fh.stat();
     // Regular files only. A FIFO, socket or device node reports size 0, which sails past
     // the cap below and then streams without bound into readFile — so the cap would be
@@ -160,6 +145,20 @@ export async function readImportFile(filePath: string): Promise<string> {
     }
     if (stats.size > cap) {
       throw new ToolError('INVALID_INPUT', `file exceeds the ${String(cap)}-byte import limit`);
+    }
+    // Checked on the FILE, not on the cap. The buffer is sized from `stats.size`, so a cap
+    // of 1e16 meaning "effectively unlimited" is perfectly servable for a 45-byte CSV — an
+    // earlier version guarded the CAP here and killed the tool outright for that config.
+    // What is unservable is a FILE bigger than Node can allocate a Buffer for, and that is
+    // the operator's storage, not the caller's path: `Buffer.allocUnsafe` would throw
+    // ERR_OUT_OF_RANGE into the catch below and surface as "file_path could not be read".
+    if (stats.size > MAX_SERVABLE_SIZE) {
+      throw new ToolError(
+        'INTERNAL',
+        'the import file is too large to read into memory',
+        undefined,
+        new Error(`file is ${String(stats.size)} bytes; the largest allocatable buffer is ${String(MAX_SERVABLE_SIZE)}`),
+      );
     }
 
     // AWAITed, not returned bare: `return promise` inside a try/finally runs the finally —

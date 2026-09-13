@@ -5,7 +5,7 @@ added to the idempotency key — see decision 2) · 2026-07-24 (trace-level inte
 transfers activated — see decision 2) · 2026-08-06 (internal transfers wired into
 the worker's `native` stream; `n` re-specified from provider order to a stable
 per-tx rank — see decision 2) · 2026-09-13 (the label path is taken only for
-trace labels in the decimal-path shape both providers send — see decision 2)
+distinct trace labels in the decimal-path shape both providers send — see decision 2)
 
 ## Context
 
@@ -26,7 +26,13 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    it sends one **in the decimal-path shape both providers actually send** (Etherscan
    `traceId`, Blockscout `index`: digits, optionally underscore-separated, `0` /
    `67` / `0_1_2`; both enumerate the call tree in execution order), otherwise a
-   `(from, to, value)` tuple. *Amended 2026-09-13:* the shape restriction is new. The
+   `(from, to, value)` tuple — and only when those labels are **distinct within the tx**.
+   *Amended 2026-09-13:* both the shape restriction and the distinctness condition are new.
+   Distinctness matters for the same reason the rest of this decision does: two traces in
+   one tx sharing a label tie under any label comparator, and a tie falls through to arrival
+   order, which is exactly what `n` must not be a function of. A repeated LABEL is not a
+   repeated ROW — those are two real value moves with different `(from, to, value)` — so a
+   duplicated label carries no ordering information and the tuple is the honest answer. The
    label comparator has to be a total order over any string, so an unfamiliar labelling
    scheme would still get ranked — but by a rule chosen for decimal paths, and the
    ranking becomes the sentinel. Narrowing the label path to the shape that is actually

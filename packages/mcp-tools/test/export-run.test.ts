@@ -177,6 +177,20 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     await expect(readdir(join(root, 'elsewhere'))).rejects.toThrow(/ENOENT/);
   });
 
+  it('refuses a rendered file name that is not a single segment', async () => {
+    // The other side of the join from exportId. '../manifest.json' writes outside the
+    // per-export directory the confinement check just validated, while files[].path still
+    // reports it as inside — and `wx` gives no protection, because the traversed target is
+    // a fresh name.
+    await expect(
+      writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [
+        { name: `..${sep}escaped.json`, content: '{}', sha256: 'x'.repeat(64) },
+      ]),
+    ).rejects.toMatchObject({ code: 'INTERNAL' });
+
+    await expect(readFile(join(root, 'june', 'close', 'escaped.json'), 'utf8')).rejects.toThrow(/ENOENT/);
+  });
+
   it('still writes normally when no link is in the way — the guard is not refusing everything', async () => {
     const { dir, files } = await writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [file]);
     expect(dir).toBe(join(root, 'june', 'close', 'run-uuid'));

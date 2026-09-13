@@ -106,3 +106,33 @@ export function classifyUnrunnable(err: unknown): Unrunnable | null {
       return null;
   }
 }
+
+/** The two-line shape an unrunnable gate reports: what happened, then what to do. */
+export function unrunnableLines(u: Unrunnable): string[] {
+  return [`eval gate COULD NOT RUN: ${u.reason}`, `  → ${u.hint}`];
+}
+
+/**
+ * Write to stderr, WAIT for it to flush, then exit.
+ *
+ * Both halves are load-bearing and they pull against each other. `console.error` followed
+ * by `process.exit()` can print nothing at all: on POSIX, stderr to a pipe — a CI log — is
+ * asynchronous, and `process.exit()` calls reallyExit without draining libuv's write queue,
+ * so the job goes red with a bare code and no explanation. But merely setting
+ * `process.exitCode` and returning leaves termination to the event loop, and the Anthropic
+ * client's keep-alive sockets are live handles: the process then waits out a keep-alive
+ * timeout at best, and at worst hangs until the job timeout and reports as a timeout rather
+ * than as the classified fault this exists to surface.
+ *
+ * Writing with a callback resolves when the chunk has actually been handed to the OS, so
+ * exiting immediately afterwards is safe and prompt.
+ */
+export async function reportAndExit(code: number, lines: readonly string[]): Promise<never> {
+  for (const line of lines) {
+    await new Promise<void>((resolve) => {
+      process.stderr.write(`${line}
+`, () => { resolve(); });
+    });
+  }
+  process.exit(code);
+}

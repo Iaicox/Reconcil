@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { inspect } from 'node:util';
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createDb, runMigrations, type Db } from '@reconcil/db';
@@ -25,7 +26,7 @@ import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
 import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
-import { EXIT_CANNOT_RUN, classifyUnrunnable } from './evals/runnability.js';
+import { EXIT_CANNOT_RUN, classifyUnrunnable, reportAndExit, unrunnableLines } from './evals/runnability.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
 import type { CaseResult, GateResult } from './evals/types.js';
 
@@ -110,8 +111,12 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   const args = parseArgs(argv);
 
   if (!process.env['ANTHROPIC_API_KEY']) {
-    console.error('ANTHROPIC_API_KEY is required to run the eval agent (the only place it is needed).');
-    process.exitCode = 1;
+    // EXIT_CANNOT_RUN, not 1. A missing key is strictly MORE environmental than the rejected
+    // key (401) that classifyUnrunnable already maps to 2 — exiting 1 here would tell a
+    // reader applying the documented rule that the gate ran and found a regression.
+    console.error('eval gate COULD NOT RUN: ANTHROPIC_API_KEY is unset, and the eval agent is the only thing that needs it');
+    console.error('  → set the secret (or run the deterministic suites instead), then re-run the job');
+    process.exitCode = EXIT_CANNOT_RUN;
     return;
   }
 
@@ -221,23 +226,14 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
 // command delegates to runEvals() directly) — mirrors keygen.ts/seed.ts/http.ts.
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runEvals().catch((err: unknown) => {
-    // An environmental fault gets ONE line and exit 2; a gate failure keeps the full object
+    // An environmental fault gets two lines and exit 2; a gate failure keeps the full object
     // and exit 1. Both are red — a gate that could not run must stay visible — but the CI
-    // summary should say which job the reader has, rather than making them parse a
-    // 40-line SDK dump to find the sentence "your credit balance is too low".
+    // summary should say which job the reader has, rather than making them parse a 40-line
+    // SDK dump to find the sentence "your credit balance is too low".
     const unrunnable = classifyUnrunnable(err);
-    if (unrunnable !== null) {
-      console.error(`eval gate COULD NOT RUN: ${unrunnable.reason}`);
-      console.error(`  → ${unrunnable.hint}`);
-    } else {
-      console.error('eval run failed:', err);
-    }
-    // `process.exitCode`, never `process.exit()`. On POSIX, stderr to a PIPE — which is what
-    // a CI log is — is asynchronous, and `process.exit()` calls reallyExit without draining
-    // libuv's write queue: the job can go red with a bare exit code and no explanation at
-    // all, which is strictly worse than the dump this replaced. Invisible locally, because a
-    // TTY writes synchronously. Setting the code and returning lets the process end on its
-    // own once the stream has drained.
-    process.exitCode = unrunnable !== null ? EXIT_CANNOT_RUN : 1;
+    void reportAndExit(
+      unrunnable !== null ? EXIT_CANNOT_RUN : 1,
+      unrunnable !== null ? unrunnableLines(unrunnable) : [`eval run failed: ${inspect(err, { depth: 5 })}`],
+    );
   });
 }

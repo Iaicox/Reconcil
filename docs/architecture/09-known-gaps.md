@@ -107,14 +107,22 @@ boundary block, and a provider failover can re-serve a window.
 
 Why this was accepted rather than migrated, and what now guards it: the label shapes whose
 ordering actually moved are **leading zeros** (`007` vs `7`), **non-decimal notations**
-(`0x10`, `1e3`), and an empty segment — and none of them occurs. Every trace label recorded
-anywhere in this repo is plain digits and underscores (`0`, `1`, `10`, `0_1`, `0_2`, `0_10`,
-`0_1_2`), for which the old and new comparators agree exactly. That was an argument about
-fixtures, so it is now also an invariant in code: `normalize()` takes the label-ordering path
-only when every label in the group is a plain decimal path (`isDecimalTracePath`), and any
-other shape — including one a future provider adapter might invent — falls to
-`compareTraceTuple`, which orders by from/to/value and so does not depend on how a provider
-chose to name its traces. `''` could never reach the comparator even before that, for the
+(`0x10`, `1e3`), an empty segment, and a label REPEATED within one tx — and none of them
+occurs. Every trace label recorded anywhere in this repo is plain digits and underscores
+(`0`, `1`, `10`, `0_1`, `0_2`, `0_10`, `0_1_2`), for which old and new agree exactly. That
+was an argument about fixtures, so it is now also an invariant in code: `normalize()`
+takes the label-ordering path only when every label in the group is a plain decimal path
+(`isDecimalTracePath`) AND the labels are distinct. Any other shape — including one a
+future provider adapter might invent — falls to `compareTraceTuple`, which orders by
+from/to/value and so does not depend on how a provider chose to name its traces.
+
+The distinctness half is a behaviour change of its own, and in the same direction: a group
+with two traces labelled alike previously took the label path, tied, and fell to ARRIVAL
+order — the one thing the sentinel must never be a function of. It now takes the tuple, so
+for that shape the derived sentinel differs from what a pre-change run would have stored.
+Same migration question as the rest of this entry, same answer: the shape appears in no
+recorded fixture, and there is no deployment holding rows to disagree with. ADR-005 d2
+carries the condition. `''` could never reach the comparator even before that, for the
 same reason. There are also no production deployments — the validation gate is a business
 milestone, not a shipped product — so there is no pre-existing table to disagree with.
 
