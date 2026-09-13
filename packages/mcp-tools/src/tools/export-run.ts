@@ -6,7 +6,7 @@
  * the citation envelope. Export tools are non-read-only (they write files +
  * register a row) but never destructive. Shared by both Face A export tools.
  */
-import { mkdir, rmdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
@@ -39,28 +39,24 @@ function exportRoot(): string {
 }
 
 /**
- * Resolve the export root, confined to `exportRoot()`. `out_dir` is a MODEL-CONTROLLED tool
- * argument (H2) and therefore hostile: it is interpreted as a subpath *under* the base, never
- * as an arbitrary write location. Absent, it is a no-op (unchanged default behavior).
- * Present, it is resolved against the base and must stay inside it — an absolute `out_dir`
- * that happens to land inside the base is fine, but any `..` traversal or absolute path that
- * escapes it throws `INVALID_INPUT` (mirrors the `recon_import_invoices` `file_path`
- * confinement, `../fs-confine.ts`). Confinement is enforced twice: a pure prefix check, then
- * a `realpath` re-check on the deepest existing ancestor (the target directory itself may not
- * exist yet — callers `mkdir -p` it right after). Never echoes the resolved server path in
- * the error — only the caller-supplied `out_dir` value, which the caller already knows.
- */
-/**
- * Module-private on purpose. An exported `baseDir(outDir, root)` would let any future
- * caller pick its own anchor — `baseDir(agentSuppliedOutDir, '/')` confines to nothing —
- * in the one helper whose entire job is "which path is the trusted anchor". The `base`
- * parameter exists only so `writeExportFiles` can read RECONCIL_EXPORT_DIR once and anchor
- * both the validation and the post-mkdir re-check to that same value.
+ * Resolve `out_dir` to a directory confined under `base`. `out_dir` is a MODEL-CONTROLLED
+ * tool argument (H2) and therefore hostile: it is a subpath *under* the base, never an
+ * arbitrary write location. Absent, it is a no-op. Present, it must stay inside — an
+ * absolute `out_dir` that happens to land inside is fine, but any `..` traversal or
+ * absolute path that escapes throws `INVALID_INPUT` (mirrors the `recon_import_invoices`
+ * `file_path` confinement, `../fs-confine.ts`). Enforced twice: a pure prefix check, then a
+ * `realpath` re-check on the deepest existing ancestor (the target may not exist yet —
+ * callers `mkdir -p` it right after). The error never echoes the resolved server path, only
+ * the caller-supplied `out_dir` value, which the caller already knows.
  *
- * There used to be an exported `baseDir(outDir?)` wrapper alongside it. Once every export
- * tool routed through `writeExportFiles`, it had no production caller left — and the nine
- * confinement assertions that exercised it were testing a path the product did not take.
- * They drive `writeExportFiles` now.
+ * Module-private on purpose. An exported `baseDir(outDir, root)` would let any future
+ * caller pick its own anchor — `baseDir(agentSuppliedOutDir, '/')` confines to nothing — in
+ * the one helper whose entire job is "which path is the trusted anchor". The `base`
+ * parameter exists only so `writeExportFiles` can read RECONCIL_EXPORT_DIR once and anchor
+ * both the validation and the post-mkdir re-check to that same value. There used to be an
+ * exported `baseDir(outDir?)` wrapper; once every export tool routed through
+ * `writeExportFiles` it had no production caller, and the nine confinement assertions that
+ * exercised it were testing a path the product did not take. They drive the writer now.
  */
 async function baseDirUnder(base: string, outDir?: string): Promise<string> {
   if (outDir === undefined) return base;
@@ -156,23 +152,54 @@ export async function writeExportFiles(
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, new Error(`export dir confinement failed: ${why}`));
     }
     const realDir = check.realTarget;
+    // Names checked BEFORE any write, so a bad one cannot leave a half-written directory.
     for (const f of rendered) {
-      // Same one-line guard as `exportId`, for the same reason: this is an exported seam,
-      // and a name like '../manifest.json' writes outside the per-export directory the
-      // check above just validated — while `files[].path` still reports it as inside.
-      // `wx` is no help there: the traversed target is a fresh name. Today every name is
-      // renderer-generated, which is an argument about callers, not about the seam.
-      if (f.name !== basename(f.name)) {
+      // Same guard as `exportId`, for the same reason: this is an exported seam, and a name
+      // like '../manifest.json' writes outside the per-export directory the check above just
+      // validated — while `files[].path` still reports it as inside. `wx` is no help there:
+      // the traversed target is a fresh name. The '', '.' and '..' cases are spelled out
+      // because `basename('..')` is '..', so the first clause alone lets it through and the
+      // write targets the PARENT of the validated directory, refused only incidentally by
+      // EISDIR. Today every name is renderer-generated, which is an argument about callers,
+      // not about the seam.
+      if (f.name !== basename(f.name) || f.name === '' || f.name === '.' || f.name === '..') {
         throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
       }
-      // Written through the RESOLVED directory — that is the security property. REPORTED
-      // under the logical one: an export root that is itself a symlink or bind-mount
-      // (macOS /var → /private/var) would otherwise hand the operator, and the exports
-      // row, paths that do not correspond to the root they configured. Both name the same
-      // file; only one of them is the operator's own vocabulary.
-      await writeFile(join(realDir, f.name), f.content, { flag: 'wx' });
-      files.push({ name: f.name, path: join(dir, f.name), sha256: f.sha256 });
     }
+
+    // Independent writes, one round of I/O. Written through the RESOLVED directory — that
+    // is the security property. REPORTED under the logical one: an export root that is
+    // itself a symlink or bind-mount (macOS /var → /private/var) would otherwise hand the
+    // operator, and the exports row, paths that do not correspond to the root they
+    // configured. Both name the same file; only one is the operator's own vocabulary.
+    const written = await Promise.allSettled(
+      rendered.map(async (f) => {
+        await writeFile(join(realDir, f.name), f.content, { flag: 'wx' });
+        return { name: f.name, path: join(dir, f.name), sha256: f.sha256 };
+      }),
+    );
+    const failure = written.find((r) => r.status === 'rejected');
+    if (failure !== undefined) {
+      // One write failing used to leave the others on disk with no `exports` row — a
+      // half-written close pack the audit table has never heard of, and a fresh `<uuid>/`
+      // every retry so it is never reclaimed. allSettled rather than all, so every write
+      // has finished before the cleanup runs and nothing is still in flight behind it.
+      //
+      // Only the writes that SUCCEEDED are removed. Removing every rendered name would
+      // delete whatever the failed write collided with — a file this code did not create
+      // and has no business destroying, which is exactly what `wx` refused to overwrite one
+      // line earlier. (Caught by its own test: the first draft deleted the squatter.)
+      await Promise.all(
+        written.flatMap((r, i) =>
+          r.status === 'fulfilled'
+            ? [rm(join(realDir, rendered[i]!.name), { force: true }).catch(() => { /* best effort */ })]
+            : [],
+        ),
+      );
+      await rmdir(dir).catch(() => { /* non-empty or gone — tidying, not containment */ });
+      throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, failure.reason);
+    }
+    files.push(...written.map((r) => (r as PromiseFulfilledResult<{ name: string; path: string; sha256: string }>).value));
     return { dir, files };
   } catch (err) {
     if (err instanceof ToolError) throw err;

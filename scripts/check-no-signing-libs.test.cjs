@@ -21,11 +21,14 @@ const {
 // Sanity: the banned regex is derived from the real .dependency-cruiser.cjs denylist, so
 // these fixtures exercise it against names that are actually on the list today.
 test('banned regex sanity — known members', () => {
-  assert.ok(banned.test('ox'));
-  assert.ok(banned.test('starknet'));
-  assert.ok(banned.test('bitcoinjs-lib'));
-  assert.ok(!banned.test('oxlint')); // prefix, not the package itself
-  assert.ok(!banned.test('left-pad'));
+  // `banned` is an accessor, not a bare RegExp: the pattern is derived lazily from the
+  // cruiser config so that a malformed config throws where a caller can handle it, rather
+  // than exiting at require() time and killing this very test run before it reports.
+  assert.ok(banned().test('ox'));
+  assert.ok(banned().test('starknet'));
+  assert.ok(banned().test('bitcoinjs-lib'));
+  assert.ok(!banned().test('oxlint')); // prefix, not the package itself
+  assert.ok(!banned().test('left-pad'));
 });
 
 test('splitNameAtSpec — unscoped, scoped, peer-qualified, no-spec, alias-target shapes', () => {

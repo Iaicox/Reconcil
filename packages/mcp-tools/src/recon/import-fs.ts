@@ -32,9 +32,15 @@ export function maxFileBytes(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 8_000_000;
 }
 
-/** The largest file this can read into one buffer — `Buffer.allocUnsafe(size + 1)` throws
- *  above `buffer.constants.MAX_LENGTH`. */
-const MAX_SERVABLE_SIZE = bufferConstants.MAX_LENGTH - 1;
+/**
+ * The largest file this can read. Bounded by MAX_STRING_LENGTH (~512 MB), not MAX_LENGTH
+ * (~9e15): `readExactly` returns a STRING, so the buffer is not the binding constraint —
+ * `buf.toString('utf8')` throws ERR_STRING_TOO_LONG long before `allocUnsafe` complains.
+ * Anchoring on MAX_LENGTH made this guard unfireable: a 1 GB file passed it, allocated a
+ * gigabyte, read the whole thing, and THEN threw into the generic catch as "file_path could
+ * not be read" — the exact misdiagnosis the guard exists to prevent, after paying for it.
+ */
+const MAX_SERVABLE_SIZE = bufferConstants.MAX_STRING_LENGTH;
 
 /** Resolved import base dir, or null when `file_path` import is not configured. */
 export function importBaseDir(): string | null {
@@ -157,7 +163,7 @@ export async function readImportFile(filePath: string): Promise<string> {
         'INTERNAL',
         'the import file is too large to read into memory',
         undefined,
-        new Error(`file is ${String(stats.size)} bytes; the largest allocatable buffer is ${String(MAX_SERVABLE_SIZE)}`),
+        new Error(`file is ${String(stats.size)} bytes; the largest readable size is ${String(MAX_SERVABLE_SIZE)} (V8's max string length)`),
       );
     }
 

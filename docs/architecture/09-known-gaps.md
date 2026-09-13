@@ -132,6 +132,52 @@ comment. Where: `packages/ingestion/src/normalize.ts` (`compareTraceIds`,
 `isDecimalTracePath`, `sentinelRank`), ADR-005 d2.
 *(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13)*
 
+**ADR-005 d2 derives the sentinel from provider METADATA while requiring it to be a function
+of the ROW SET — and the thing that buys never arrives.** Raised 2026-09-13 after the same
+decision needed two amendments in two consecutive review rounds; recorded here rather than
+acted on, because it is an ADR change plus an ingestion simplification and does not belong
+in the branch that surfaced it.
+
+The decision says `n` "must be a function of the row set alone, or a re-fetch that returns
+the same traces in a different order would renumber them into each other's slots". It then
+derives `n` from the provider's trace LABEL, which is not row content — it is how a provider
+chose to name the row. Everything this branch added to that path (a total order over
+arbitrary strings, the decimal-path shape test, the distinctness test) is an attempt to make
+label-derived ranking behave like row-derived ranking. Each amendment narrows the label path
+further toward "use labels only where they would agree with the tuple anyway".
+
+Note that **the tuple satisfies the requirement by construction, and the label cannot**.
+If the rank is
+derived from row content, two rows with identical content are interchangeable *by
+definition*: a re-fetch that reorders them yields the same set of (key, payload) pairs, so
+nothing is dropped and nothing is duplicated. Two rows with the same LABEL but different
+content are not interchangeable — which is the defect the distinctness amendment had to
+patch.
+
+And **the label path's stated benefit does not reach any consumer**. It exists to preserve
+execution order ("both enumerate the call tree in execution order"). But the sentinel is
+`-(1000 + n)` and all five consuming queries order ascending by `log_index`
+(`balances.ts:117`, `counterparties.ts:101`, `flows.ts:122`, `gas.ts:101`,
+`list-events.ts:90`), so `n = 2` sorts *before* `n = 0`. Execution order is inverted
+everywhere it could be observed. Nothing depends on it, and nothing can.
+
+Proposal: amend d2 so the `(from, to, value)` tuple is the ONLY rank source. That deletes
+`compareTraceIds`, `compareDecimalDigits`, `isDecimalTracePath`, their property test, and
+collapses both 2026-09-13 amendments into a simpler decision. The raw label is not lost —
+`normalize()` already stores the full provider row in `chain_events.raw`, so it stops being
+part of the idempotency key without leaving the database.
+
+Cost, stated honestly: this changes the derived sentinel for ALL internal transfers, not
+only the edge shapes the amendments covered, so the blast radius is larger than either
+amendment. Same migration question as the entry above, same answer today — no deployment
+holds rows to disagree with — but that answer expires at the first real ingest.
+
+Trigger: before the first real deployment ingests mainnet history, and ideally alongside a
+plan-mode sweep for the same pattern elsewhere (a decision whose stated invariant is not
+what its implementation derives from). Where: `docs/adr/ADR-005-event-store.md` (decision 2),
+`packages/ingestion/src/normalize.ts`, `packages/ingestion/test/trace-order.property.test.ts`.
+*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13 — raised, not acted on)*
+
 ## Ledger
 
 **`isRealCalendarDate` re-splits a string `parseIsoDateComponentsUtc` already parsed.**
@@ -358,7 +404,7 @@ label-resolution cases can be restored. Where: `apps/cli/src/evals/seed-case.ts`
 
 ## Reconciling the count
 
-This register holds **28 entries**. The source ledger
+This register holds **29 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
@@ -449,7 +495,12 @@ number is gone.) The reconciliation from 32 ledger lines:
   migrated because the label shapes whose ordering moved do not occur in either provider's
   output (see the entry for the evidence), and there is no deployment to disagree with yet.
 
-32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 + 1 = **28**, matching this document.
+- **+1**: one entry RAISED by the review of this same branch and deliberately not acted on —
+  ADR-005 d2 deriving the sentinel from provider metadata while requiring it to be a function
+  of the row set. It is an ADR change plus an ingestion simplification, so it gets its own
+  branch rather than riding the one that surfaced it.
+
+32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 + 1 + 1 = **29**, matching this document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation

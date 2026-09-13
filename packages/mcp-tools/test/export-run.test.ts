@@ -5,7 +5,7 @@
  * must resolve to a subpath *under* the export root, never an arbitrary write location.
  * Mirrors `import-fs.test.ts` (the read-path counterpart) in shape and intent.
  */
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 
@@ -189,6 +189,26 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     ).rejects.toMatchObject({ code: 'INTERNAL' });
 
     await expect(readFile(join(root, 'june', 'close', 'escaped.json'), 'utf8')).rejects.toThrow(/ENOENT/);
+  });
+
+  it('a failed write leaves no partial export behind', async () => {
+    // One write failing used to leave the others on disk with no `exports` row — a
+    // half-written close pack the audit table has never heard of, and a fresh <uuid>/ on
+    // every retry so it was never reclaimed. The second file collides with something
+    // already at its name, which is what `wx` is for.
+    await mkdir(join(root, 'june', 'close', 'run-uuid'), { recursive: true });
+    await writeFile(join(root, 'june', 'close', 'run-uuid', 'b.json'), 'squatted');
+
+    await expect(
+      writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [
+        { name: 'a.json', content: '{"a":1}', sha256: 'a'.repeat(64) },
+        { name: 'b.json', content: '{"b":2}', sha256: 'b'.repeat(64) },
+      ]),
+    ).rejects.toMatchObject({ code: 'INTERNAL' });
+
+    // a.json was written and must be gone; b.json was never ours and must be untouched.
+    await expect(readFile(join(root, 'june', 'close', 'run-uuid', 'a.json'), 'utf8')).rejects.toThrow(/ENOENT/);
+    await expect(readFile(join(root, 'june', 'close', 'run-uuid', 'b.json'), 'utf8')).resolves.toBe('squatted');
   });
 
   it('still writes normally when no link is in the way — the guard is not refusing everything', async () => {

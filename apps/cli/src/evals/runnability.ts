@@ -66,12 +66,38 @@ function apiMessage(err: unknown): string {
   return parts.filter((x): x is string => typeof x === 'string').join(' ');
 }
 
+/** Connection-level SDK errors carry no HTTP status — there was no response to have one. */
+function isConnectionFault(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const name = (err as { name?: unknown }).name;
+  return name === 'APIConnectionError' || name === 'APIConnectionTimeoutError' || name === 'APIUserAbortError';
+}
+
 export function classifyUnrunnable(err: unknown): Unrunnable | null {
   const status = apiStatus(err);
-  if (status === null) return null;
+  if (status === null) {
+    // No status means no response: the gateway is down, DNS flaked, or the request timed
+    // out. run.ts already calls "a dropped connection" a failure "not about the cases at
+    // all"; keying purely on status contradicted that and sent it to exit 1, where the
+    // documented rule tells the reader the branch under review broke the gate.
+    return isConnectionFault(err)
+      ? {
+          reason: 'the API could not be reached, so the suite did not complete',
+          hint: 're-run the job; if it recurs, check ANTHROPIC_BASE_URL and network egress — the branch is not implicated',
+        }
+      : null;
+  }
   const message = apiMessage(err);
 
   switch (status) {
+    case 502:
+    case 503:
+    case 504:
+      // A gateway's own failure, not the API's. Same class as no response at all.
+      return {
+        reason: `the API gateway returned ${String(status)}, so the suite did not complete`,
+        hint: 're-run the job; if it recurs, check the ANTHROPIC_BASE_URL gateway — the branch is not implicated',
+      };
     case 400:
       // ONLY the billing shape. Every other 400 is a request this code built wrong, which
       // is a contract break and belongs to the gate.
@@ -128,8 +154,17 @@ export function unrunnableLines(u: Unrunnable): string[] {
  * exiting immediately afterwards is safe and prompt.
  */
 export async function reportAndExit(code: number, lines: readonly string[]): Promise<never> {
+  // Set FIRST, before anything that can go wrong. The code used to be applied only by the
+  // `process.exit` below, which made it conditional on getting there: a synchronous throw
+  // from `write` on a destroyed stderr rejects this function, the callers `void` it, and
+  // Node exits 1 — silently downgrading a classified EXIT_CANNOT_RUN. Worse, a callback
+  // that never fires lets the loop drain and the process exit 0: a gate that could not run
+  // reported GREEN, which this module's own header forbids.
+  process.exitCode = code;
   for (const line of lines) {
     await new Promise<void>((resolve) => {
+      // `resolve` on both paths: the write callback receives an error rather than throwing,
+      // and a failure to print must not change the exit code that is already set.
       process.stderr.write(`${line}
 `, () => { resolve(); });
     });
