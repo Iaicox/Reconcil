@@ -6,14 +6,21 @@
 # fixes arrive, and Dependabot watches this file (.github/dependabot.yml) so the pin is
 # maintained rather than quietly aging.
 #
-# NOT pinned to .nvmrc's 22.13, and that is deliberate: node:22.22-slim bundles a corepack
-# whose embedded signing keys predate npm's key rotation, so `pnpm fetch` dies on
-# "Cannot find matching keyid" before a single dependency is downloaded. .nvmrc and
-# engines (>=22.13.0) are floors, not ceilings. Anyone tempted to "align the pin with
-# .nvmrc" will reproduce that build failure; the fix is a newer minor, never
-# COREPACK_INTEGRITY_KEYS=0, which would trade a build error for an unverified toolchain.
+# WHICH MAJOR: LTS lines only. A Dependabot major is accepted once that major has ENTERED
+# LTS, not when it is released — a `Current` release in the production image means shipping
+# a runtime no LTS-tracking self-hoster has. That is why the 2026-09 bump took 24.x (Active
+# LTS since 2025-10, EOL 2028-04) over the offered 26.8, which is Current until 2026-10-28.
+# Node 26 is the next major to accept, on or after that date.
+#
+# The tag now MATCHES .nvmrc, which it deliberately did not before: node:22.22-slim was
+# chosen over .nvmrc's 22.13 because that image bundles a corepack whose embedded signing
+# keys predate npm's key rotation, so `pnpm fetch` died on "Cannot find matching keyid"
+# before a single dependency was downloaded. 24.x ships current keys, so the divergence is
+# no longer needed. Kept as history because the trap recurs: if a future pin ever fails that
+# way, the fix is a newer minor — never COREPACK_INTEGRITY_KEYS=0, which would trade a
+# build error for an unverified toolchain.
 
-FROM node:22.22-slim AS builder
+FROM node:24.21-slim AS builder
 RUN corepack enable pnpm
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -39,7 +46,7 @@ RUN rm -rf apps/cli
 # prod deps (e.g. pg) that a workspace app still needs at runtime. We ship the
 # full node_modules; slimming via `pnpm deploy --prod` is a later size optimization.
 
-FROM node:22.22-slim
+FROM node:24.21-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=builder /app /app
@@ -48,7 +55,7 @@ COPY --from=builder /app /app
 # / dist-only copy) is a deliberately deferred separate slice. The eval runner is already
 # gone at this point — removed in the builder, so it is absent from this layer rather than
 # hidden behind a whiteout.
-# node:22.22-slim ships a pre-created `node` user (uid 1000). `/app` is root-owned
+# node:24.21-slim ships a pre-created `node` user (uid 1000). `/app` is root-owned
 # from the COPY above (world-readable, so `node` can still read + exec it); the
 # one path either command writes to at runtime is the exports dir (close-pack /
 # PDF / journal-drafts tools, RECONCIL_EXPORT_DIR default `./exports` — gitignored,
@@ -56,5 +63,10 @@ COPY --from=builder /app /app
 # owned by `node` so the bind/named volume mount inherits that ownership.
 RUN mkdir -p /app/exports && chown node:node /app/exports
 USER node
+# Documentation only: EXPOSE binds nothing. It names config.ts DEFAULT_PORT, and a PORT
+# override moves the listener without moving this line — there is no dynamic form short of
+# a build arg, which would only push the same duplication into the build. docker-compose.yml
+# is the authority that actually tracks the override ("${PORT:-8484}:${PORT:-8484}", with
+# its own comment on why it is not hardcoded).
 EXPOSE 8484
 CMD ["node", "apps/mcp-server/dist/http.js"]

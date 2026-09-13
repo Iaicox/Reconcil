@@ -304,10 +304,12 @@ becomes an actual deployment concern. Where: `Dockerfile`. *(Task 15,
 
 > The other half — "its `node:22-slim` base floats on the major tag" — is **fixed** (PR #66).
 > The tag pins the minor and Dependabot gained the `docker` ecosystem so the pin is
-> maintained rather than aging. Not pinned to `.nvmrc`'s 22.13, which is a trap worth
-> knowing: that image bundles a corepack whose signing keys predate npm's rotation, so
-> `pnpm fetch` dies on "Cannot find matching keyid" before downloading anything. `.nvmrc`
-> and `engines` are floors, not ceilings.
+> maintained rather than aging. The divergence from `.nvmrc` that PR #66 documented is gone
+> as of the 2026-09 toolchain bump: `.nvmrc`, `engines`, the `@types/node` catalog and both
+> Dockerfile stages now all say 24.x, and the Dockerfile carries the rule that decided it
+> (LTS lines only — accept a major once it has entered LTS, which is why 24.21 was taken over
+> the offered 26.8). The corepack-signing-key trap that forced the old divergence is kept
+> there as history, because it recurs.
 
 **`site`'s `next lint` script emits a deprecation warning on every run.** A second,
 unrelated fact bundled into the same ledger line as the Dockerfile item above (both were
