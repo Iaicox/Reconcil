@@ -12,7 +12,7 @@ import { basename, join, resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ToolError } from '../src/errors.js';
-import { baseDir, writeExportFiles } from '../src/tools/export-run.js';
+import { writeExportFiles } from '../src/tools/export-run.js';
 
 let root: string;
 
@@ -26,37 +26,46 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-describe('baseDir — export root confinement (security, H2)', () => {
+/**
+ * Driven through `writeExportFiles` — the path every export tool actually takes — rather
+ * than through a `baseDir(outDir?)` wrapper. That wrapper existed only for these tests once
+ * the tools were routed through the shared writer, so nine security assertions were
+ * exercising code the product did not run; the wrapper is gone.
+ */
+describe('export root confinement, through the shipped writer (security, H2)', () => {
+  const one = [{ name: 'manifest.json', content: '{}', sha256: 'x'.repeat(64) }];
+  const write = (outDir?: string): Promise<{ dir: string }> =>
+    writeExportFiles('export_close_pack', outDir, 'run-uuid', one);
+
   it('defaults to the configured export root when out_dir is absent', async () => {
-    expect(await baseDir()).toBe(resolve(root));
+    expect((await write()).dir).toBe(join(resolve(root), 'run-uuid'));
   });
 
   it('resolves a relative out_dir as a subpath under the root', async () => {
-    expect(await baseDir(join('june', 'close'))).toBe(resolve(root, 'june', 'close'));
+    expect((await write(join('june', 'close'))).dir).toBe(join(resolve(root), 'june', 'close', 'run-uuid'));
   });
 
   it('accepts an absolute out_dir that happens to resolve inside the root', async () => {
-    expect(await baseDir(root)).toBe(resolve(root));
+    expect((await write(root)).dir).toBe(join(resolve(root), 'run-uuid'));
   });
 
   it('rejects a parent-directory traversal', async () => {
-    await expect(baseDir('../escape')).rejects.toBeInstanceOf(ToolError);
-    await expect(baseDir('../escape')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(write('../escape')).rejects.toBeInstanceOf(ToolError);
+    await expect(write('../escape')).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
   it('rejects an absolute out_dir outside the root (the temp-dir root itself)', async () => {
-    await expect(baseDir(tmpdir())).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(write(tmpdir())).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
   it('rejects a sibling-prefix bypass (root + "-evil")', async () => {
-    const evil = `..${sep}${basename(root)}-evil`;
-    await expect(baseDir(evil)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    await expect(write(`..${sep}${basename(root)}-evil`)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
   });
 
   it('never leaks the resolved root path in the error, and hints at RECONCIL_EXPORT_DIR', async () => {
     let thrown: ToolError | undefined;
     try {
-      await baseDir('../escape');
+      await write('../escape');
     } catch (err) {
       thrown = err as ToolError;
     }
@@ -64,6 +73,11 @@ describe('baseDir — export root confinement (security, H2)', () => {
     expect(thrown?.message).not.toContain(resolve(root)); // no internal-path leak
     expect(thrown?.message).toContain('../escape'); // naming the supplied value is fine
     expect(thrown?.hint).toContain('RECONCIL_EXPORT_DIR');
+  });
+
+  it('refuses before creating anything — a rejected out_dir leaves no directory behind', async () => {
+    await expect(write('../escape')).rejects.toThrow();
+    await expect(readdir(join(root, '..', 'escape'))).rejects.toThrow(/ENOENT/);
   });
 });
 
@@ -130,6 +144,37 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it('refuses a redirect to ANOTHER location inside the root, not just an escape from it', async () => {
+    // Containment alone is satisfied here: the link points at a sibling directory that IS
+    // under the export root. But the write would land in someone else's folder while the
+    // exports row and the tool response still name <root>/june/close/<uuid> — an audit
+    // trail pointing at a directory holding none of the bytes. Only equality against
+    // realpath(base)/exportId catches it.
+    await mkdir(join(root, 'june', 'close'), { recursive: true });
+    const sibling = join(root, 'tenant-b-exports');
+    await mkdir(sibling, { recursive: true });
+    await symlink(sibling, join(root, 'june', 'close', 'run-uuid'), 'junction');
+
+    await expect(
+      writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [file]),
+    ).rejects.toMatchObject({ code: 'INTERNAL' });
+
+    expect(await readdir(sibling)).toEqual([]);
+  });
+
+  it('refuses an exportId that is not a single path segment', async () => {
+    // The other side of the join. Every production caller passes randomUUID(), but this is
+    // an exported seam, and a traversing exportId lands outside the validated out_dir while
+    // staying inside the root — where a containment check cannot see it.
+    for (const bad of ['../../elsewhere', 'a/b', '..', '.', '']) {
+      await expect(
+        writeExportFiles('export_close_pack', 'june/close', bad, [file]),
+      ).rejects.toMatchObject({ code: 'INTERNAL' });
+    }
+    // …and nothing was created for any of them.
+    await expect(readdir(join(root, 'elsewhere'))).rejects.toThrow(/ENOENT/);
   });
 
   it('still writes normally when no link is in the way — the guard is not refusing everything', async () => {

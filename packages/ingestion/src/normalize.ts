@@ -76,7 +76,10 @@ function compareDecimalDigits(a: string, b: string): number {
  * The rule that removes the cycle: the two classes are totally ordered against each other
  * (every numeric segment sorts before every non-numeric one) instead of being compared by a
  * measure that only makes sense inside one class. And two DISTINCT labels never compare
- * equal, so the caller's arrival-order tiebreak is only ever reached for a genuine repeat.
+ * equal — so the caller's arrival-order tiebreak is reached only when the two labels are
+ * IDENTICAL, which is not the same as the two rows being identical. The caller is what has
+ * to notice that: `normalize()` takes the label path only for a group whose labels are all
+ * distinct, precisely so a repeated label cannot hand the ordering to arrival order.
  */
 export function compareTraceIds(a: string, b: string): number {
   const pa = a.split('_');
@@ -260,7 +263,17 @@ export function normalize(
     // an unfamiliar scheme falls to `compareTraceTuple` (from/to/value: provider-independent,
     // and derived from the transfer itself rather than from how a provider chose to name it)
     // instead. Loud in neither case, but deterministic in both.
-    const labelled = group.every(({ it }) => isDecimalTracePath(it.traceId ?? ''));
+    const labels = group.map(({ it }) => it.traceId ?? '');
+    // DISTINCT decimal paths, not merely decimal ones. Shape alone is not enough: two traces
+    // in one tx both labelled '0' tie under `compareTraceIds`, and the tie falls to
+    // `a.arrival - b.arrival` — the provider's response order, which is what the sentinel
+    // must never depend on. A repeat of the LABEL is not a repeat of the ROW: those two
+    // traces have different (from, to, value) and are two real value moves, so a re-fetch
+    // that returns them the other way round swaps their sentinels and ON CONFLICT DO NOTHING
+    // stops matching (ADR-005 d2). A duplicated label carries no ordering information, so
+    // the honest fallback is the tuple, which separates different payloads on their own
+    // content.
+    const labelled = labels.every((l) => isDecimalTracePath(l)) && new Set(labels).size === labels.length;
     [...group]
       .sort((a, b) => {
         const primary = labelled

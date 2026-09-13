@@ -29,28 +29,49 @@ export interface Unrunnable {
   hint: string;
 }
 
-/** The Anthropic SDK's thrown shape: an HTTP status plus the parsed error body. */
-interface ApiErrorLike {
-  status: number;
-  error: { error: { type?: unknown; message?: unknown } };
+/**
+ * The HTTP status, if this is any kind of API error.
+ *
+ * Status only — NOT the nested `error.error` body the Anthropic SDK parses. CI can point
+ * ANTHROPIC_BASE_URL at a gateway (ci.yml), and this repo has already been bitten by one
+ * returning a non-Anthropic body: a 401 that arrived as a 400 saying "Unsupported Claude
+ * Code version". Requiring the nested shape meant any such gateway fell through to the
+ * raw-dump path this module exists to remove — exactly when the operator most needs to be
+ * told the gate could not run. The status is the part every HTTP intermediary preserves.
+ */
+function apiStatus(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null) return null;
+  const { status } = err as { status?: unknown };
+  return typeof status === 'number' ? status : null;
 }
 
-function asApiError(err: unknown): ApiErrorLike | null {
-  if (typeof err !== 'object' || err === null) return null;
-  const { status, error } = err as { status?: unknown; error?: unknown };
-  if (typeof status !== 'number') return null;
-  if (typeof error !== 'object' || error === null) return null;
-  const inner = (error as { error?: unknown }).error;
-  if (typeof inner !== 'object' || inner === null) return null;
-  return { status, error: { error: inner } };
+/**
+ * Best-effort message, across the shapes a body can arrive in: the SDK's parsed
+ * `error.error.message`, a flatter `error.message`, a bare string `error`, or the Error's
+ * own message (the SDK puts the body text there too). Only the 400 branch consults it.
+ */
+function apiMessage(err: unknown): string {
+  if (typeof err !== 'object' || err === null) return '';
+  const e = err as { error?: unknown; message?: unknown };
+  const parts: unknown[] = [];
+  if (typeof e.error === 'string') parts.push(e.error);
+  else if (typeof e.error === 'object' && e.error !== null) {
+    const body = e.error as { message?: unknown; error?: unknown };
+    parts.push(body.message);
+    if (typeof body.error === 'object' && body.error !== null) {
+      parts.push((body.error as { message?: unknown }).message);
+    }
+  }
+  parts.push(e.message);
+  return parts.filter((x): x is string => typeof x === 'string').join(' ');
 }
 
 export function classifyUnrunnable(err: unknown): Unrunnable | null {
-  const api = asApiError(err);
-  if (api === null) return null;
-  const message = typeof api.error.error.message === 'string' ? api.error.error.message : '';
+  const status = apiStatus(err);
+  if (status === null) return null;
+  const message = apiMessage(err);
 
-  switch (api.status) {
+  switch (status) {
     case 400:
       // ONLY the billing shape. Every other 400 is a request this code built wrong, which
       // is a contract break and belongs to the gate.

@@ -9,6 +9,7 @@
  * symlink escape) — plus a byte-size cap. Every failure returns a GENERIC message: the
  * path and the underlying fs error never leak back to the caller.
  */
+import { constants as bufferConstants } from 'node:buffer';
 import { open } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -19,14 +20,26 @@ import { realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
  *  configurable at runtime and testable). */
 export function maxFileBytes(): number {
   const raw = Number(process.env.RECONCIL_IMPORT_MAX_BYTES);
-  // Finite and positive is the whole test. An upper ceiling was briefly added here on the
-  // theory that the cap sized a Buffer — it does not (the buffer is sized from the file's
-  // own stat), so the only thing an unusually large cap affects is the comparison below,
-  // which handles any finite number. A ceiling would instead have discarded a legitimate
-  // `RECONCIL_IMPORT_MAX_BYTES=1000000000` in silence and then rejected a 40 MB file
-  // naming an 8 MB limit the operator never configured.
+  // Finite and positive, and NOT silently narrowed. An earlier version clamped this at
+  // 512 MB and fell back to the 8 MB default when the operator asked for more — which
+  // discarded a legitimate `RECONCIL_IMPORT_MAX_BYTES=1000000000` without a word and then
+  // rejected a 40 MB file naming a limit nobody had configured.
+  //
+  // The cap does bound an allocation (the read buffer is sized from a stat the cap has
+  // already bounded), so a value Node cannot allocate is a real misconfiguration — but it
+  // is refused LOUDLY at read time (`readImportFile`) rather than quietly replaced here.
+  // Silently honouring less than what was asked for is the failure mode worth avoiding in
+  // both directions.
   return Number.isFinite(raw) && raw > 0 ? raw : 8_000_000;
 }
+
+/**
+ * The largest cap that can actually be served. `Buffer.allocUnsafe` throws above
+ * `buffer.constants.MAX_LENGTH`, and that throw lands in the generic catch below, where it
+ * would surface as "file_path could not be read" — an operator's environment variable
+ * diagnosed as a hostile caller path.
+ */
+const MAX_SERVABLE_CAP = bufferConstants.MAX_LENGTH - 1;
 
 /** Resolved import base dir, or null when `file_path` import is not configured. */
 export function importBaseDir(): string | null {
@@ -124,6 +137,16 @@ export async function readImportFile(filePath: string): Promise<string> {
   }
   try {
     const cap = maxFileBytes();
+    if (cap > MAX_SERVABLE_CAP) {
+      // Not an INVALID_INPUT: nothing the caller did is wrong, and telling the model its
+      // file_path is bad would be a lie. INTERNAL with a cause the operator can find.
+      throw new ToolError(
+        'INTERNAL',
+        'the import size limit is misconfigured',
+        undefined,
+        new Error(`RECONCIL_IMPORT_MAX_BYTES=${String(cap)} exceeds the largest allocatable buffer (${String(MAX_SERVABLE_CAP)})`),
+      );
+    }
     const stats = await fh.stat();
     // Regular files only. A FIFO, socket or device node reports size 0, which sails past
     // the cap below and then streams without bound into readFile — so the cap would be

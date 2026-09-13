@@ -7,7 +7,7 @@
  * register a row) but never destructive. Shared by both Face A export tools.
  */
 import { mkdir, rmdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
@@ -50,17 +50,17 @@ function exportRoot(): string {
  * exist yet — callers `mkdir -p` it right after). Never echoes the resolved server path in
  * the error — only the caller-supplied `out_dir` value, which the caller already knows.
  */
-export async function baseDir(outDir?: string): Promise<string> {
-  return baseDirUnder(exportRoot(), outDir);
-}
-
 /**
- * The same confinement, against a root the CALLER names. Module-private on purpose: an
- * exported `baseDir(outDir, root)` would let any future caller pick its own anchor —
- * `baseDir(agentSuppliedOutDir, '/')` confines to nothing — in the one helper whose entire
- * job is "which path is the trusted anchor". The parameter exists only so
- * `writeExportFiles` can read RECONCIL_EXPORT_DIR once and anchor both the validation and
- * the post-mkdir re-check to that same value.
+ * Module-private on purpose. An exported `baseDir(outDir, root)` would let any future
+ * caller pick its own anchor — `baseDir(agentSuppliedOutDir, '/')` confines to nothing —
+ * in the one helper whose entire job is "which path is the trusted anchor". The `base`
+ * parameter exists only so `writeExportFiles` can read RECONCIL_EXPORT_DIR once and anchor
+ * both the validation and the post-mkdir re-check to that same value.
+ *
+ * There used to be an exported `baseDir(outDir?)` wrapper alongside it. Once every export
+ * tool routed through `writeExportFiles`, it had no production caller left — and the nine
+ * confinement assertions that exercised it were testing a path the product did not take.
+ * They drive `writeExportFiles` now.
  */
 async function baseDirUnder(base: string, outDir?: string): Promise<string> {
   if (outDir === undefined) return base;
@@ -108,29 +108,56 @@ export async function writeExportFiles(
   // INTERNAL against a narrower one. Passing it in is what enforces that — relying on the
   // two calls sharing a synchronous tick would be an invariant the next `await` breaks
   // silently.
+  // `exportId` becomes a path segment, so it is confined like any other caller-supplied
+  // component. Every production caller passes randomUUID(), but this is an exported seam
+  // and `writeExportFiles(tool, 'june/close', '../../elsewhere', …)` would otherwise land
+  // outside the validated out_dir — still inside the root, so the post-mkdir check below
+  // could not see it. Same argument that keeps the root parameter module-private, applied
+  // to the other side of the join.
+  if (exportId !== basename(exportId) || exportId === '' || exportId === '.' || exportId === '..') {
+    throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
+  }
+
+  // Root read ONCE and passed into both users. `exportRoot()` reads the environment, and
+  // the post-mkdir check below must be anchored to the same root `baseDirUnder` validated
+  // against; two independent reads could see a different RECONCIL_EXPORT_DIR (the export
+  // tests mutate it), making the re-check either vacuous against a wider root or a spurious
+  // INTERNAL against a narrower one. Passing it in is what enforces that — relying on the
+  // two calls sharing a synchronous tick would be an invariant the next `await` breaks
+  // silently.
   const root = exportRoot();
-  const dir = join(await baseDirUnder(root, outDir), exportId);
+  const base = await baseDirUnder(root, outDir);
+  const dir = join(base, exportId);
 
   const files: { name: string; path: string; sha256: string }[] = [];
   try {
     await mkdir(dir, { recursive: true });
-    // Anchored at the EXPORT ROOT, not at the out_dir-narrowed base. Anchoring at the base
-    // makes the check self-referential and unable to detect the very escape it is for:
-    // with out_dir 'june/close' and a symlink planted at <root>/june, realpath resolves
-    // BOTH sides through that symlink — realBase '/elsewhere/close', realTarget
-    // '/elsewhere/close/<uuid>' — and the prefix test passes. The root is the one path an
-    // attacker inside the export tree cannot move. (Verified: the base-anchored form wrote
-    // outside the root in a Linux container; see the branch's second review round.)
+    // Two questions, not one. (a) Is the finished directory still inside the export ROOT?
+    // Anchoring that at the out_dir-narrowed base instead makes the check self-referential
+    // and blind to the escape it exists for: with out_dir 'june/close' and a link planted
+    // at <root>/june, realpath resolves BOTH sides through it and the prefix test passes.
+    // (Verified: the base-anchored form wrote outside the root in a Linux container.)
+    // (b) Is it the SAME directory that was validated? Containment alone allows a link
+    // planted during the mkdir window to redirect the write ELSEWHERE INSIDE the root —
+    // another tenant's export folder — while the exports row and the tool response still
+    // report the logical out_dir path, leaving an audit trail that points at a directory
+    // holding none of the bytes. Equality against realpath(base)/exportId answers both.
+    const baseCheck = await realpathWithinBase(root, base);
     const check = await realpathWithinBase(root, dir);
-    if (!check.ok) {
-      // `mkdir -p` already ran, so a link planted during that window got a real directory
-      // created behind it, outside the root. No contents ever land there — that is what the
-      // check buys — but leaving the directory is a free write for the attacker and an
-      // orphan nobody reclaims (the next run mints a fresh exportId). Non-recursive rmdir:
-      // it removes only an empty directory, so it cannot destroy anything that was already
-      // there, and best-effort because failing to tidy up must not mask the refusal.
-      await rmdir(dir).catch(() => { /* nothing to reclaim, or not ours to remove */ });
-      throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
+    const expected = baseCheck.ok ? join(baseCheck.realTarget, exportId) : null;
+    if (!check.ok || expected === null || check.realTarget !== expected) {
+      // `mkdir -p` already ran, so a link planted in that window may have got a real
+      // directory created behind it. Best-effort, and it removes AT MOST THE LEAF: a
+      // non-recursive rmdir cannot take back the intermediate levels `mkdir -p` created,
+      // and on POSIX it fails outright when the planted entry is itself a symlink
+      // (ENOTDIR). No contents ever land there — that is what the check buys — so this is
+      // tidying, not containment, and failing to tidy must never mask the refusal.
+      await rmdir(dir).catch(() => { /* a link, or levels above it — not reclaimable here */ });
+      // The escaped/unresolvable discriminant is kept as the CAUSE (server-side only; the
+      // model still sees the generic INTERNAL, C6). "Somebody planted a link under the
+      // export root" and "the directory vanished mid-write" are the same message otherwise.
+      const why = !check.ok ? check.reason : 'redirected within the export root';
+      throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, new Error(`export dir confinement failed: ${why}`));
     }
     const realDir = check.realTarget;
     for (const f of rendered) {

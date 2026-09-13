@@ -271,6 +271,39 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
     expect(slots(events)).toEqual({ '1': -1000, '2': -1001 });
   });
 
+  it('a REPEATED label falls to the tuple — a repeated label is not a repeated row', () => {
+    // Two real value moves in one tx, both labelled '0'. Taking the label path here makes
+    // compareTraceIds tie and the sort fall to `a.arrival - b.arrival`, i.e. the provider's
+    // response order — which a re-fetch of the overlap boundary block, or a failover, can
+    // invert. The two would then hold each other's sentinels and ON CONFLICT DO NOTHING
+    // would stop matching (ADR-005 d2). The tuple separates them on their own content.
+    const forward = run([trace({ traceId: '0', value: '30' }), trace({ traceId: '0', value: '10' })]);
+    const reversed = run([trace({ traceId: '0', value: '10' }), trace({ traceId: '0', value: '30' })]);
+    expect(slots(forward)).toEqual({ '10': -1000, '30': -1001 });
+    // Same slots whichever order the provider served them in — that is the whole property.
+    expect(slots(reversed)).toEqual(slots(forward));
+  });
+
+  it('a label shape neither provider sends falls to the tuple rather than an invented order', () => {
+    // Trailing underscore: an empty segment. It is the one shape where the label comparator
+    // changed behaviour (ADR-005, amended 2026-09-13), so it must not reach it.
+    const forward = run([trace({ traceId: '0_', value: '30' }), trace({ traceId: '1', value: '10' })]);
+    const reversed = run([trace({ traceId: '1', value: '10' }), trace({ traceId: '0_', value: '30' })]);
+    expect(slots(forward)).toEqual({ '10': -1000, '30': -1001 });
+    expect(slots(reversed)).toEqual(slots(forward));
+  });
+
+  it('keys stay identical across a re-fetch that reorders the page', () => {
+    // The property the sentinel exists for, stated directly: (tx_hash, log_index) is a
+    // function of the row SET, so ON CONFLICT DO NOTHING still matches on a re-serve.
+    const items = [
+      trace({ traceId: '0_2', value: '30' }),
+      trace({ traceId: '0', value: '10' }),
+      trace({ traceId: '0_10', value: '20' }),
+    ];
+    expect(keys(run(items)).sort()).toEqual(keys(run([...items].reverse())).sort());
+  });
+
   it('falls back to a deterministic (from, to, value) tuple when the provider sends no trace id', () => {
     const events = run([trace({ value: '30' }), trace({ value: '10' }), trace({ value: '20' })]);
     expect(slots(events)).toEqual({ '10': -1000, '20': -1001, '30': -1002 });

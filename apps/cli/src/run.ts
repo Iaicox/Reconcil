@@ -229,9 +229,15 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
     if (unrunnable !== null) {
       console.error(`eval gate COULD NOT RUN: ${unrunnable.reason}`);
       console.error(`  → ${unrunnable.hint}`);
-      process.exit(EXIT_CANNOT_RUN);
+    } else {
+      console.error('eval run failed:', err);
     }
-    console.error('eval run failed:', err);
-    process.exit(1);
+    // `process.exitCode`, never `process.exit()`. On POSIX, stderr to a PIPE — which is what
+    // a CI log is — is asynchronous, and `process.exit()` calls reallyExit without draining
+    // libuv's write queue: the job can go red with a bare exit code and no explanation at
+    // all, which is strictly worse than the dump this replaced. Invisible locally, because a
+    // TTY writes synchronously. Setting the code and returning lets the process end on its
+    // own once the stream has drained.
+    process.exitCode = unrunnable !== null ? EXIT_CANNOT_RUN : 1;
   });
 }

@@ -145,3 +145,31 @@ describe('readExactly', () => {
     }
   });
 });
+
+describe('readImportFile — an unservable cap is the operator\'s problem, said plainly', () => {
+  it('refuses a cap larger than the largest allocatable buffer, as INTERNAL not INVALID_INPUT', async () => {
+    // Buffer.allocUnsafe throws above buffer.constants.MAX_LENGTH, and that throw lands in
+    // the generic catch — where it would surface as "file_path could not be read", blaming
+    // the caller's path for the operator's environment variable. Nothing the model did is
+    // wrong here, so INVALID_INPUT would be a lie.
+    process.env.RECONCIL_IMPORT_MAX_BYTES = String(Number.MAX_SAFE_INTEGER);
+    await writeFile(join(dir, 'ok.csv'), 'a,b\n1,2\n');
+    try {
+      await readImportFile('ok.csv');
+      expect.unreachable('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ToolError);
+      expect((err as ToolError).code).toBe('INTERNAL');
+      expect((err as ToolError).message).toMatch(/size limit is misconfigured/);
+    }
+  });
+
+  it('still serves a large-but-allocatable cap rather than silently narrowing it', async () => {
+    // The regression the 512 MB ceiling caused: an operator asking for 1 GB got 8 MB and a
+    // rejection naming a limit they never set.
+    process.env.RECONCIL_IMPORT_MAX_BYTES = '1000000000';
+    const body = 'external_ref,amount\nINV-1,10\n';
+    await writeFile(join(dir, 'big-cap.csv'), body);
+    await expect(readImportFile('big-cap.csv')).resolves.toBe(body);
+  });
+});

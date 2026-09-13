@@ -16,7 +16,8 @@ import { describe, expect, it } from 'vitest';
 
 import { classifyUnrunnable } from '../src/evals/runnability.js';
 
-/** The shape the Anthropic SDK throws: a status plus the parsed error body. */
+/** The shape the Anthropic SDK throws: a status plus the parsed error body. Other shapes —
+ *  what a gateway might return — are covered separately below. */
 function apiError(status: number, type: string, message: string): unknown {
   return Object.assign(new Error(`${String(status)} ${message}`), {
     status,
@@ -52,11 +53,34 @@ describe('classifyUnrunnable', () => {
     expect(classifyUnrunnable(apiError(500, 'api_error', 'internal'))).toBeNull();
   });
 
-  it('returns null for anything that is not an API error at all', () => {
+  it('returns null for anything that carries no HTTP status', () => {
     expect(classifyUnrunnable(new Error('assertion failed'))).toBeNull();
     expect(classifyUnrunnable('a string')).toBeNull();
     expect(classifyUnrunnable(null)).toBeNull();
-    expect(classifyUnrunnable({ status: 401 })).toBeNull(); // no error body — not the SDK shape
+    expect(classifyUnrunnable({ error: { error: { message: 'no status here' } } })).toBeNull();
+  });
+
+  it('classifies on STATUS, not on the shape of the body a gateway returned', () => {
+    // CI may point ANTHROPIC_BASE_URL at a gateway, and this repo has already met one that
+    // returned a non-Anthropic body. Requiring the SDK's nested error.error shape sent every
+    // such response down the raw-dump path — precisely when the operator most needs telling
+    // that the gate could not run.
+    expect(classifyUnrunnable({ status: 401 })).not.toBeNull();
+    expect(classifyUnrunnable({ status: 429, error: 'rate limited' })).not.toBeNull();
+    expect(classifyUnrunnable({ status: 403, error: { message: 'flat body' } })).not.toBeNull();
+  });
+
+  it('finds the billing signature wherever in the body it arrives', () => {
+    // The 400 branch is the only one that reads the message, so it is the only one a
+    // reshaped body can silently defeat.
+    for (const shaped of [
+      { status: 400, error: { error: { message: 'Your credit balance is too low' } } },
+      { status: 400, error: { message: 'Your credit balance is too low' } },
+      { status: 400, error: 'Your credit balance is too low' },
+      Object.assign(new Error('400 Your credit balance is too low'), { status: 400 }),
+    ]) {
+      expect(classifyUnrunnable(shaped), JSON.stringify(shaped)).not.toBeNull();
+    }
   });
 
   it('carries a hint that says what to DO, not just what happened', () => {
