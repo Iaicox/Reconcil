@@ -7,7 +7,7 @@
  * helper re-resolves the finished directory so the thing written into is the thing that was
  * validated.
  */
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -47,24 +47,24 @@ const symlinksWork = await (async (): Promise<boolean> => {
 })();
 
 describe('realpathDirWithinBase', () => {
-  it('accepts a real directory inside the base', async () => {
+  it('accepts a real directory inside the base, returning the resolved path to write through', async () => {
     const dir = join(base, 'a', 'b');
     await mkdir(dir, { recursive: true });
-    expect(await realpathDirWithinBase(base, dir)).toBe(true);
+    expect(await realpathDirWithinBase(base, dir)).toBe(await realpath(dir));
   });
 
   it('accepts the base itself', async () => {
-    expect(await realpathDirWithinBase(base, base)).toBe(true);
+    expect(await realpathDirWithinBase(base, base)).toBe(await realpath(base));
   });
 
   it('rejects a directory that does not exist — removed underneath us is not writable', async () => {
-    expect(await realpathDirWithinBase(base, join(base, 'never-created'))).toBe(false);
+    expect(await realpathDirWithinBase(base, join(base, 'never-created'))).toBeNull();
   });
 
   it('rejects a sibling whose path merely shares the base prefix', async () => {
     const evil = join(root, 'exports-evil');
     await mkdir(evil, { recursive: true });
-    expect(await realpathDirWithinBase(base, evil)).toBe(false);
+    expect(await realpathDirWithinBase(base, evil)).toBeNull();
   });
 
   it.runIf(symlinksWork)('rejects a symlink planted under the base that points outside it', async () => {
@@ -77,7 +77,7 @@ describe('realpathDirWithinBase', () => {
     const planted = join(base, 'run-uuid');
     await symlink(outside, planted, 'dir');
 
-    expect(await realpathDirWithinBase(base, planted)).toBe(false);
+    expect(await realpathDirWithinBase(base, planted)).toBeNull();
   });
 
   it.runIf(symlinksWork)('accepts a symlink under the base that points back inside it', async () => {
@@ -86,6 +86,8 @@ describe('realpathDirWithinBase', () => {
     const link = join(base, 'link');
     await symlink(real, link, 'dir');
 
-    expect(await realpathDirWithinBase(base, link)).toBe(true);
+    // …and it hands back the RESOLVED target, not the link, so the caller writes into the
+    // real directory rather than re-traversing the symlink on every file.
+    expect(await realpathDirWithinBase(base, link)).toBe(await realpath(real));
   });
 });

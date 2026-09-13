@@ -77,8 +77,18 @@ export async function readImportFile(filePath: string): Promise<string> {
     throw new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory');
   }
   try {
-    const { size } = await fh.stat();
-    if (size > maxFileBytes()) {
+    const stats = await fh.stat();
+    // Regular files only. A FIFO, socket or device node reports size 0, which sails past
+    // the cap below and then streams without bound into readFile — so the cap would be
+    // guarding nothing at all for exactly the planted-file case it exists for. (The open()
+    // above can also block forever on a writer-less FIFO, consuming one of libuv's four
+    // threadpool threads; four of those wedge every filesystem operation in the process.
+    // That window is not closed here — it needs O_NONBLOCK, which Node's promises API does
+    // not expose — but a non-regular file is refused the moment it is observable.)
+    if (!stats.isFile()) {
+      throw new ToolError('INVALID_INPUT', 'file_path is not a regular file');
+    }
+    if (stats.size > maxFileBytes()) {
       throw new ToolError('INVALID_INPUT', `file exceeds the ${String(maxFileBytes())}-byte import limit`);
     }
     return await fh.readFile('utf8');
@@ -88,6 +98,10 @@ export async function readImportFile(filePath: string): Promise<string> {
     if (err instanceof ToolError) throw err;
     throw new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory');
   } finally {
-    await fh.close();
+    // Swallowed deliberately: a rejection from a `finally` REPLACES the outcome of the
+    // try/catch, so an EIO on close would turn a fully-read CSV into a raw fs error, and
+    // would overwrite the generic ToolError above with the underlying message this module
+    // exists to keep off the wire (C6).
+    await fh.close().catch(() => { /* the read already succeeded or already failed */ });
   }
 }

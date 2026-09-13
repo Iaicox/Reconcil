@@ -63,7 +63,13 @@ export type GuardrailKind = z.infer<typeof guardrailKind>;
 const expectSchema = z
   .object({
     tools_expected: z.array(toolName).optional(),
-    tools_any_of: z.array(toolName).min(2).optional(),
+    tools_any_of: z
+      .array(toolName)
+      // Message stated, not left to Zod's generic "too_small": the rule is a judgment
+      // ("a set of one is a plain expectation"), and its test pins this text rather than
+      // a bare .toThrow() that any unrelated schema error would also satisfy.
+      .min(2, { message: 'tools_any_of needs at least two tools — a set of one is a plain tools_expected' })
+      .optional(),
     writes_allowed: z.array(toolName).optional(),
     no_tools: z.boolean().optional(),
     numbers: z.array(z.object({ value: decimalString, label: z.string() }).strict()).optional(),

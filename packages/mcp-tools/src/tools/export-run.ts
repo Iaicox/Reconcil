@@ -11,7 +11,7 @@ import { join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
-import { isZero, type RenderedExport } from '@reconcil/exporters';
+import { isZero, type RenderedExport, type RenderedFile } from '@reconcil/exporters';
 
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
@@ -66,35 +66,59 @@ export async function baseDir(outDir?: string): Promise<string> {
   return resolved;
 }
 
+/**
+ * Create this export's `<exportId>/` directory under the confined base and write its files
+ * into it. Shared by every export tool: `export_journal_drafts` used to carry its own copy
+ * of this `mkdir`+`writeFile` pair, which meant the hardening below reached only the tools
+ * routed through `runExport` while the register claimed the write path was covered.
+ *
+ * Three things beyond a plain write, all for the same co-resident-writer threat:
+ *  - `baseDir` is computed ONCE (it is two realpath walks and it can throw INVALID_INPUT;
+ *    recomputing it inside the write block let that surface after `mkdir` had succeeded);
+ *  - after `mkdir -p`, the finished directory is re-resolved — `baseDir`'s check could only
+ *    vouch for segments that existed then, and every segment created since, including
+ *    `<exportId>/` itself, went unvalidated;
+ *  - writes go through the RESOLVED directory with `{ flag: 'wx' }` — create, never follow
+ *    or truncate. The directory is a fresh UUID, so anything already at that path was
+ *    planted, and a plain `writeFile` would follow it straight out of the export root.
+ */
+export async function writeExportFiles(
+  toolName: string,
+  outDir: string | undefined,
+  exportId: string,
+  rendered: readonly RenderedFile[],
+): Promise<{ dir: string; files: { name: string; path: string; sha256: string }[] }> {
+  const base = await baseDir(outDir);
+  const dir = join(base, exportId);
+
+  const files: { name: string; path: string; sha256: string }[] = [];
+  try {
+    await mkdir(dir, { recursive: true });
+    const realDir = await realpathDirWithinBase(base, dir);
+    if (realDir === null) {
+      throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
+    }
+    for (const f of rendered) {
+      const path = join(realDir, f.name);
+      await writeFile(path, f.content, { flag: 'wx' });
+      files.push({ name: f.name, path, sha256: f.sha256 });
+    }
+    // The RESOLVED dir is what gets recorded on the exports row too — storing the
+    // unresolved string would persist a path that points somewhere else.
+    return { dir: realDir, files };
+  } catch (err) {
+    if (err instanceof ToolError) throw err;
+    throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, err);
+  }
+}
+
 export async function runExport<T>(
   opts: ExportRunOptions,
   outputSchema: { parse: (v: unknown) => T },
 ): Promise<ToolEnvelope<T>> {
   const { ctx, data, rendered, provenance } = opts;
-  const dir = join(await baseDir(opts.outDir), provenance.exportId);
 
-  const files: { name: string; path: string; sha256: string }[] = [];
-  try {
-    await mkdir(dir, { recursive: true });
-    // Second look, now that the directory exists. baseDir()'s check ran against the deepest
-    // ancestor that existed THEN; every segment created since — including this export's own
-    // `<uuid>/` — went unvalidated, and a co-resident writer racing the mkdir can redirect
-    // one with a symlink. Cheap (two realpaths) and it fails before the first byte.
-    if (!(await realpathDirWithinBase(await baseDir(opts.outDir), dir))) {
-      throw new ToolError('INTERNAL', `${opts.toolName} failed to write export files`);
-    }
-    for (const f of rendered.files) {
-      const path = join(dir, f.name);
-      // 'wx': create, never follow or truncate an existing entry. The directory is a fresh
-      // UUID so nothing legitimate is ever there — if something is, it was planted, and
-      // plain writeFile would happily follow it out of the export root.
-      await writeFile(path, f.content, { flag: 'wx' });
-      files.push({ name: f.name, path, sha256: f.sha256 });
-    }
-  } catch (err) {
-    if (err instanceof ToolError) throw err;
-    throw new ToolError('INTERNAL', `${opts.toolName} failed to write export files`, undefined, err);
-  }
+  const { dir, files } = await writeExportFiles(opts.toolName, opts.outDir, provenance.exportId, rendered.files);
 
   // Build + validate the output BEFORE any DB write, so a contract violation can't
   // leave an orphan `done` exports row (the files already on disk are harmless).

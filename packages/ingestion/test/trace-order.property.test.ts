@@ -63,8 +63,23 @@ describe('compareTraceIds is a consistent comparator', () => {
     expect(compareTraceIds('2', '10')).toBeLessThan(0);
     expect(compareTraceIds('0_2', '0_10')).toBeLessThan(0);
     expect(compareTraceIds('0_1', '0_1_0')).toBeLessThan(0);
-    // Leading zeros are still the same number, and the tiebreak is deterministic.
-    expect(compareTraceIds('007', '7')).toBe(0);
+    // Leading zeros are the same NUMBER, so the segment comparison is a tie — but the two
+    // labels are distinct, so the comparator must still separate them rather than return 0
+    // and let the caller's arrival-order tiebreak decide (ADR-005 d2).
+    expect(compareTraceIds('007', '7')).toBeLessThan(0);
+    expect(compareTraceIds('7', '007')).toBeGreaterThan(0);
+  });
+
+  it('never returns 0 for two DISTINCT labels — the caller must not fall to arrival order', () => {
+    // The sentinel log_index is assigned from this sort, and it is half the ADR-005
+    // idempotency key. A tie between distinct labels hands that assignment to the
+    // provider's response order, which a re-fetch or a failover can invert.
+    fc.assert(
+      fc.property(traceId, traceId, (a, b) => {
+        if (a !== b) expect(compareTraceIds(a, b)).not.toBe(0);
+      }),
+      { numRuns: 3000 },
+    );
   });
 
   it('does not read non-decimal notations as numbers', () => {

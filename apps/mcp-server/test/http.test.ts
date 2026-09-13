@@ -155,23 +155,14 @@ describe('buildHttpApp — DNS-rebinding Host validation (minor, defense-in-dept
     });
   }
 
-  it('an EXPLICIT empty allowedHosts falls back to the defaults instead of disabling the check', async () => {
+  it('an EXPLICIT empty allowedHosts is refused, not silently replaced', async () => {
     // `[]` is not nullish, so `deps.allowedHosts ?? resolveAllowedHosts(...)` used to keep
     // it — and the SDK guards its Host check with `allowedHosts.length > 0`, so an empty
     // list turns DNS-rebinding protection OFF rather than making it strict. Fail-open, and
     // invisible: every request simply succeeds. Not reachable from config
     // (resolveAllowedHosts already collapses an empty env list to the defaults), but the
     // injectable seam must not be able to express what the config path cannot.
-    const app = await appWithHosts([]);
-    const res = await app.inject({
-      method: 'POST',
-      url: '/mcp',
-      headers: { 'content-type': 'application/json', authorization: 'Bearer good', host: 'evil.example:8484' },
-      payload: rpc,
-    });
-    expect(res.statusCode).toBeGreaterThanOrEqual(400);
-    expect(res.json<{ error?: { message?: string } }>().error?.message).toContain('Invalid Host header');
-    await app.close();
+    await expect(appWithHosts([])).rejects.toThrow(/at least one host/i);
   });
 
   it('mismatched Host header is rejected before reaching protocol logic', async () => {

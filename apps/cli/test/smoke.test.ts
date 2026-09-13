@@ -1,7 +1,7 @@
 import type { EvalCase } from '@reconcil/evals';
 import { describe, expect, it } from 'vitest';
 
-import { SMOKE_IDS, selectSmokeDataset } from '../src/evals/smoke.js';
+import { SMOKE_IDS, buildSmokeIds, selectSmokeDataset } from '../src/evals/smoke.js';
 
 function fakeCase(id: string): EvalCase {
   return { id, face: 'A', question: 'q', expect: {} };
@@ -41,14 +41,20 @@ describe('selectSmokeDataset', () => {
     const all = [...SMOKE_IDS].map((id) => fakeCase(id));
     expect(selectSmokeDataset(all)).toHaveLength(SMOKE_IDS.size);
   });
-  it('a duplicate id in the literal is loud, not a silently smaller smoke', () => {
+
+  it('a duplicate id in the list is loud, not a silently smaller smoke', () => {
     // The failure this guards: `new Set([...])` absorbs a repeat, `ids.size` drops to 5,
     // and selectSmokeDataset's `length === size` check is then satisfied by 5 cases — a
-    // smoke one case smaller than intended, reporting a clean match. The dataset-side
-    // duplicate check below is a different mistake and does not cover this one.
-    const withDupe = ['cover-001', 'flow-001', 'cover-001'];
-    expect(new Set(withDupe).size).not.toBe(withDupe.length);
-    // SMOKE_IDS is built under that assertion, so the real one is intact:
+    // smoke one case smaller than intended, reporting a clean match. (selectSmokeDataset's
+    // own duplicate check is about duplicates in the DATASET; different mistake.)
+    expect(() => buildSmokeIds(['cover-001', 'flow-001', 'cover-001'])).toThrow(
+      'duplicate id(s): cover-001',
+    );
+    // …and it names every repeat, not just the first.
+    expect(() => buildSmokeIds(['a', 'a', 'b', 'b'])).toThrow('duplicate id(s): a, b');
+    // A clean list passes through unchanged.
+    expect(buildSmokeIds(['a', 'b']).size).toBe(2);
+    // The real one is built through that guard.
     expect(SMOKE_IDS.size).toBe(6);
   });
 });

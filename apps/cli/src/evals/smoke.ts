@@ -19,15 +19,23 @@ import type { EvalCase } from '@reconcil/evals';
  */
 const SMOKE_ID_LIST = ['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001', 'recon-status-001'] as const;
 
-export const SMOKE_IDS: ReadonlySet<string> = (() => {
-  const set = new Set<string>(SMOKE_ID_LIST);
-  if (set.size !== SMOKE_ID_LIST.length) {
+/**
+ * Exported so the guard can be exercised with a duplicate list. Inlined as an IIFE it was
+ * unreachable by construction — SMOKE_ID_LIST is a module-private literal — and a test
+ * could only assert that `new Set` de-duplicates, which is a property of Set, not of this
+ * module. A guard no test can execute is a guard nobody knows still works.
+ */
+export function buildSmokeIds(list: readonly string[]): ReadonlySet<string> {
+  const set = new Set<string>(list);
+  if (set.size !== list.length) {
     const seen = new Set<string>();
-    const dupes = SMOKE_ID_LIST.filter((id) => (seen.has(id) ? true : (seen.add(id), false)));
-    throw new Error(`SMOKE_ID_LIST contains duplicate id(s): ${[...new Set(dupes)].join(', ')}`);
+    const dupes = new Set(list.filter((id) => (seen.has(id) ? true : (seen.add(id), false))));
+    throw new Error(`smoke id list contains duplicate id(s): ${[...dupes].join(', ')}`);
   }
   return set;
-})();
+}
+
+export const SMOKE_IDS: ReadonlySet<string> = buildSmokeIds(SMOKE_ID_LIST);
 
 /**
  * Filter `all` down to `ids` and assert every id actually matched exactly once — mirrors

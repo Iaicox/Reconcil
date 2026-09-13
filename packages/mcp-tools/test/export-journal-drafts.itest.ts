@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ToolContext } from '../src/context.js';
 import { ToolError } from '../src/errors.js';
+import { hydrateFxRefs, hydratePriceRefs } from '../src/pricing-refs.js';
 import { exportJournalDrafts } from '../src/tools/export-journal-drafts.js';
 
 let container: StartedPostgreSqlContainer;
@@ -335,5 +336,49 @@ describe('export_journal_drafts — out_dir confinement (security, H2)', () => {
     const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: 'june/close' });
     expect(env.data.file.path).toContain(join(outDir, 'june', 'close'));
     await expect(readFile(env.data.file.path)).resolves.toBeTruthy();
+  });
+});
+
+/**
+ * Ref hydration order (P1/P2). Lives HERE, in the caller's own itest, rather than in a file
+ * of its own: this tool is the consumer whose `[...priceRefMap.values()]` becomes the
+ * envelope's citation ARRAY, so the ordering is tested where it actually reaches the wire —
+ * and it reuses this container instead of adding a twentieth to the suite.
+ *
+ * The assertions pin ascending id. They do not try to PROVOKE the old instability: a seq
+ * scan on a handful of rows often comes back sorted anyway, so a test that waited for the
+ * planner to misbehave would pass vacuously. Pinning the contract is what makes a future
+ * `ORDER BY` removal fail — and it does: without it this suite measured Postgres returning
+ * the rows in DESCENDING id.
+ */
+describe('pricing ref hydration is run-stable (P1/P2)', () => {
+  it('returns price refs in ascending snapshot id, whatever order the ids were asked for', async () => {
+    const weth = await seedVolatileToken();
+    const ids: number[] = [];
+    for (const [date, price] of [['2026-06-01', '1000'], ['2026-06-02', '1100'], ['2026-06-03', '1200'], ['2026-06-04', '1300']] as const) {
+      ids.push(await seedSnapshot(weth, price, date));
+    }
+    const sorted = [...ids].sort((a, b) => a - b);
+
+    const map = await hydratePriceRefs(db, [ids[2]!, ids[0]!, ids[3]!, ids[1]!]);
+    expect([...map.keys()]).toEqual(sorted);
+    expect([...map.values()].map((r) => r.snapshot_id)).toEqual(sorted);
+  });
+
+  it('returns fx refs in ascending fx_rate id', async () => {
+    const ids: number[] = [];
+    for (const date of ['2026-06-01', '2026-06-02', '2026-06-03']) {
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO fx_rates (rate_date, base_currency, quote_currency, rate, source)
+         VALUES ($1,'USD','EUR','0.92','ecb') RETURNING id`,
+        [date],
+      );
+      ids.push(Number(rows[0]!.id));
+    }
+    const sorted = [...ids].sort((a, b) => a - b);
+
+    const map = await hydrateFxRefs(db, [ids[1]!, ids[2]!, ids[0]!]);
+    expect([...map.keys()]).toEqual(sorted);
+    expect([...map.values()].map((r) => r.fx_rate_id)).toEqual(sorted);
   });
 });

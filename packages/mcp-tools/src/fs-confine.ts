@@ -70,12 +70,17 @@ async function realpathExistingAncestor(path: string): Promise<string> {
  * existed at validation time; the segments created afterwards were never checked, and a
  * co-resident writer racing the `mkdir` can plant a symlink among them. Re-resolving the
  * finished directory confirms the thing about to be written into is the thing that was
- * validated. Returns false if either path cannot be resolved — missing means something
+ * validated.
+ *
+ * Returns the RESOLVED directory, which the caller must then write through — returning a
+ * bare boolean would leave the caller building paths from the unresolved string, so every
+ * write would re-traverse the very symlinks this check just resolved past and the check
+ * would narrow nothing. `null` if either path cannot be resolved: missing means something
  * removed it underneath us, which is not a state to write into.
  */
-export async function realpathDirWithinBase(base: string, dir: string): Promise<boolean> {
+export async function realpathDirWithinBase(base: string, dir: string): Promise<string | null> {
   const check = await realpathWithinBase(base, dir);
-  return check.ok;
+  return check.ok ? check.realTarget : null;
 }
 
 /**

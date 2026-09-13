@@ -86,13 +86,16 @@ describe('parseDataset', () => {
   });
 
   it('throws on a tools_any_of of one — a set of one is a plain expectation', () => {
+    // Pinned, not a bare .toThrow(): unpinned, this stays green if .min(2) is deleted and
+    // the case happens to fail on an unrelated refine or a typo in the fixture string —
+    // i.e. it would stop proving the rule fires. Same standard as its siblings below.
     expect(() =>
       parseDataset(`- id: x
   face: A
   question: q
   expect: { tools_any_of: [analytics_flows] }
 `),
-    ).toThrow();
+    ).toThrow(/at least two tools/i);
   });
 
   it('throws on a duplicate inside tools_any_of — it would shrink the set silently', () => {

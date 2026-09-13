@@ -189,16 +189,20 @@ export interface HttpDeps {
 export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   const { db, logger } = deps;
   const authenticate = deps.authenticate ?? ((h) => bearerTenant(db, h));
-  // Length-checked, not `??`: `[]` is not nullish, so an explicit empty array used to pass
-  // straight through — and the SDK guards its Host check with `allowedHosts.length > 0`,
-  // which means an empty list turns DNS-rebinding protection OFF rather than making it
-  // maximally strict. Fail-open and silent. resolveAllowedHosts already collapses an empty
-  // RECONCIL_ALLOWED_HOSTS to the defaults, so this makes the injectable seam agree with the
-  // config path instead of being able to express a state production cannot reach.
-  const allowedHosts =
-    deps.allowedHosts !== undefined && deps.allowedHosts.length > 0
-      ? deps.allowedHosts
-      : resolveAllowedHosts({ PORT: DEFAULT_PORT });
+  // An explicit `[]` is REJECTED, not quietly replaced. `[]` is not nullish, so it used to
+  // slip past a `??` — and the SDK guards its Host check with `allowedHosts.length > 0`,
+  // so an empty list turns DNS-rebinding protection OFF rather than making it maximally
+  // strict. Substituting the defaults instead would fix the fail-open but introduce a third
+  // state: neither what the caller asked for nor what the config path produces, with nothing
+  // said about it. `resolveAllowedHosts` already collapses an empty RECONCIL_ALLOWED_HOSTS
+  // to the defaults, so `[]` reaching here means a caller meant something this seam cannot
+  // honour, and the honest answer is to say so.
+  if (deps.allowedHosts !== undefined && deps.allowedHosts.length === 0) {
+    throw new Error(
+      'allowedHosts must name at least one host — an empty list disables DNS-rebinding protection entirely. Omit it to use the defaults.',
+    );
+  }
+  const allowedHosts = deps.allowedHosts ?? resolveAllowedHosts({ PORT: DEFAULT_PORT });
   const ipRateLimitPolicy = deps.ipRateLimit ?? { max: 600, timeWindow: '1 minute' };
   const tenantRateLimitPolicy = deps.tenantRateLimit ?? { max: 120, timeWindow: '1 minute' };
   // Built as a typed value rather than spread inline: a union-typed `trustProxy` in an

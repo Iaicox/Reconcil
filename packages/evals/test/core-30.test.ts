@@ -63,7 +63,12 @@ describe('core-30 dataset', () => {
     // The sibling stablecoin cases stay single-tool on purpose — they name stablecoins
     // outright, so the specialised tool IS the expected answer.
     for (const id of ['stable-001', 'stable-002', 'flow-001', 'flow-003-self-transfer']) {
-      expect(cases.find((c) => c.id === id)?.expect.tools_any_of).toBeUndefined();
+      const sibling = cases.find((c) => c.id === id);
+      // Asserted to EXIST first: `find(...)?.expect.tools_any_of` is undefined for a case
+      // that was renamed away, which is exactly what the assertion below demands — the
+      // guard would go quiet at the moment the drift it watches for happens.
+      expect(sibling, `sibling case ${id} is gone — rename it here or restore it`).toBeDefined();
+      expect(sibling!.expect.tools_any_of).toBeUndefined();
     }
   });
 

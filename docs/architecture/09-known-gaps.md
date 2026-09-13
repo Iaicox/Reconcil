@@ -187,20 +187,29 @@ fixing found the description understated one half and overstated the other.
 read consumed whatever the path pointed at by then. That is not a theoretical window: it is
 a straightforward bypass of the only thing standing between a hostile `file_path` and an
 unbounded read. Now a single `open`, with `fh.stat()` and `fh.readFile()` on that
-descriptor, so check and use cannot refer to different files. The export write path gained
-its own second look: `realpathAncestorWithinBase` can only vouch for segments that existed
-at validation time, so after `mkdir -p` the finished directory is re-resolved
-(`realpathDirWithinBase`), and files are written `{ flag: 'wx' }` — create, never follow or
+descriptor, so check and use cannot refer to different files. `fh.stat().isFile()` also
+refuses a FIFO/socket/device node, which reports size 0 and would otherwise sail past the
+cap and stream without bound. The export write path gained its own second look:
+`realpathAncestorWithinBase` can only vouch for segments that existed at validation time, so
+after `mkdir -p` the finished directory is re-resolved (`realpathDirWithinBase`), writes go
+through the RESOLVED path, and files are written `{ flag: 'wx' }` — create, never follow or
 truncate — since the per-export `<uuid>/` is fresh and anything already at that path was
-planted.
+planted. All of that lives in ONE helper (`writeExportFiles`) that every export tool routes
+through: `export_journal_drafts` carried its own copy of the `mkdir`+`writeFile` pair, so
+the first version of this fix reached every export tool except that one — while this entry
+claimed the write path was covered.
 
 *Still open:* the window between `realpath` and `open` itself. Closing it needs an
 `O_NOFOLLOW`-per-segment walk (or `openat`, which Node does not expose), which is a
-different slice. Why deferred: the threat model is a co-resident writer with filesystem
+different slice. Separately, `open()` on a writer-less FIFO blocks forever and holds one of
+libuv's four threadpool threads; four such calls wedge every filesystem operation in the
+process. Refusing non-regular files closes the read, not the open — that needs `O_NONBLOCK`,
+also unavailable through the promises API. Why deferred: the threat model is a co-resident writer with filesystem
 access to the export/import root — already inside the trust boundary those roots assume —
 not the model-controlled-input threat (H2) the confinement logic was built to close.
 Trigger: if either root is ever shared with a less-trusted co-tenant process. Where:
-`packages/mcp-tools/src/fs-confine.ts`, `src/tools/export-run.ts`, `src/recon/import-fs.ts`.
+`packages/mcp-tools/src/fs-confine.ts`, `src/tools/export-run.ts`
+(`writeExportFiles`), `src/tools/export-journal-drafts.ts`, `src/recon/import-fs.ts`.
 *(Task 2, `fix/export-out-dir`; narrowed on `fix/evals-any-of-and-known-gaps`)*
 
 **`fs-confine.ts`'s prefix comparison is case-sensitive on Windows.** Inherited behavior,

@@ -11,14 +11,6 @@ import type { Erc20WithMeta } from './logindex.js';
 const INTERNAL_SENTINEL_BASE = -1000;
 
 /**
- * Order two traces of the same parent tx by the provider's trace label. Etherscan
- * sends a dotted DFS path ("0", "0_1", "0_10"), Blockscout a plain ordinal ("67");
- * both compare component-wise and numerically, so "0_2" precedes "0_10" (a lexical
- * sort would invert them) and a shorter path precedes its own extensions. A
- * non-numeric component falls back to text order — an unknown labelling scheme
- * still yields a total, deterministic order, which is all the caller needs.
- */
-/**
  * Decimal-digits only. `Number()` was the old test and it is far too generous for a trace
  * label: it reads '' as 0, '0x10' as 16 and '1e3' as 1000, putting three non-numeric
  * segments into the numeric class. Real Etherscan/Blockscout trace ids are digits and
@@ -39,7 +31,8 @@ const DECIMAL_SEGMENT = /^[0-9]+$/;
  *
  * The rule that removes the cycle: the two classes are totally ordered against each other
  * (every numeric segment sorts before every non-numeric one) instead of being compared by a
- * measure that only makes sense inside one class.
+ * measure that only makes sense inside one class. And two DISTINCT labels never compare
+ * equal, so the caller's arrival-order tiebreak is only ever reached for a genuine repeat.
  */
 export function compareTraceIds(a: string, b: string): number {
   const pa = a.split('_');
@@ -65,6 +58,15 @@ export function compareTraceIds(a: string, b: string): number {
     if (numA !== numB) return numA ? -1 : 1;
     return xa < xb ? -1 : 1;
   }
+  // Every segment compared equal. If the LABELS still differ — "007" vs "7", equal as
+  // numbers — returning 0 would hand the ordering to the caller's `a.arrival - b.arrival`
+  // tiebreak, i.e. to the provider's response order. That is precisely the arrival-order
+  // dependence ADR-005 d2 forbids: re-fetching the tx at an overlap boundary, or after a
+  // failover, can return the rows the other way round, and the two would then get each
+  // other's sentinel — ON CONFLICT DO NOTHING no longer dedupes, one value move is stored
+  // twice and another is lost. The raw string is a total order, so distinct labels get a
+  // stable relative position that depends on nothing but the labels themselves.
+  if (a !== b) return a < b ? -1 : 1;
   return 0;
 }
 

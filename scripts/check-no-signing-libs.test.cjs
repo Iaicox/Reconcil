@@ -251,7 +251,36 @@ test('a violation outranks an unreadable second lockfile — exit 1, and says th
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('an unreadable FIRST lockfile does not stop the scan of the second', () => {
+// Only findOffendersInNpmLock can THROW (JSON.parse, plus its lockfileVersion-shape guard);
+// findOffendersInPnpmLock is a line scanner that returns an empty set for any garbage. So the
+// parse-failure branch of main() is reachable only through the SECOND lockfile, and "an
+// unparseable FIRST lockfile" is not a state this guard can be put into — the first-lockfile
+// case below stages a MISSING one, which is the branch that actually exists.
+const MALFORMED_NPM = '{ "lockfileVersion": 1, "dependencies": {} }';
+
+test('an unparseable second lockfile is reported and exits 2 when nothing else is wrong', () => {
+  const root = stage({ pnpmLock: CLEAN_PNPM, npmLock: MALFORMED_NPM });
+  try {
+    const { code, stderr } = run(root);
+    assert.equal(code, 2);
+    assert.ok(stderr.includes('cannot run'), stderr);
+    assert.ok(stderr.includes('no "packages" map'), stderr);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a violation outranks an UNPARSEABLE second lockfile — exit 1, scan marked partial', () => {
+  // This is the case that exercises the parse-failure `continue`. Pre-fix it exited 2,
+  // reporting "cannot run" over a banned package printed one line earlier.
+  const root = stage({ pnpmLock: DIRTY_PNPM, npmLock: MALFORMED_NPM });
+  try {
+    const { code, stderr } = run(root);
+    assert.equal(code, 1);
+    assert.ok(stderr.includes('ADR-011 violation'), stderr);
+    assert.ok(stderr.includes('may be incomplete'), stderr);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a missing FIRST lockfile does not stop the scan of the second', () => {
   // Pre-fix the loop exited on the first failure, so a violation in site/ went unreported.
   const root = stage({
     pnpmLock: null,
@@ -260,6 +289,6 @@ test('an unreadable FIRST lockfile does not stop the scan of the second', () => 
   try {
     const { code, stderr } = run(root);
     assert.equal(code, 1);
-    assert.match(stderr, /site\/package-lock\.json/);
+    assert.ok(stderr.includes('site/package-lock.json'), stderr);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
