@@ -22,20 +22,23 @@ import { inspect } from 'node:util';
 
 import Anthropic from '@anthropic-ai/sdk';
 
+import { UsageError } from './usage-error.js';
+
+
+/** Re-exported for callers that already reach for the classifier; the class itself lives in
+ *  its own SDK-free module so the argv router and the arg parser stay light. */
+export { UsageError };
 
 /** Exit code for "the gate could not run" — 1 stays "the gate ran and failed". */
 export const EXIT_CANNOT_RUN = 2;
 
 /**
- * A bad invocation: an unknown flag, `--runs 0`, a `--cases` id that is not in the dataset.
- * Its own class because the exit code has to tell it apart from a gate failure — the suite
- * never started, so reporting 1 ("the gate ran and missed") sends the reader to a diff that
- * cannot explain it. Same reasoning that moved the missing-ANTHROPIC_API_KEY branch to 2.
+ * None of these reasons claims "so no case ever ran". They used to, and it is not knowable
+ * here: credit runs out, a key is rotated, or a permission is revoked MID-suite far more
+ * often than before it starts — and run.ts writes a partial scorecard in exactly that case,
+ * so the two lines contradicted each other in the same CI log, telling the reader to ignore
+ * sixty real graded results. The classifier sees the error, not the progress.
  */
-export class UsageError extends Error {
-  override readonly name = 'UsageError';
-}
-
 export interface Unrunnable {
   /** One line, for the top of a CI log. */
   reason: string;
@@ -134,18 +137,18 @@ export function classifyUnrunnable(err: unknown): Unrunnable | null {
       // is a contract break and belongs to the gate.
       return /credit balance/i.test(message)
         ? {
-            reason: 'the Anthropic account has no credit left, so no case ever ran',
+            reason: 'the Anthropic account has no credit left',
             hint: 'top up the key in Plans & Billing, then re-run the job — nothing about this branch is implicated',
           }
         : null;
     case 401:
       return {
-        reason: 'the API key was rejected, so no case ever ran',
+        reason: 'the API key was rejected',
         hint: 'check the ANTHROPIC_API_KEY secret (rotated? wrong workspace?), then re-run the job',
       };
     case 403:
       return {
-        reason: 'the API key is not permitted to use this model or workspace, so no case ever ran',
+        reason: 'the API key is not permitted to use this model or workspace',
         hint: 'check the key\'s workspace and model permissions, then re-run the job',
       };
     case 429:
@@ -167,13 +170,17 @@ export function classifyUnrunnable(err: unknown): Unrunnable | null {
 /**
  * The two-line shape an unrunnable run reports: what happened, then what to do.
  *
+ * The label is REQUIRED, with no default. A default of 'eval gate' was dead — both call
+ * sites pass one — and its only possible effect was to give a future caller who forgot the
+ * argument exactly the wrong vocabulary this parameter exists to prevent.
+ *
  * The LABEL is a parameter because `main.ts` routes every command through the same catch.
  * Reporting a `repl` failure as "eval gate COULD NOT RUN … so no case ever ran" was wrong
  * three ways: no eval case existed in that run, there is no CI job to re-run, and
  * 04-testing.md defines exit 2 as the eval runner's contract specifically. The classified
  * REASON ("the API key was rejected") is shared; the framing around it is not.
  */
-export function unrunnableLines(u: Unrunnable, label = 'eval gate'): string[] {
+export function unrunnableLines(u: Unrunnable, label: string): string[] {
   return [`${label} COULD NOT RUN: ${u.reason}`, `  → ${u.hint}`];
 }
 

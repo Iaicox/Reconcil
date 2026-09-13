@@ -20,12 +20,14 @@ describe('core-30 dataset', () => {
     expect(faceB.length).toBeGreaterThanOrEqual(6);
     // Every Face B case seeds the recon-smb scenario, and the five recon tools are all exercised.
     expect(faceB.every((c) => c.setup?.fixture === 'recon-smb')).toBe(true);
-    // Both fields, for the same reason the "names the tool(s) it expects" invariant below
-    // sums them: a Face B case broadened to tools_any_of would otherwise drop out of this
-    // coverage check, and the five-tool assertion would fail for the wrong reason.
-    const exercised = new Set(
-      faceB.flatMap((c) => [...(c.expect.tools_expected ?? []), ...(c.expect.tools_any_of ?? [])]),
-    );
+    // `tools_expected` ONLY. Summing in `tools_any_of` (as an earlier round did, to stop a
+    // broadened case dropping out) makes this assertion weaker than its own name: a case
+    // broadened to `[recon_status, analytics_list_events]` would keep `recon_status` in the
+    // set while no case REQUIRED it any more, so G1 would pass a run that never called it.
+    // "Exercised" has to mean required. No Face B case uses tools_any_of today — the
+    // scarcity test below pins the whole any-of list at ['flow-002'] — so if one ever does,
+    // this fails and the decision gets made deliberately rather than absorbed silently.
+    const exercised = new Set(faceB.flatMap((c) => c.expect.tools_expected ?? []));
     for (const t of ['recon_import_invoices', 'recon_suggest_matches', 'recon_confirm_match', 'recon_status', 'export_journal_drafts']) {
       expect(exercised.has(t)).toBe(true);
     }

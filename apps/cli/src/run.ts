@@ -25,7 +25,8 @@ import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
 import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
-import { EXIT_CANNOT_RUN, UsageError, reportFailure } from './evals/runnability.js';
+import { EXIT_CANNOT_RUN, reportFailure } from './evals/runnability.js';
+import { UsageError } from './evals/usage-error.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
 import type { CaseResult, GateResult } from './evals/types.js';
 
@@ -129,8 +130,19 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   // every schema the model sees are identical either way.
   const selected = args.cases.length > 0 ? all.filter((c) => args.cases.includes(c.id)) : all;
   if (args.cases.length > 0 && selected.length !== args.cases.length) {
+    // Two distinct ways the counts can disagree, and the message has to say which. A
+    // duplicated id ('--cases flow-001,flow-001') makes the lengths differ while every id
+    // exists, so reporting only the missing ones produced "unknown case id(s): " with
+    // nothing after the colon — an error naming nothing, under a hint that says "fix the
+    // invocation".
     const missing = args.cases.filter((id) => !all.some((c) => c.id === id));
-    throw new UsageError(`unknown case id(s): ${missing.join(', ')}`);
+    const seen = new Set<string>();
+    const repeated = [...new Set(args.cases.filter((id) => (seen.has(id) ? true : (seen.add(id), false))))];
+    const detail = [
+      missing.length > 0 ? `unknown case id(s): ${missing.join(', ')}` : undefined,
+      repeated.length > 0 ? `repeated case id(s): ${repeated.join(', ')}` : undefined,
+    ].filter((x): x is string => x !== undefined).join(' — ');
+    throw new UsageError(detail);
   }
   const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : selected;
 

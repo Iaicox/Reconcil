@@ -6,7 +6,7 @@
  * the citation envelope. Export tools are non-read-only (they write files +
  * register a row) but never destructive. Shared by both Face A export tools.
  */
-import { mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
@@ -107,8 +107,16 @@ export async function writeExportFiles(
   // an empty `<exportId>/` orphaned under the export root on a bad name: no `exports` row,
   // and a fresh uuid every retry so nothing ever reclaimed it. They need no filesystem to
   // check, so there is no reason for them to run after one has been touched.
-  if (!isSinglePathSegment(exportId) || rendered.some((f) => !isSinglePathSegment(f.name))) {
-    throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
+  const badSegment = !isSinglePathSegment(exportId)
+    ? `exportId ${JSON.stringify(exportId)}`
+    : rendered.map((f) => f.name).find((n) => !isSinglePathSegment(n));
+  if (badSegment !== undefined) {
+    // The model sees the generic message (C6); the cause records WHICH component was
+    // refused, server-side. Every other branch here attaches one for the same reason —
+    // without it the operator cannot tell an exportId from a rendered name, or either from
+    // a filesystem fault.
+    throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined,
+      new Error(`not a single path segment: ${badSegment}`));
   }
 
   // Root read ONCE and passed into both users. `exportRoot()` reads the environment, and
@@ -122,7 +130,6 @@ export async function writeExportFiles(
   const base = await baseDirUnder(root, outDir);
   const dir = join(base, exportId);
 
-  const files: { name: string; path: string; sha256: string }[] = [];
   try {
     await mkdir(dir, { recursive: true });
     // Two questions, not one. (a) Is the finished directory still inside the export ROOT?
@@ -135,12 +142,16 @@ export async function writeExportFiles(
     // another tenant's export folder — while the exports row and the tool response still
     // report the logical out_dir path, leaving an audit trail that points at a directory
     // holding none of the bytes. Equality against realpath(base)/exportId answers both.
-    // Independent questions, one round of I/O.
-    const [baseCheck, check] = await Promise.all([
-      realpathWithinBase(root, base),
+    // One confinement call, not two. `base`'s containment was already settled by
+    // `baseDirUnder` above; all that is needed from it here is its RESOLVED path, so a plain
+    // `realpath` does the job — a second `realpathWithinBase(root, base)` re-asked a
+    // question already answered, and on the default path (no `out_dir`, so `base === root`)
+    // it was `root` compared against itself.
+    const [realBase, check] = await Promise.all([
+      realpath(base).catch(() => null),
       realpathWithinBase(root, dir),
     ]);
-    const expected = baseCheck.ok ? join(baseCheck.realTarget, exportId) : null;
+    const expected = realBase === null ? null : join(realBase, exportId);
     if (!check.ok || expected === null || check.realTarget !== expected) {
       // `mkdir -p` already ran, so a link planted in that window may have got a real
       // directory created behind it. Best-effort, and it removes AT MOST THE LEAF: a
@@ -188,7 +199,7 @@ export async function writeExportFiles(
       await rmdir(dir).catch(() => { /* non-empty or gone — tidying, not containment */ });
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, failure.reason);
     }
-    files.push(...written.map((r) => (r as PromiseFulfilledResult<{ name: string; path: string; sha256: string }>).value));
+    const files = written.map((r) => (r as PromiseFulfilledResult<{ name: string; path: string; sha256: string }>).value);
     return { dir, files };
   } catch (err) {
     if (err instanceof ToolError) throw err;

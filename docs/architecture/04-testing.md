@@ -306,8 +306,11 @@ jobs gate on, so a missing key makes them **skip** (grey), never fail red.
 
 **Exit codes — "the gate failed" and "the gate could not run" are different answers.** The
 runner exits **1** when the suite ran and missed the gate, and **2** when it could not run at
-all: the account out of credit, a rejected or unpermitted key, rate limiting, an overloaded
-API. Both are red — mapping an unrunnable gate to a pass, or to a silent skip, is how a
+all. Every route to 2, because the exit code is the contract a CI reader applies: the account
+out of credit, a rejected or unpermitted key, rate limiting, an overloaded API, a gateway
+5xx, no response at all (connection refused, DNS, timeout), a bad invocation (an unknown
+flag, `--runs 0`, an unknown `--cases` id), a missing `ANTHROPIC_API_KEY`, and a deliberate
+abort. Both are red — mapping an unrunnable gate to a pass, or to a silent skip, is how a
 suite stops running and nobody notices — but a 2 says the branch is not implicated and no
 amount of reading the diff will help. It prints one line and a hint instead of the error
 object. The classification is deliberately narrow and asymmetric (`evals/runnability.ts`):

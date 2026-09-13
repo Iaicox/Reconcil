@@ -6,7 +6,7 @@
  * the gate passes vacuously over ZERO runs); and an unknown flag is a hard error, not a
  * silent no-op (a mistyped `--smoek` would otherwise fall through and run the full 30×3).
  */
-import { UsageError } from './runnability.js';
+import { UsageError } from './usage-error.js';
 import { coreDatasetPath } from '@reconcil/evals';
 
 import { DEFAULT_MODEL } from '../model.js';
@@ -34,7 +34,16 @@ export function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--smoke') args.smoke = true;
-    else if (a === '--cases') args.cases = (argv[++i] ?? '').split(',').map((c) => c.trim()).filter(Boolean);
+    else if (a === '--cases') {
+      // A missing or blank value used to leave `cases` empty, which means "no filter" —
+      // so `--cases` with the value forgotten ran the full 30x3 of live traffic instead of
+      // the handful the operator meant to investigate. That is the same outcome this
+      // parser's unknown-flag guard exists to prevent, reached through the option whose
+      // whole purpose is to narrow the run.
+      const ids = (argv[++i] ?? '').split(',').map((c) => c.trim()).filter(Boolean);
+      if (ids.length === 0) throw new UsageError('--cases needs at least one case id');
+      args.cases = ids;
+    }
     else if (a === '--suite') args.suite = argv[++i] ?? args.suite;
     else if (a === '--runs') args.runs = Number(argv[++i] ?? args.runs);
     else if (a === '--model') args.model = argv[++i] ?? args.model;
