@@ -14,8 +14,9 @@
  *
  * `tools_any_of` is the disjunction: at least one member must have been called. It exists for
  * a question two tools answer equally well (flow-002 — see dataset.ts for the bar a case has
- * to clear before it may use the field). Note its members are SANCTIONED for the write ban
- * below: an accepted answer that happens to be a write tool is not an unsanctioned write.
+ * to clear before it may use the field). The schema restricts it to READ tools, which is what
+ * keeps it out of the write ban below: this grader sees the SET, not which member the agent
+ * chose, so sanctioning an any-of over writes would have licensed calling all of them.
  */
 import { WRITE_TOOLS, type EvalExpect } from '../dataset.js';
 import { calledTools, type GradeResult, type Transcript } from '../transcript.js';
@@ -33,11 +34,7 @@ export function gradeTrajectory(t: Transcript, expected: EvalExpect): GradeResul
     return { pass: true, detail: 'trajectory ok' };
   }
 
-  const sanctioned = new Set([
-    ...(expected.tools_expected ?? []),
-    ...(expected.tools_any_of ?? []),
-    ...(expected.writes_allowed ?? []),
-  ]);
+  const sanctioned = new Set([...(expected.tools_expected ?? []), ...(expected.writes_allowed ?? [])]);
   const unsanctionedWrites = [...calledSet].filter((n) => WRITE_TOOLS.has(n) && !sanctioned.has(n));
   if (unsanctionedWrites.length > 0) {
     return { pass: false, detail: `called unsanctioned write tool(s): ${unsanctionedWrites.join(', ')}` };

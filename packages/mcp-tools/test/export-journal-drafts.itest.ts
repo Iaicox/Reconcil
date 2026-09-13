@@ -307,10 +307,13 @@ describe('export_journal_drafts — journal provenance (H11)', () => {
   });
 });
 
-// export-journal-drafts.ts calls `baseDir` directly (not through `runExport`, unlike
-// export_close_pack / export_pdf_summary) — this is a separate call site, so it gets its
-// own confinement smoke test (H2). Full coverage of `baseDir` itself lives in
-// export-run.test.ts (hermetic) and export.itest.ts's confinement describe block.
+// This tool used to call `baseDir` directly — a second, unhardened call site, which is why
+// it had its own confinement smoke test. It now routes through the shared
+// `writeExportFiles` like every other export tool, so the smoke test no longer guards a
+// separate implementation. It is kept as a regression guard against the tool being wired
+// back to its own write path: confinement must hold end-to-end for THIS tool, not only for
+// the helper. Full coverage of `baseDir` itself lives in export-run.test.ts (hermetic) and
+// export.itest.ts's confinement describe block.
 describe('export_journal_drafts — out_dir confinement (security, H2)', () => {
   it('rejects a traversal out_dir without leaking the export root path, and registers nothing', async () => {
     let thrown: ToolError | undefined;

@@ -118,11 +118,16 @@ describe('G1 trajectory', () => {
     expect(res.detail).toContain('analytics_flows');
     expect(res.detail).toContain('analytics_stablecoin_movements');
   });
-  it('sanctions a WRITE named in tools_any_of — an accepted answer is not an unsanctioned write', () => {
-    // Without tools_any_of in the sanctioned set, the write ban fires first and the case
-    // fails for the opposite of the reason it was written.
+  it('does not sanction writes via tools_any_of — the write ban still bites', () => {
+    // The schema forbids a write tool in tools_any_of (dataset.ts), because this grader sees
+    // the SET and not the member the agent chose: sanctioning the set would have let an
+    // agent call recon_confirm_match AND recon_reject_match and still score "trajectory ok".
+    // Asserted here too, on a hand-built expectation the loader would have rejected, so the
+    // grader does not quietly depend on the schema being the only thing holding the line.
     const either: EvalExpect = { tools_any_of: ['recon_confirm_match', 'recon_reject_match'] };
-    expect(gradeTrajectory(script([inv('recon_confirm_match', {})], 'ok'), either).pass).toBe(true);
+    const res = gradeTrajectory(script([inv('recon_confirm_match', {})], 'ok'), either);
+    expect(res.pass).toBe(false);
+    expect(res.detail).toContain('recon_confirm_match');
   });
   it('enforces tools_expected and tools_any_of together — required AND at-least-one', () => {
     const both: EvalExpect = {

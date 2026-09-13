@@ -146,7 +146,7 @@ describe('handleHijackedTransport — H14 error path after hijack', () => {
 });
 
 describe('buildHttpApp — DNS-rebinding Host validation (minor, defense-in-depth)', () => {
-  function appWithHosts(allowedHosts: string[]) {
+  function appWithHosts(allowedHosts: [string, ...string[]]) {
     return buildHttpApp({
       db: {} as unknown as Db,
       logger: silentLogger,
@@ -156,13 +156,17 @@ describe('buildHttpApp — DNS-rebinding Host validation (minor, defense-in-dept
   }
 
   it('an EXPLICIT empty allowedHosts is refused, not silently replaced', async () => {
-    // `[]` is not nullish, so `deps.allowedHosts ?? resolveAllowedHosts(...)` used to keep
-    // it — and the SDK guards its Host check with `allowedHosts.length > 0`, so an empty
-    // list turns DNS-rebinding protection OFF rather than making it strict. Fail-open, and
-    // invisible: every request simply succeeds. Not reachable from config
-    // (resolveAllowedHosts already collapses an empty env list to the defaults), but the
-    // injectable seam must not be able to express what the config path cannot.
-    await expect(appWithHosts([])).rejects.toThrow(/at least one host/i);
+    // The SDK guards its Host check with `allowedHosts.length > 0`, so an empty list turns
+    // DNS-rebinding protection OFF rather than making it strict — fail-open and invisible:
+    // every request simply succeeds. It is now a COMPILE error on HttpDeps.allowedHosts
+    // (a non-empty tuple), and the ts-expect-error below is the assertion that it is; the
+    // runtime throw is the backstop for a JS caller the compiler never saw.
+    // @ts-expect-error — an empty allowedHosts must not typecheck
+    await expect(appWithHosts([])).rejects.toThrow(/at least one non-empty host/i);
+  });
+
+  it('a blank allowedHosts entry is refused too — it can never match a Host header', async () => {
+    await expect(appWithHosts([' '])).rejects.toThrow(/non-empty host/i);
   });
 
   it('mismatched Host header is rejected before reaching protocol logic', async () => {

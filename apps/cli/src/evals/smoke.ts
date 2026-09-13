@@ -25,14 +25,23 @@ const SMOKE_ID_LIST = ['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001
  * could only assert that `new Set` de-duplicates, which is a property of Set, not of this
  * module. A guard no test can execute is a guard nobody knows still works.
  */
-export function buildSmokeIds(list: readonly string[]): ReadonlySet<string> {
-  const set = new Set<string>(list);
-  if (set.size !== list.length) {
-    const seen = new Set<string>();
-    const dupes = new Set(list.filter((id) => (seen.has(id) ? true : (seen.add(id), false))));
-    throw new Error(`smoke id list contains duplicate id(s): ${[...dupes].join(', ')}`);
+/** Ids appearing more than once, in first-seen order, each reported once. */
+function findDuplicates(list: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const id of list) {
+    if (seen.has(id)) dupes.add(id);
+    else seen.add(id);
   }
-  return set;
+  return [...dupes];
+}
+
+export function buildSmokeIds(list: readonly string[]): ReadonlySet<string> {
+  const dupes = findDuplicates(list);
+  if (dupes.length > 0) {
+    throw new Error(`smoke id list contains duplicate id(s): ${dupes.join(', ')}`);
+  }
+  return new Set(list);
 }
 
 export const SMOKE_IDS: ReadonlySet<string> = buildSmokeIds(SMOKE_ID_LIST);
@@ -51,12 +60,7 @@ export function selectSmokeDataset(all: readonly EvalCase[], ids: ReadonlySet<st
   const foundIds = dataset.map((c) => c.id);
   const foundSet = new Set(foundIds);
   const missing = [...ids].filter((id) => !foundSet.has(id));
-  const seen = new Set<string>();
-  const unexpected = foundIds.filter((id) => {
-    if (seen.has(id)) return true;
-    seen.add(id);
-    return false;
-  });
+  const unexpected = findDuplicates(foundIds);
 
   const detail = [
     missing.length > 0 ? `missing: ${missing.join(', ')}` : undefined,

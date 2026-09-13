@@ -124,6 +124,18 @@ describe('parseDataset', () => {
     ).toThrow(/tools_any_of/i);
   });
 
+  it('throws when tools_any_of names a WRITE tool — the set would license calling all of them', () => {
+    expect(() =>
+      parseDataset(
+        `- id: x
+  face: A
+  question: q
+  expect: { tools_any_of: [recon_confirm_match, recon_reject_match] }
+`,
+      ),
+    ).toThrow(/only name read tools/i);
+  });
+
   it('throws when a tool is both an accepted answer and merely writes_allowed', () => {
     expect(() =>
       parseDataset(

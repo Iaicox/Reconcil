@@ -66,8 +66,8 @@ export async function readImportFile(filePath: string): Promise<string> {
   // inode and the read consumed whatever the path pointed at by then. A co-resident writer
   // swapping a path component between the stat and the read walked straight past the
   // 8 MB cap, which is the one thing that cap exists to prevent. `fh.stat()` reports the
-  // descriptor's own inode, and `fh.readFile()` reads that same descriptor, so check and
-  // use cannot diverge. (The realpath→open window remains and is the residual TOCTOU noted
+  // descriptor's own inode, and the read below is bounded rather than read-to-EOF, so
+  // neither a different inode nor growth of the same one can get past the cap. (The realpath→open window remains and is the residual TOCTOU noted
   // in 09-known-gaps.md; closing it needs an O_NOFOLLOW-per-segment walk, which is a
   // different slice. This removes the window that had an actual consequence.)
   let fh;
@@ -77,6 +77,7 @@ export async function readImportFile(filePath: string): Promise<string> {
     throw new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory');
   }
   try {
+    const cap = maxFileBytes();
     const stats = await fh.stat();
     // Regular files only. A FIFO, socket or device node reports size 0, which sails past
     // the cap below and then streams without bound into readFile — so the cap would be
@@ -88,10 +89,26 @@ export async function readImportFile(filePath: string): Promise<string> {
     if (!stats.isFile()) {
       throw new ToolError('INVALID_INPUT', 'file_path is not a regular file');
     }
-    if (stats.size > maxFileBytes()) {
-      throw new ToolError('INVALID_INPUT', `file exceeds the ${String(maxFileBytes())}-byte import limit`);
+    if (stats.size > cap) {
+      throw new ToolError('INVALID_INPUT', `file exceeds the ${String(cap)}-byte import limit`);
     }
-    return await fh.readFile('utf8');
+
+    // Bounded read, not `fh.readFile()`. The stat above is a snapshot: a co-resident writer
+    // can append to the SAME inode between it and the read, and readFile follows to EOF, so
+    // the cap would still be advisory for exactly the planted-file case it exists for. Read
+    // at most cap+1 bytes into a fixed buffer — the extra byte is what distinguishes "filled
+    // the budget exactly" from "there was more", without ever allocating more than the cap.
+    const buf = Buffer.allocUnsafe(cap + 1);
+    let read = 0;
+    for (;;) {
+      const { bytesRead } = await fh.read(buf, read, buf.length - read, null);
+      if (bytesRead === 0) break;
+      read += bytesRead;
+      if (read > cap) {
+        throw new ToolError('INVALID_INPUT', `file exceeds the ${String(cap)}-byte import limit`);
+      }
+    }
+    return buf.subarray(0, read).toString('utf8');
   } catch (err) {
     // The cap is a ToolError already shaped for the caller; anything else is an fs fault
     // whose text must not leak (C6).

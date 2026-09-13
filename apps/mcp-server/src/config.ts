@@ -66,10 +66,18 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
  * reality actually sends: localhost / 127.0.0.1 (host-mapped local dev) and the
  * `mcp-server` compose service name, all suffixed with the configured PORT.
  */
-export function resolveAllowedHosts(cfg: Pick<ServerConfig, 'PORT' | 'RECONCIL_ALLOWED_HOSTS'>): string[] {
+export function resolveAllowedHosts(
+  cfg: Pick<ServerConfig, 'PORT' | 'RECONCIL_ALLOWED_HOSTS'>,
+): [string, ...string[]] {
+  // The NON-EMPTY return type is the point, not decoration: an empty allow-list does not
+  // make the transport's Host check strict, it disables it (the SDK guards on
+  // `length > 0`). This function already never returns one — the env branch is taken only
+  // when it has something left after trimming, and the fallback is three literals — so
+  // saying so in the type is what lets http.ts type its own seam the same way instead of
+  // re-checking at runtime.
   if (cfg.RECONCIL_ALLOWED_HOSTS !== undefined) {
-    const hosts = cfg.RECONCIL_ALLOWED_HOSTS.split(',').map((h) => h.trim()).filter((h) => h.length > 0);
-    if (hosts.length > 0) return hosts;
+    const [first, ...rest] = cfg.RECONCIL_ALLOWED_HOSTS.split(',').map((h) => h.trim()).filter((h) => h.length > 0);
+    if (first !== undefined) return [first, ...rest];
   }
   const port = String(cfg.PORT);
   return [`localhost:${port}`, `127.0.0.1:${port}`, `mcp-server:${port}`];

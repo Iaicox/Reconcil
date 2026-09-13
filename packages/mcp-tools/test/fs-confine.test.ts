@@ -90,4 +90,24 @@ describe('realpathDirWithinBase', () => {
     // real directory rather than re-traversing the symlink on every file.
     expect(await realpathDirWithinBase(base, link)).toBe(await realpath(real));
   });
+  it.runIf(symlinksWork)('rejects a target reached through a symlinked SEGMENT of the path, anchored at the root', async () => {
+    // The shape that defeats a self-anchored check, and the reason callers must pass the
+    // immovable export ROOT rather than an out_dir-narrowed base: if the base itself is
+    // reached through the planted link, realpath resolves BOTH sides through it and the
+    // prefix test passes on an escape.
+    const outside = join(root, 'outside');
+    await mkdir(join(outside, 'close'), { recursive: true });
+
+    // <base>/june -> <root>/outside, so <base>/june/close resolves to <root>/outside/close.
+    await symlink(outside, join(base, 'june'), 'dir');
+    const narrowed = join(base, 'june', 'close');
+    const target = join(narrowed, 'run-uuid');
+    await mkdir(target, { recursive: true });
+
+    // Anchored at the narrowed base — what the first version did — this WRONGLY passes:
+    // both sides resolve into <root>/outside.
+    expect(await realpathDirWithinBase(narrowed, target)).not.toBeNull();
+    // Anchored at the root, the escape is visible.
+    expect(await realpathDirWithinBase(base, target)).toBeNull();
+  });
 });

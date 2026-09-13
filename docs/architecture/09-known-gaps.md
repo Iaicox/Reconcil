@@ -95,6 +95,32 @@ alongside the `status='live'` gap above but exercising a different code path. Tr
 same as above — pin alongside the next unrelated edit to that logic. Where:
 `apps/worker/src/main.ts` (`getCheckpointBlock`). *(Task 12, `fix/worker-queues`)*
 
+**`compareTraceIds` changed, and the sentinel it derives is half an idempotency key.** The
+comparator was fixed on 2026-09-13 (it cycled: `"9" < "10" < "1a" < "9"`, and two distinct
+labels could tie and hand the ordering to arrival order). Its output becomes the
+`log_index` sentinel `-(1000 + n)` on every internal transfer, which is part of
+`UNIQUE (chain_id, tx_hash, log_index, token_id)` — so for any tx whose trace labels order
+differently under the new rule, a re-ingest derives a *different* sentinel, `ON CONFLICT DO
+NOTHING` stops matching, and the same value move is inserted twice into an append-only
+table with no rollback path. Ingestion does re-serve rows: it re-fetches the overlap-by-one
+boundary block, and a provider failover can re-serve a window.
+
+Why this was accepted rather than migrated: the label shapes whose ordering actually moved
+are **leading zeros** (`007` vs `7`), **non-decimal notations** (`0x10`, `1e3`), and an
+empty segment — and none of them occurs. Every trace label recorded anywhere in this
+repo is plain digits and underscores (`0`, `1`, `10`, `0_1`, `0_2`, `0_10`, `0_1_2`), for
+which the old and new comparators agree exactly. The one other observed value, `''`, cannot
+reach the comparator at all: a group containing an unlabelled trace fails the `labelled`
+check in `normalize()` and is ordered by `compareTraceTuple` instead. There are also no
+production deployments — the validation gate is a business milestone, not a shipped
+product — so there is no pre-existing table to disagree with.
+
+Trigger: before the first real deployment ingests mainnet history, or if a provider is ever
+added whose trace labels are not plain decimal paths — at which point re-deriving sentinels
+for already-stored internal transfers becomes a migration, not a comment. Where:
+`packages/ingestion/src/normalize.ts` (`compareTraceIds`, `sentinelRank`), ADR-005 d2.
+*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13)*
+
 ## Ledger
 
 **`isRealCalendarDate` re-splits a string `parseIsoDateComponentsUtc` already parsed.**
@@ -316,7 +342,7 @@ label-resolution cases can be restored. Where: `apps/cli/src/evals/seed-case.ts`
 
 ## Reconciling the count
 
-This register holds **27 entries**. The source ledger
+This register holds **28 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
@@ -402,7 +428,12 @@ number is gone.) The reconciliation from 32 ledger lines:
 
 - **±0**: the `## Pricing` heading, empty since PR #66 removed both of its entries, is gone.
 
-32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 = **27**, matching this document.
+- **+1**: one entry ADDED by the review of that same sweep — `compareTraceIds` changing the
+  sentinel it derives, with no migration for already-ingested rows. Recorded rather than
+  migrated because the label shapes whose ordering moved do not occur in either provider's
+  output (see the entry for the evidence), and there is no deployment to disagree with yet.
+
+32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 + 1 = **28**, matching this document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation

@@ -164,7 +164,10 @@ export interface HttpDeps {
    * defense-in-depth on top of bearer auth). Defaults to the localhost/127.0.0.1/
    * compose-service-name forms at DEFAULT_PORT — production always passes the
    * real one via config.ts `resolveAllowedHosts(cfg)`. */
-  allowedHosts?: string[];
+  // A NON-EMPTY tuple, not `string[]`: `[]` is what the SDK reads as "no Host check at all"
+  // (it guards on `length > 0`), so the seam must not be able to spell it. Typed this way
+  // the mistake is a compile error at the call site rather than a runtime branch nobody hits.
+  allowedHosts?: [string, ...string[]];
   /** Layer 1: IP-keyed hard ceiling on every /mcp request (valid credential, invalid,
    * or absent — see the block comment above `ipRateLimitKey`). Defaults to the
    * production 600/min. Overridable so tests can trip it deterministically. */
@@ -189,18 +192,11 @@ export interface HttpDeps {
 export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   const { db, logger } = deps;
   const authenticate = deps.authenticate ?? ((h) => bearerTenant(db, h));
-  // An explicit `[]` is REJECTED, not quietly replaced. `[]` is not nullish, so it used to
-  // slip past a `??` — and the SDK guards its Host check with `allowedHosts.length > 0`,
-  // so an empty list turns DNS-rebinding protection OFF rather than making it maximally
-  // strict. Substituting the defaults instead would fix the fail-open but introduce a third
-  // state: neither what the caller asked for nor what the config path produces, with nothing
-  // said about it. `resolveAllowedHosts` already collapses an empty RECONCIL_ALLOWED_HOSTS
-  // to the defaults, so `[]` reaching here means a caller meant something this seam cannot
-  // honour, and the honest answer is to say so.
-  if (deps.allowedHosts !== undefined && deps.allowedHosts.length === 0) {
-    throw new Error(
-      'allowedHosts must name at least one host — an empty list disables DNS-rebinding protection entirely. Omit it to use the defaults.',
-    );
+  // The empty case is ruled out by the TYPE (`HttpDeps.allowedHosts`, below); this is the
+  // backstop for a JS caller the compiler never saw. An empty list does not make the check
+  // strict — the SDK guards it with `length > 0`, so it turns DNS-rebinding protection OFF.
+  if (deps.allowedHosts?.some((h) => h.trim() === '') === true || deps.allowedHosts?.length === 0) {
+    throw new Error('allowedHosts must name at least one non-empty host — omit it to use the defaults');
   }
   const allowedHosts = deps.allowedHosts ?? resolveAllowedHosts({ PORT: DEFAULT_PORT });
   const ipRateLimitPolicy = deps.ipRateLimit ?? { max: 600, timeWindow: '1 minute' };

@@ -58,7 +58,9 @@ export type GuardrailKind = z.infer<typeof guardrailKind>;
  * longer tests tool selection at all. Broaden a case only when (a) a GRADED RUN produced the
  * alternative — never speculatively — and (b) both tools compute the figure server-side. (b)
  * is what rules out e.g. answering cp-002 from `analytics_list_events`: the rows are there,
- * but the agent would have to sum them, and the LLM never computes (P1).
+ * but the agent would have to sum them, and the LLM never computes (P1). The field is
+ * restricted to READ tools — see the refine below for why a disjunction over writes cannot
+ * mean what it looks like it means.
  */
 const expectSchema = z
   .object({
@@ -112,6 +114,15 @@ const expectSchema = z
     },
     { message: 'tools_any_of may not name a tool that tools_expected already requires' },
   )
+  // READ tools only. A disjunction cannot express "whichever one you picked, only that
+  // one": G1 sees the set, not the choice, so an any-of over write tools would have to
+  // sanction every member — and `[recon_confirm_match, recon_reject_match]` would then
+  // pass for an agent that called BOTH, confirming a match and then rejecting it. Reads
+  // are never banned, so restricting the field removes the question instead of answering
+  // it badly. A case that genuinely needs alternative WRITES needs a different notion.
+  .refine((e) => (e.tools_any_of ?? []).every((t) => !WRITE_TOOLS.has(t)), {
+    message: 'tools_any_of may only name read tools — a disjunction over writes would sanction every member',
+  })
   // An accepted ANSWER and a merely PERMITTED write are different claims about the same
   // call; asserting both says the case does and does not care which tool answered.
   .refine(

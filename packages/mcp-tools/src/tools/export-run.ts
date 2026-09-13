@@ -73,14 +73,16 @@ export async function baseDir(outDir?: string): Promise<string> {
  * routed through `runExport` while the register claimed the write path was covered.
  *
  * Three things beyond a plain write, all for the same co-resident-writer threat:
- *  - `baseDir` is computed ONCE (it is two realpath walks and it can throw INVALID_INPUT;
- *    recomputing it inside the write block let that surface after `mkdir` had succeeded);
+ *  - `baseDir` is computed once, OUTSIDE the try: it can throw INVALID_INPUT, and a second
+ *    call inside the block would let that surface after `mkdir` had already succeeded, for
+ *    a value the caller had already passed validation on;
  *  - after `mkdir -p`, the finished directory is re-resolved — `baseDir`'s check could only
  *    vouch for segments that existed then, and every segment created since, including
  *    `<exportId>/` itself, went unvalidated;
  *  - writes go through the RESOLVED directory with `{ flag: 'wx' }` — create, never follow
  *    or truncate. The directory is a fresh UUID, so anything already at that path was
  *    planted, and a plain `writeFile` would follow it straight out of the export root.
+ *    Reported paths stay in the LOGICAL vocabulary (see below).
  */
 export async function writeExportFiles(
   toolName: string,
@@ -88,24 +90,31 @@ export async function writeExportFiles(
   exportId: string,
   rendered: readonly RenderedFile[],
 ): Promise<{ dir: string; files: { name: string; path: string; sha256: string }[] }> {
-  const base = await baseDir(outDir);
-  const dir = join(base, exportId);
+  const dir = join(await baseDir(outDir), exportId);
 
   const files: { name: string; path: string; sha256: string }[] = [];
   try {
     await mkdir(dir, { recursive: true });
-    const realDir = await realpathDirWithinBase(base, dir);
+    // Anchored at the EXPORT ROOT, not at the out_dir-narrowed base. Anchoring at the base
+    // makes the check self-referential and unable to detect the very escape it is for:
+    // with out_dir 'june/close' and a symlink planted at <root>/june, realpath resolves
+    // BOTH sides through that symlink — realBase '/etc/close', realTarget
+    // '/etc/close/<uuid>' — and the prefix test passes. The root is the one path an
+    // attacker inside the export tree cannot move.
+    const realDir = await realpathDirWithinBase(exportRoot(), dir);
     if (realDir === null) {
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
     }
     for (const f of rendered) {
-      const path = join(realDir, f.name);
-      await writeFile(path, f.content, { flag: 'wx' });
-      files.push({ name: f.name, path, sha256: f.sha256 });
+      // Written through the RESOLVED directory — that is the security property. REPORTED
+      // under the logical one: an export root that is itself a symlink or bind-mount
+      // (macOS /var → /private/var) would otherwise hand the operator, and the exports
+      // row, paths that do not correspond to the root they configured. Both name the same
+      // file; only one of them is the operator's own vocabulary.
+      await writeFile(join(realDir, f.name), f.content, { flag: 'wx' });
+      files.push({ name: f.name, path: join(dir, f.name), sha256: f.sha256 });
     }
-    // The RESOLVED dir is what gets recorded on the exports row too — storing the
-    // unresolved string would persist a path that points somewhere else.
-    return { dir: realDir, files };
+    return { dir, files };
   } catch (err) {
     if (err instanceof ToolError) throw err;
     throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, err);
