@@ -6,8 +6,8 @@
  * the citation envelope. Export tools are non-read-only (they write files +
  * register a row) but never destructive. Shared by both Face A export tools.
  */
-import { mkdir, realpath, rm, rmdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdir, open, realpath, rm, rmdir } from 'node:fs/promises';
+import { join, relative, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
@@ -142,16 +142,26 @@ export async function writeExportFiles(
     // another tenant's export folder — while the exports row and the tool response still
     // report the logical out_dir path, leaving an audit trail that points at a directory
     // holding none of the bytes. Equality against realpath(base)/exportId answers both.
-    // One confinement call, not two. `base`'s containment was already settled by
-    // `baseDirUnder` above; all that is needed from it here is its RESOLVED path, so a plain
-    // `realpath` does the job — a second `realpathWithinBase(root, base)` re-asked a
-    // question already answered, and on the default path (no `out_dir`, so `base === root`)
-    // it was `root` compared against itself.
-    const [realBase, check] = await Promise.all([
-      realpath(base).catch(() => null),
+    // `expected` is built from the ROOT plus the path we ASKED for, never from re-resolving
+    // an intermediate we do not control.
+    //
+    // Building it from `realpath(base)` was self-satisfying above the leaf, and a probe
+    // against the built package proved it: with `<root>/june` a link to `<root>/tenant-b`
+    // and `<root>/tenant-b/close` real, out_dir 'june/close' passed BOTH layers — the
+    // pre-mkdir ancestor check (the link resolves inside the root, so it is not an escape)
+    // and this equality (both sides resolve through the same link) — and the bytes landed
+    // in tenant-b while `dir`, `files[].path` and the `exports` row all said june.
+    //
+    // Anchoring on `realpath(root) + the relative path` separates the two things that make
+    // `realDir` differ from `dir`: the export ROOT itself being a link or bind-mount
+    // (macOS /var → /private/var — benign, and the relative part is unchanged, so this
+    // still matches), versus a link INSIDE the root redirecting a segment (the relative
+    // part is exactly what changes, so it no longer matches).
+    const [realRoot, check] = await Promise.all([
+      realpath(root).catch(() => null),
       realpathWithinBase(root, dir),
     ]);
-    const expected = realBase === null ? null : join(realBase, exportId);
+    const expected = realRoot === null ? null : join(realRoot, relative(root, dir));
     if (!check.ok || expected === null || check.realTarget !== expected) {
       // `mkdir -p` already ran, so a link planted in that window may have got a real
       // directory created behind it. Best-effort, and it removes AT MOST THE LEAF: a
@@ -172,9 +182,23 @@ export async function writeExportFiles(
     // itself a symlink or bind-mount (macOS /var → /private/var) would otherwise hand the
     // operator, and the exports row, paths that do not correspond to the root they
     // configured. Both name the same file; only one is the operator's own vocabulary.
+    // `created` records which names this call brought into existence, which is NOT the same
+    // as which writes succeeded. `wx` creates the entry and then writes it, so a write that
+    // fails part-way (ENOSPC, EIO) leaves a TRUNCATED file behind while settling as
+    // rejected — and a cleanup keyed on "fulfilled" skipped exactly that file, leaving the
+    // half-written close pack the cleanup exists to prevent, and an ENOTEMPTY on the rmdir
+    // that follows. Keyed on creation instead, so a pre-existing squatter (the write failed
+    // with EEXIST, nothing created) is still left strictly alone.
+    const created = new Set<string>();
     const written = await Promise.allSettled(
       rendered.map(async (f) => {
-        await writeFile(join(realDir, f.name), f.content, { flag: 'wx' });
+        const handle = await open(join(realDir, f.name), 'wx');
+        created.add(f.name);
+        try {
+          await handle.writeFile(f.content);
+        } finally {
+          await handle.close().catch(() => { /* the write already succeeded or failed */ });
+        }
         return { name: f.name, path: join(dir, f.name), sha256: f.sha256 };
       }),
     );
@@ -185,16 +209,13 @@ export async function writeExportFiles(
       // every retry so it is never reclaimed. allSettled rather than all, so every write
       // has finished before the cleanup runs and nothing is still in flight behind it.
       //
-      // Only the writes that SUCCEEDED are removed. Removing every rendered name would
-      // delete whatever the failed write collided with — a file this code did not create
-      // and has no business destroying, which is exactly what `wx` refused to overwrite one
-      // line earlier. (Caught by its own test: the first draft deleted the squatter.)
+      // Everything this call CREATED is removed, finished or not. Removing every rendered
+      // name would delete whatever a failed write collided with — a file this code did not
+      // create and has no business destroying, which is what `wx` refused to overwrite one
+      // line earlier (caught by its own test: an early draft deleted the squatter). Keying
+      // on "fulfilled" was the opposite error: it left the truncated file the cleanup is for.
       await Promise.all(
-        written.flatMap((r, i) =>
-          r.status === 'fulfilled'
-            ? [rm(join(realDir, rendered[i]!.name), { force: true }).catch(() => { /* best effort */ })]
-            : [],
-        ),
+        [...created].map((name) => rm(join(realDir, name), { force: true }).catch(() => { /* best effort */ })),
       );
       await rmdir(dir).catch(() => { /* non-empty or gone — tidying, not containment */ });
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, failure.reason);

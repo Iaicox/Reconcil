@@ -86,12 +86,20 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    What the implementation actually does now, since two steps grew to several: prefix check →
    `realpath` of the deepest existing ancestor → single-path-segment checks on every
    caller-supplied component (`exportId`, each rendered file name) → `mkdir -p` → `realpath`
-   of the finished directory, anchored at the ROOT and required to EQUAL
-   `realpath(base)/exportId` → writes through the resolved directory with `{ flag: 'wx' }` →
-   cleanup of anything partially written. Anchoring that re-check at the out_dir-narrowed
-   base instead of the root was a real hole, verified writing outside the root in a Linux
-   container before it was fixed; equality rather than containment closes the
-   redirect-within-root case. The deeper question — whether a confinement this shaped should
+   of the finished directory, required to equal `realpath(root)` joined with the path that
+   was ASKED for → writes through the resolved directory with `{ flag: 'wx' }` → cleanup of
+   anything this call created.
+
+   That last anchor has been wrong twice, and what makes it right is worth stating: the
+   comparison must be against something the caller cannot move. Anchored at the
+   out_dir-narrowed BASE it was blind to a link in any out_dir segment, because both sides
+   of the equality resolved through that same link — with `<root>/june` pointing at
+   `<root>/tenant-b`, an export asked for under `june/close` was accepted while its bytes
+   landed in tenant-b and every reported path said june. Anchored at the ROOT plus the
+   RELATIVE path, the two reasons `realpath` can differ from the asked-for path separate
+   cleanly: the export root itself being a link or bind-mount (macOS `/var` → `/private/var`
+   — benign, relative part unchanged) versus a link inside the root redirecting a segment
+   (the relative part is exactly what changes). The deeper question — whether a confinement this shaped should
    be built out of `realpath` at all — is recorded in `09-known-gaps.md` for the ADR sweep.
 
 ## Alternatives considered

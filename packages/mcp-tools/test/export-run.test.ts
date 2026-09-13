@@ -229,6 +229,49 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     await expect(readdir(join(root, 'june', 'close'))).rejects.toThrow(/ENOENT/);
   });
 
+  it('refuses a redirect through a SEGMENT of out_dir, not only one at the export-id leaf', async () => {
+    // The case the previous version claimed to close and did not — proved against the built
+    // package before this test existed. `<root>/june` links to `<root>/tenant-b`, and
+    // `<root>/tenant-b/close` is real, so BOTH earlier layers passed: the pre-mkdir ancestor
+    // check saw a link resolving INSIDE the root (not an escape), and the equality check
+    // built `expected` from `realpath(base)` — the same link both sides resolved through.
+    // The bytes landed in tenant-b while dir, files[].path and the exports row said june.
+    await mkdir(join(root, 'tenant-b', 'close'), { recursive: true });
+    await symlink(join(root, 'tenant-b'), join(root, 'june'), 'junction');
+
+    await expect(
+      writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [file]),
+    ).rejects.toMatchObject({ code: 'INTERNAL' });
+
+    expect(await readdir(join(root, 'tenant-b', 'close'))).toEqual([]);
+  });
+
+  it('still accepts an export ROOT that is itself a link — the benign shape', async () => {
+    // macOS /var -> /private/var, or a bind-mounted root. `realDir` differs from `dir` here
+    // too, so an anchor that cannot tell the two apart would refuse every export on those
+    // machines. The relative part is what distinguishes them: unchanged when the ROOT is
+    // the link, changed when a segment inside it is.
+    const outer = await mkdtemp(join(tmpdir(), 'reconcil-linked-root-'));
+    try {
+      const real = join(outer, 'real-exports');
+      await mkdir(real, { recursive: true });
+      const linked = join(outer, 'exports');
+      await symlink(real, linked, 'junction');
+      process.env.RECONCIL_EXPORT_DIR = linked;
+
+      // Ids spelled out: deriving one from `outDir` puts a path separator in it, which the
+      // single-segment guard correctly refuses — and the test would then pass for the wrong
+      // reason on a line that is not the subject.
+      for (const [outDir, id] of [[undefined, 'uuid-root'], [join('june', 'close'), 'uuid-sub']] as const) {
+        const r = await writeExportFiles('export_close_pack', outDir, id, [file]);
+        await expect(readFile(r.files[0]!.path, 'utf8')).resolves.toBe(file.content);
+      }
+    } finally {
+      process.env.RECONCIL_EXPORT_DIR = root;
+      await rm(outer, { recursive: true, force: true });
+    }
+  });
+
   it('still writes normally when no link is in the way — the guard is not refusing everything', async () => {
     const { dir, files } = await writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [file]);
     expect(dir).toBe(join(root, 'june', 'close', 'run-uuid'));
