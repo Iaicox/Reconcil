@@ -295,3 +295,20 @@ test('a missing FIRST lockfile does not stop the scan of the second', () => {
     assert.ok(stderr.includes('site/package-lock.json'), stderr);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a malformed cruiser config is reported as a CONFIG fault, once, not as a lockfile fault', () => {
+  // Making bannedPattern() lazy moved its throw inside the per-lockfile try/catch, so the
+  // guard blamed 'pnpm-lock.yaml: could not find the no-signing-libraries rule' for a
+  // defect in .dependency-cruiser.cjs — and repeated it per lockfile, while the
+  // entrypoint's catch for exactly this case never ran. Resolving the pattern before the
+  // loop puts the diagnosis back on the file that is actually broken.
+  const root = stage({ pnpmLock: CLEAN_PNPM, npmLock: CLEAN_NPM });
+  try {
+    writeFileSync(join(root, '.dependency-cruiser.cjs'), 'module.exports = { forbidden: [] };');
+    const { code, stderr } = run(root);
+    assert.equal(code, 2);
+    assert.ok(stderr.includes('could not find the no-signing-libraries rule'), stderr);
+    assert.ok(!stderr.includes('pnpm-lock.yaml:'), `config fault blamed on a lockfile: ${stderr}`);
+    assert.equal(stderr.split('could not find').length - 1, 1, `reported more than once: ${stderr}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

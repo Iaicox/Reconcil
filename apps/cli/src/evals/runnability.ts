@@ -18,6 +18,10 @@
  * definition, exactly what this gate exists to catch — is environmental only for the one
  * billing shape, and a 500 is not classified at all.
  */
+import { inspect } from 'node:util';
+
+import Anthropic from '@anthropic-ai/sdk';
+
 
 /** Exit code for "the gate could not run" — 1 stays "the gate ran and failed". */
 export const EXIT_CANNOT_RUN = 2;
@@ -68,22 +72,36 @@ function apiMessage(err: unknown): string {
 
 /** Connection-level SDK errors carry no HTTP status — there was no response to have one. */
 function isConnectionFault(err: unknown): boolean {
-  if (typeof err !== 'object' || err === null) return false;
-  const name = (err as { name?: unknown }).name;
-  return name === 'APIConnectionError' || name === 'APIConnectionTimeoutError' || name === 'APIUserAbortError';
+  // `instanceof`, NOT `err.name`. The SDK sets no `name` on any of its error classes, so
+  // `name === 'APIConnectionError'` never matched and this whole branch was dead code —
+  // a gateway being down still exited 1 with the raw dump. `APIConnectionTimeoutError`
+  // extends `APIConnectionError`, so one check covers both; `APIUserAbortError` does NOT,
+  // which is correct — see below.
+  return err instanceof Anthropic.APIConnectionError;
+}
+
+/** A deliberate cancellation: neither a gate failure nor an environment fault. */
+function isUserAbort(err: unknown): boolean {
+  return err instanceof Anthropic.APIUserAbortError;
 }
 
 export function classifyUnrunnable(err: unknown): Unrunnable | null {
   const status = apiStatus(err);
   if (status === null) {
+    if (isUserAbort(err)) {
+      // Ctrl-C or an explicit abort signal. Diagnosing it as a network problem — which a
+      // single "no status ⇒ connection fault" branch would — hands the operator a remedy
+      // for something nobody broke.
+      return { reason: 'the run was cancelled before it finished', hint: 'start it again when ready' };
+    }
     // No status means no response: the gateway is down, DNS flaked, or the request timed
     // out. run.ts already calls "a dropped connection" a failure "not about the cases at
     // all"; keying purely on status contradicted that and sent it to exit 1, where the
     // documented rule tells the reader the branch under review broke the gate.
     return isConnectionFault(err)
       ? {
-          reason: 'the API could not be reached, so the suite did not complete',
-          hint: 're-run the job; if it recurs, check ANTHROPIC_BASE_URL and network egress — the branch is not implicated',
+          reason: 'the API could not be reached, so the run did not complete',
+          hint: 'retry; if it recurs, check ANTHROPIC_BASE_URL and network egress — the code under test is not implicated',
         }
       : null;
   }
@@ -133,9 +151,30 @@ export function classifyUnrunnable(err: unknown): Unrunnable | null {
   }
 }
 
-/** The two-line shape an unrunnable gate reports: what happened, then what to do. */
-export function unrunnableLines(u: Unrunnable): string[] {
-  return [`eval gate COULD NOT RUN: ${u.reason}`, `  → ${u.hint}`];
+/**
+ * The two-line shape an unrunnable run reports: what happened, then what to do.
+ *
+ * The LABEL is a parameter because `main.ts` routes every command through the same catch.
+ * Reporting a `repl` failure as "eval gate COULD NOT RUN … so no case ever ran" was wrong
+ * three ways: no eval case existed in that run, there is no CI job to re-run, and
+ * 04-testing.md defines exit 2 as the eval runner's contract specifically. The classified
+ * REASON ("the API key was rejected") is shared; the framing around it is not.
+ */
+export function unrunnableLines(u: Unrunnable, label = 'eval gate'): string[] {
+  return [`${label} COULD NOT RUN: ${u.reason}`, `  → ${u.hint}`];
+}
+
+/**
+ * Classify, report and exit — the whole failure path, so both entrypoints cannot drift
+ * apart again (the exit-code contract was false for `cli evals` for two rounds because
+ * only one of them had been updated).
+ */
+export async function reportFailure(label: string, err: unknown): Promise<never> {
+  const unrunnable = classifyUnrunnable(err);
+  return reportAndExit(
+    unrunnable !== null ? EXIT_CANNOT_RUN : 1,
+    unrunnable !== null ? unrunnableLines(unrunnable, label) : [`${label} failed: ${inspect(err, { depth: 5 })}`],
+  );
 }
 
 /**
@@ -161,13 +200,22 @@ export async function reportAndExit(code: number, lines: readonly string[]): Pro
   // that never fires lets the loop drain and the process exit 0: a gate that could not run
   // reported GREEN, which this module's own header forbids.
   process.exitCode = code;
-  for (const line of lines) {
-    await new Promise<void>((resolve) => {
-      // `resolve` on both paths: the write callback receives an error rather than throwing,
-      // and a failure to print must not change the exit code that is already set.
-      process.stderr.write(`${line}
+  try {
+    for (const line of lines) {
+      await new Promise<void>((resolve) => {
+        // `resolve` on both paths: the write callback receives an error rather than
+        // throwing, and a failure to print must not change the exit code already set.
+        process.stderr.write(`${line}
 `, () => { resolve(); });
-    });
+      });
+    }
+  } catch {
+    // Swallowed deliberately. `process.exitCode = 2` does NOT survive an unhandled
+    // rejection — Node exits 1 — so letting a throw escape here silently downgrades a
+    // classified "could not run" into "the gate ran and found a regression", which is the
+    // one outcome this module exists to prevent. Verified: `node -e "process.exitCode=2;
+    // Promise.reject(new Error('x'))"` exits 1. Losing the message is bad; losing the
+    // code is worse, because the code is what CI reads.
   }
   process.exit(code);
 }

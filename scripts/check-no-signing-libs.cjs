@@ -169,6 +169,13 @@ const lockfiles = [
  * and one run should report everything it can see.
  */
 function main() {
+  // Resolved HERE, before the loop. Making it lazy moved the throw inside
+  // findOffendersIn*Lock, which run inside the per-lockfile `catch` below — so a malformed
+  // .dependency-cruiser.cjs was reported as "pnpm-lock.yaml: could not find the
+  // no-signing-libraries rule", blaming the lockfile for a config defect and repeating it
+  // once per lockfile, while the entrypoint's own catch for exactly this case never ran.
+  banned();
+
   let violated = false;
   let cannotRun = false;
   for (const { path, label, parse } of lockfiles) {

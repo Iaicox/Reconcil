@@ -10,7 +10,6 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { inspect } from 'node:util';
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createDb, runMigrations, type Db } from '@reconcil/db';
@@ -26,7 +25,7 @@ import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
 import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
-import { EXIT_CANNOT_RUN, classifyUnrunnable, reportAndExit, unrunnableLines } from './evals/runnability.js';
+import { EXIT_CANNOT_RUN, reportFailure } from './evals/runnability.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
 import type { CaseResult, GateResult } from './evals/types.js';
 
@@ -226,14 +225,10 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
 // command delegates to runEvals() directly) — mirrors keygen.ts/seed.ts/http.ts.
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runEvals().catch((err: unknown) => {
-    // An environmental fault gets two lines and exit 2; a gate failure keeps the full object
+    // An environmental fault gets two lines and exit 2; anything else keeps the full object
     // and exit 1. Both are red — a gate that could not run must stay visible — but the CI
     // summary should say which job the reader has, rather than making them parse a 40-line
     // SDK dump to find the sentence "your credit balance is too low".
-    const unrunnable = classifyUnrunnable(err);
-    void reportAndExit(
-      unrunnable !== null ? EXIT_CANNOT_RUN : 1,
-      unrunnable !== null ? unrunnableLines(unrunnable) : [`eval run failed: ${inspect(err, { depth: 5 })}`],
-    );
+    void reportFailure('eval gate', err);
   });
 }

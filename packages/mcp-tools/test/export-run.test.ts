@@ -1,9 +1,13 @@
 /**
- * `baseDir` (export-run.ts) is pure filesystem math — no DB — so its confinement is tested
- * here, hermetically, against a real temp directory standing in for `RECONCIL_EXPORT_DIR`.
+ * `writeExportFiles` (export-run.ts) — the path every export tool takes — against a real
+ * temp directory standing in for `RECONCIL_EXPORT_DIR`. No DB, but this is NOT pure path
+ * math: it creates directories, plants junctions and writes real files, so a new case must
+ * expect on-disk state (and `{ flag: 'wx' }` makes a second write to the same name a hard
+ * EEXIST, not a silent overwrite).
+ *
  * H2 (security): `out_dir` is a model-controlled tool argument and therefore hostile; it
  * must resolve to a subpath *under* the export root, never an arbitrary write location.
- * Mirrors `import-fs.test.ts` (the read-path counterpart) in shape and intent.
+ * Mirrors `import-fs.test.ts` (the read-path counterpart) in intent.
  */
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

@@ -261,6 +261,45 @@ auth-path latency ever becomes a measured concern. Where: `apps/mcp-server/src/a
 
 ## Exporters
 
+**ADR-012 d7 describes a two-step confinement and promises more than Node can deliver; the
+implementation is now nine steps and a weaker guarantee.** Raised 2026-09-13 alongside the
+ADR-005 d2 entry above, by the same signal — a decision whose stated invariant is not what
+the implementation actually provides. Recorded, not acted on: it belongs with the ADR sweep,
+not in the branch that surfaced it.
+
+d7 says `out_dir` is "resolved as a subpath under it, prefix-checked, then `realpath`-rechecked
+past symlinks", and that an escape "is `INVALID_INPUT`, never a write outside the configured
+base". After this branch the write path does: prefix check → realpath of the deepest existing
+ancestor → `mkdir -p` → realpath of the FINISHED directory anchored at the ROOT, requiring
+equality with `realpath(base)/exportId` → single-segment checks on `exportId` and each
+`f.name` → `{ flag: 'wx' }` → cleanup of partial writes → `rmdir` of the orphan on refusal.
+
+Two mismatches, neither of them a hole:
+
+- **Error contract.** d7 names one escape class and assigns it `INVALID_INPUT`. That still
+  holds for the cases it names (`..`, an absolute path outside the root — caught before
+  anything is created). But the classes discovered since — a link planted during the `mkdir`
+  window, and a redirect to a different location *inside* the root — return `INTERNAL`,
+  because by then the caller's argument has already been validated and the fault is not
+  theirs. d7 does not mention either class, so a reader implementing to it would map them
+  wrongly.
+- **"Never a write outside the configured base."** `mkdir -p` runs before the post-creation
+  check can fire, so a link planted in that window does get a real DIRECTORY created behind
+  it outside the root (no contents ever land there, and it is best-effort `rmdir`'d). The
+  absolute phrasing is not achievable in Node: closing it needs `openat`/`O_NOFOLLOW`
+  per segment, which the promises API does not expose. The honest form is "no export CONTENT
+  is ever written outside the root", plus the residual named.
+
+Why this matters beyond tidiness: five review rounds went into this path, each adding a
+mechanism d7 does not describe. A decision that under-describes what was built stops being
+the thing a reviewer can check an implementation against — which is how the mechanisms came
+to be designed in review, one finding at a time, rather than decided once.
+
+Trigger: the ADR sweep (see the ADR-005 entry). Where: `docs/adr/ADR-012-mcp-transport-auth.md`
+(decision 7), `docs/architecture/02-mcp-contracts.md` (the matching `out_dir` paragraph),
+`packages/mcp-tools/src/tools/export-run.ts`, `packages/mcp-tools/src/fs-confine.ts`.
+*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13 — raised, not acted on)*
+
 **Residual TOCTOU between `realpath` and `open` (narrowed, not closed).** The original entry
 said "Export I/O reads the path before its `realpath` re-check", and re-reading it while
 fixing found the description understated one half and overstated the other.
@@ -404,7 +443,7 @@ label-resolution cases can be restored. Where: `apps/cli/src/evals/seed-case.ts`
 
 ## Reconciling the count
 
-This register holds **29 entries**. The source ledger
+This register holds **30 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
@@ -500,7 +539,11 @@ number is gone.) The reconciliation from 32 ledger lines:
   of the row set. It is an ADR change plus an ingestion simplification, so it gets its own
   branch rather than riding the one that surfaced it.
 
-32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 + 1 + 1 = **29**, matching this document.
+- **+1**: a second entry raised by the same review and also not acted on — ADR-012 d7
+  describing a confinement the implementation has outgrown. Same signal as the ADR-005 one,
+  found the same way, and it goes to the same sweep.
+
+32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 + 1 + 1 + 1 = **30**, matching this document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation

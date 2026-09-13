@@ -53,12 +53,41 @@ describe('classifyUnrunnable', () => {
     expect(classifyUnrunnable(apiError(500, 'api_error', 'internal'))).toBeNull();
   });
 
-  it('returns null for anything that carries no HTTP status', () => {
+  it('returns null for a plain error that carries no HTTP status and is not an SDK fault', () => {
     expect(classifyUnrunnable(new Error('assertion failed'))).toBeNull();
     expect(classifyUnrunnable('a string')).toBeNull();
     expect(classifyUnrunnable(null)).toBeNull();
     expect(classifyUnrunnable({ error: { error: { message: 'no status here' } } })).toBeNull();
   });
+  it('classifies a REAL SDK connection error — the shape, not a hand-built stand-in', async () => {
+    // This is the test that was missing, and its absence is why the first version of this
+    // branch shipped dead code: it keyed on `err.name`, which the SDK never sets (every one
+    // of its error classes inherits name === 'Error'). A hand-built `{ name:
+    // 'APIConnectionError' }` would have passed happily while the real thing fell through
+    // to exit 1 with the raw dump.
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const conn = new Anthropic.APIConnectionError({ message: 'socket hang up' });
+    expect(conn.name).toBe('Error'); // the trap, asserted so it cannot quietly change
+    expect(conn.status).toBeUndefined();
+    expect(classifyUnrunnable(conn)?.reason).toMatch(/could not be reached/i);
+  });
+
+  it('classifies a REAL timeout — it subclasses the connection error, so one check covers both', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const timeout = new Anthropic.APIConnectionTimeoutError({ message: 'timed out' });
+    expect(classifyUnrunnable(timeout)?.reason).toMatch(/could not be reached/i);
+  });
+
+  it('does not give a deliberate abort a network diagnosis', async () => {
+    // APIUserAbortError does NOT subclass APIConnectionError, so it must be handled on its
+    // own — otherwise Ctrl-C is reported as "check ANTHROPIC_BASE_URL and network egress".
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const abort = new Anthropic.APIUserAbortError();
+    const c = classifyUnrunnable(abort);
+    expect(c?.reason).toMatch(/cancelled/i);
+    expect(c?.hint).not.toMatch(/network|egress|ANTHROPIC_BASE_URL/i);
+  });
+
 
   it('classifies on STATUS, not on the shape of the body a gateway returned', () => {
     // CI may point ANTHROPIC_BASE_URL at a gateway, and this repo has already met one that
