@@ -65,6 +65,20 @@ async function realpathExistingAncestor(path: string): Promise<string> {
 }
 
 /**
+ * Realpath re-check for a directory that now EXISTS — the write path's second look, after
+ * `mkdir -p`. `realpathAncestorWithinBase` can only vouch for the deepest ancestor that
+ * existed at validation time; the segments created afterwards were never checked, and a
+ * co-resident writer racing the `mkdir` can plant a symlink among them. Re-resolving the
+ * finished directory confirms the thing about to be written into is the thing that was
+ * validated. Returns false if either path cannot be resolved — missing means something
+ * removed it underneath us, which is not a state to write into.
+ */
+export async function realpathDirWithinBase(base: string, dir: string): Promise<boolean> {
+  const check = await realpathWithinBase(base, dir);
+  return check.ok;
+}
+
+/**
  * Realpath re-check for a `target` that may not exist yet (the write-path shape: the caller
  * is about to `mkdir -p` it). Realpaths the deepest existing ancestor of both `base` and
  * `target` and confirms the target's ancestor sits inside the base's ancestor — this defeats

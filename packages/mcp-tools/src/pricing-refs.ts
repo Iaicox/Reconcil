@@ -11,7 +11,7 @@
  * legs. Both read the exact same columns, so the SQL lives here once.
  */
 import { fxRates, priceSnapshots, tokens, type Db, type Tx } from '@reconcil/db';
-import { eq, inArray } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 
 import type { FxRef, PriceRef, Warning } from '@reconcil/core';
 import type {
@@ -50,6 +50,13 @@ export function collectPricingRefs(valued: ValuationResult): { priceRefs: PriceR
  * Re-hydrate `price_snapshots` rows pinned by id into wire `PriceRef`s, keyed by
  * `snapshot_id` (H11, C4 "priced means pinned"). `ids` is de-duplicated by the caller;
  * an empty list short-circuits (no query) — the common stablecoin-face-value path.
+ *
+ * `ORDER BY id` is load-bearing, not tidiness: a `Map` iterates in insertion order, and
+ * export-journal-drafts.ts turns this map straight into the envelope's citation ARRAY
+ * (`[...priceRefMap.values()]`). Without it the array order is the planner's row order —
+ * measured as DESCENDING id on a four-row table — so two runs of the same tool call over
+ * identical data could emit citations in different orders. Nothing reads refs positionally,
+ * so this was never wrong; it was non-deterministic, which P1/P2 do not allow in output.
  */
 export async function hydratePriceRefs(db: Db | Tx, ids: number[]): Promise<Map<number, PriceRef>> {
   const map = new Map<number, PriceRef>();
@@ -62,7 +69,8 @@ export async function hydratePriceRefs(db: Db | Tx, ids: number[]): Promise<Map<
     })
     .from(priceSnapshots)
     .innerJoin(tokens, eq(tokens.id, priceSnapshots.tokenId))
-    .where(inArray(priceSnapshots.id, ids));
+    .where(inArray(priceSnapshots.id, ids))
+    .orderBy(asc(priceSnapshots.id));
   for (const r of rows) {
     map.set(r.id, {
       snapshot_id: r.id, token: r.symbol ?? String(r.tokenId), date: r.priceDate,
@@ -72,7 +80,9 @@ export async function hydratePriceRefs(db: Db | Tx, ids: number[]): Promise<Map<
   return map;
 }
 
-/** Re-hydrate `fx_rates` rows pinned by id into wire `FxRef`s, keyed by `fx_rate_id` (H11). */
+/** Re-hydrate `fx_rates` rows pinned by id into wire `FxRef`s, keyed by `fx_rate_id` (H11).
+ *  `ORDER BY id` for the same reason as `hydratePriceRefs` above — the map becomes a
+ *  citation array at the edge, and an array is ordered whether or not anyone meant it to be. */
 export async function hydrateFxRefs(db: Db | Tx, ids: number[]): Promise<Map<number, FxRef>> {
   const map = new Map<number, FxRef>();
   if (ids.length === 0) return map;
@@ -82,7 +92,8 @@ export async function hydrateFxRefs(db: Db | Tx, ids: number[]): Promise<Map<num
       quote: fxRates.quoteCurrency, rate: fxRates.rate, source: fxRates.source,
     })
     .from(fxRates)
-    .where(inArray(fxRates.id, ids));
+    .where(inArray(fxRates.id, ids))
+    .orderBy(asc(fxRates.id));
   for (const r of rows) {
     map.set(r.id, { fx_rate_id: r.id, date: r.rateDate, base: r.base, quote: r.quote, rate: r.rate, source: r.source });
   }

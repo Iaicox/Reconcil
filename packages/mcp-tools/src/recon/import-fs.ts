@@ -9,7 +9,7 @@
  * symlink escape) — plus a byte-size cap. Every failure returns a GENERIC message: the
  * path and the underlying fs error never leak back to the caller.
  */
-import { readFile, stat } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { ToolError } from '../errors.js';
@@ -61,19 +61,33 @@ export async function readImportFile(filePath: string): Promise<string> {
   }
   const realTarget = check.realTarget;
 
-  let size: number;
+  // ONE open, then stat and read through that descriptor. The previous shape resolved the
+  // path three separate times — realpath, stat, readFile — so the size cap measured one
+  // inode and the read consumed whatever the path pointed at by then. A co-resident writer
+  // swapping a path component between the stat and the read walked straight past the
+  // 8 MB cap, which is the one thing that cap exists to prevent. `fh.stat()` reports the
+  // descriptor's own inode, and `fh.readFile()` reads that same descriptor, so check and
+  // use cannot diverge. (The realpath→open window remains and is the residual TOCTOU noted
+  // in 09-known-gaps.md; closing it needs an O_NOFOLLOW-per-segment walk, which is a
+  // different slice. This removes the window that had an actual consequence.)
+  let fh;
   try {
-    size = (await stat(realTarget)).size;
+    fh = await open(realTarget, 'r');
   } catch {
     throw new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory');
   }
-  if (size > maxFileBytes()) {
-    throw new ToolError('INVALID_INPUT', `file exceeds the ${String(maxFileBytes())}-byte import limit`);
-  }
-
   try {
-    return await readFile(realTarget, 'utf8');
-  } catch {
+    const { size } = await fh.stat();
+    if (size > maxFileBytes()) {
+      throw new ToolError('INVALID_INPUT', `file exceeds the ${String(maxFileBytes())}-byte import limit`);
+    }
+    return await fh.readFile('utf8');
+  } catch (err) {
+    // The cap is a ToolError already shaped for the caller; anything else is an fs fault
+    // whose text must not leak (C6).
+    if (err instanceof ToolError) throw err;
     throw new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory');
+  } finally {
+    await fh.close();
   }
 }

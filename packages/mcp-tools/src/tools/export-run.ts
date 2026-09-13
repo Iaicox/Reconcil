@@ -16,7 +16,7 @@ import { isZero, type RenderedExport } from '@reconcil/exporters';
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
-import { realpathAncestorWithinBase, resolveWithinBase } from '../fs-confine.js';
+import { realpathAncestorWithinBase, realpathDirWithinBase, resolveWithinBase } from '../fs-confine.js';
 import { runWriteTool } from '../write-tx.js';
 import type { CloseData } from './close-pack-data.js';
 
@@ -76,12 +76,23 @@ export async function runExport<T>(
   const files: { name: string; path: string; sha256: string }[] = [];
   try {
     await mkdir(dir, { recursive: true });
+    // Second look, now that the directory exists. baseDir()'s check ran against the deepest
+    // ancestor that existed THEN; every segment created since — including this export's own
+    // `<uuid>/` — went unvalidated, and a co-resident writer racing the mkdir can redirect
+    // one with a symlink. Cheap (two realpaths) and it fails before the first byte.
+    if (!(await realpathDirWithinBase(await baseDir(opts.outDir), dir))) {
+      throw new ToolError('INTERNAL', `${opts.toolName} failed to write export files`);
+    }
     for (const f of rendered.files) {
       const path = join(dir, f.name);
-      await writeFile(path, f.content);
+      // 'wx': create, never follow or truncate an existing entry. The directory is a fresh
+      // UUID so nothing legitimate is ever there — if something is, it was planted, and
+      // plain writeFile would happily follow it out of the export root.
+      await writeFile(path, f.content, { flag: 'wx' });
       files.push({ name: f.name, path, sha256: f.sha256 });
     }
   } catch (err) {
+    if (err instanceof ToolError) throw err;
     throw new ToolError('INTERNAL', `${opts.toolName} failed to write export files`, undefined, err);
   }
 

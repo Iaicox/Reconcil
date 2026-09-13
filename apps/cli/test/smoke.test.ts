@@ -41,4 +41,14 @@ describe('selectSmokeDataset', () => {
     const all = [...SMOKE_IDS].map((id) => fakeCase(id));
     expect(selectSmokeDataset(all)).toHaveLength(SMOKE_IDS.size);
   });
+  it('a duplicate id in the literal is loud, not a silently smaller smoke', () => {
+    // The failure this guards: `new Set([...])` absorbs a repeat, `ids.size` drops to 5,
+    // and selectSmokeDataset's `length === size` check is then satisfied by 5 cases — a
+    // smoke one case smaller than intended, reporting a clean match. The dataset-side
+    // duplicate check below is a different mistake and does not cover this one.
+    const withDupe = ['cover-001', 'flow-001', 'cover-001'];
+    expect(new Set(withDupe).size).not.toBe(withDupe.length);
+    // SMOKE_IDS is built under that assertion, so the real one is intact:
+    expect(SMOKE_IDS.size).toBe(6);
+  });
 });

@@ -10,7 +10,24 @@
  */
 import type { EvalCase } from '@reconcil/evals';
 
-export const SMOKE_IDS = new Set(['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001', 'recon-status-001']);
+/**
+ * The ids, as an ARRAY. A `new Set([...])` literal absorbs a duplicate silently, and
+ * `selectSmokeDataset` compares against `ids.size` — so a typo repeating one id would
+ * shrink the smoke to 5 cases and still report a clean match. (It catches duplicates in the
+ * DATASET, not in this literal; the two are different mistakes.) Declared as a list and
+ * de-duplicated under an assertion, so the mistake is loud at module load.
+ */
+const SMOKE_ID_LIST = ['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001', 'recon-status-001'] as const;
+
+export const SMOKE_IDS: ReadonlySet<string> = (() => {
+  const set = new Set<string>(SMOKE_ID_LIST);
+  if (set.size !== SMOKE_ID_LIST.length) {
+    const seen = new Set<string>();
+    const dupes = SMOKE_ID_LIST.filter((id) => (seen.has(id) ? true : (seen.add(id), false)));
+    throw new Error(`SMOKE_ID_LIST contains duplicate id(s): ${[...new Set(dupes)].join(', ')}`);
+  }
+  return set;
+})();
 
 /**
  * Filter `all` down to `ids` and assert every id actually matched exactly once — mirrors

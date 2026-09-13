@@ -125,6 +125,12 @@ const INTERNAL_ERROR_BODY = JSON.stringify({ error: 'internal_error' });
  * `destroy()` the socket if headers already went out (a started response can't
  * be retracted). Either branch resolves — no hang. Takes only `handleRequest` so
  * tests can inject a failing stub transport without opening a real socket.
+ *
+ * The third case is doing NOTHING. If the response completed between the `headersSent`
+ * check and the `destroy()` call — a real race, since the rejection and the final write
+ * are concurrent — then destroying sends an RST for a reply the client already holds in
+ * full, converting a delivered answer into a transport error on their side. There is
+ * nothing left to write and nothing to retract, so the correct action is none.
  */
 export async function handleHijackedTransport(
   transport: Pick<StreamableHTTPServerTransport, 'handleRequest'>,
@@ -137,6 +143,9 @@ export async function handleHijackedTransport(
     await transport.handleRequest(req, res, parsedBody);
   } catch (err) {
     logger.error('mcp transport handleRequest failed after hijack', { err: serializeError(err) });
+    // Re-read liveness HERE, after the await: these are the values as of the rejection,
+    // not as of the call. A finished or already-destroyed response needs neither branch.
+    if (res.writableEnded || res.destroyed) return;
     if (res.headersSent) {
       res.destroy();
     } else {
@@ -180,7 +189,16 @@ export interface HttpDeps {
 export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   const { db, logger } = deps;
   const authenticate = deps.authenticate ?? ((h) => bearerTenant(db, h));
-  const allowedHosts = deps.allowedHosts ?? resolveAllowedHosts({ PORT: DEFAULT_PORT });
+  // Length-checked, not `??`: `[]` is not nullish, so an explicit empty array used to pass
+  // straight through — and the SDK guards its Host check with `allowedHosts.length > 0`,
+  // which means an empty list turns DNS-rebinding protection OFF rather than making it
+  // maximally strict. Fail-open and silent. resolveAllowedHosts already collapses an empty
+  // RECONCIL_ALLOWED_HOSTS to the defaults, so this makes the injectable seam agree with the
+  // config path instead of being able to express a state production cannot reach.
+  const allowedHosts =
+    deps.allowedHosts !== undefined && deps.allowedHosts.length > 0
+      ? deps.allowedHosts
+      : resolveAllowedHosts({ PORT: DEFAULT_PORT });
   const ipRateLimitPolicy = deps.ipRateLimit ?? { max: 600, timeWindow: '1 minute' };
   const tenantRateLimitPolicy = deps.tenantRateLimit ?? { max: 120, timeWindow: '1 minute' };
   // Built as a typed value rather than spread inline: a union-typed `trustProxy` in an

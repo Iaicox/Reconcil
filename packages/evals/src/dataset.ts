@@ -47,10 +47,23 @@ export type GuardrailKind = z.infer<typeof guardrailKind>;
  * reasonably call `recon_suggest_matches` first to find the match id, or take it from
  * `recon_status`; requiring it would over-specify the path, and banning it would fail a
  * correct run. `no_tools` is the refusal cases' structural half: a decline calls nothing.
+ *
+ * `tools_any_of` is the disjunction `tools_expected` cannot express: a set of tools of which
+ * AT LEAST ONE must be called, for a question two tools answer equally well. flow-002 asks
+ * for "the net USDC flow" — both a flow question and a stablecoin question — and a live run
+ * answered it correctly through `analytics_stablecoin_movements` while the case demanded
+ * `analytics_flows`; G1 scored a miss for a choice that was not wrong.
+ *
+ * The bar for using it is deliberately high, because a case that accepts either tool no
+ * longer tests tool selection at all. Broaden a case only when (a) a GRADED RUN produced the
+ * alternative — never speculatively — and (b) both tools compute the figure server-side. (b)
+ * is what rules out e.g. answering cp-002 from `analytics_list_events`: the rows are there,
+ * but the agent would have to sum them, and the LLM never computes (P1).
  */
 const expectSchema = z
   .object({
     tools_expected: z.array(toolName).optional(),
+    tools_any_of: z.array(toolName).min(2).optional(),
     writes_allowed: z.array(toolName).optional(),
     no_tools: z.boolean().optional(),
     numbers: z.array(z.object({ value: decimalString, label: z.string() }).strict()).optional(),
@@ -62,15 +75,45 @@ const expectSchema = z
   .refine((e) => (e.writes_allowed ?? []).every((t) => WRITE_TOOLS.has(t)), {
     message: 'writes_allowed may only name write tools — sanctioning a read tool is a no-op',
   })
-  .refine((e) => !(e.no_tools === true && ((e.tools_expected?.length ?? 0) > 0 || (e.writes_allowed?.length ?? 0) > 0)), {
-    message: 'no_tools cannot be combined with tools_expected or writes_allowed',
-  })
+  .refine(
+    (e) =>
+      !(
+        e.no_tools === true &&
+        ((e.tools_expected?.length ?? 0) > 0 ||
+          (e.tools_any_of?.length ?? 0) > 0 ||
+          (e.writes_allowed?.length ?? 0) > 0)
+      ),
+    { message: 'no_tools cannot be combined with tools_expected, tools_any_of or writes_allowed' },
+  )
   .refine(
     (e) => {
       const expected = new Set(e.tools_expected ?? []);
       return (e.writes_allowed ?? []).every((t) => !expected.has(t));
     },
     { message: 'a tool cannot be both expected and merely writes_allowed' },
+  )
+  // A duplicate would shrink the set behind the .min(2) that enforces "a set of one is a
+  // plain expectation" — [analytics_flows, analytics_flows] is exactly that, spelled twice.
+  .refine((e) => new Set(e.tools_any_of ?? []).size === (e.tools_any_of?.length ?? 0), {
+    message: 'tools_any_of may not repeat a tool',
+  })
+  // tools_expected already forces the call, so an any-of set containing it is satisfied by
+  // construction and constrains nothing — the defect the retired allowlist had.
+  .refine(
+    (e) => {
+      const expected = new Set(e.tools_expected ?? []);
+      return (e.tools_any_of ?? []).every((t) => !expected.has(t));
+    },
+    { message: 'tools_any_of may not name a tool that tools_expected already requires' },
+  )
+  // An accepted ANSWER and a merely PERMITTED write are different claims about the same
+  // call; asserting both says the case does and does not care which tool answered.
+  .refine(
+    (e) => {
+      const allowed = new Set(e.writes_allowed ?? []);
+      return (e.tools_any_of ?? []).every((t) => !allowed.has(t));
+    },
+    { message: 'tools_any_of may not name a tool that is merely writes_allowed' },
   );
 
 // `wallets` used to sit here. It was validated and then read by nobody: the seeder tracks

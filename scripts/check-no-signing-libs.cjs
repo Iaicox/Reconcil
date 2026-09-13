@@ -135,19 +135,39 @@ const lockfiles = [
   },
 ];
 
+/**
+ * Decide the exit code from what actually happened, rather than from whichever condition
+ * came first:
+ *
+ *   1 — the guard RAN and found a banned package. Actionable: remove the dependency.
+ *   2 — the guard COULD NOT RUN over every lockfile. Actionable: fix the environment.
+ *   0 — clean.
+ *
+ * A violation outranks an incomplete scan, and the two used to be conflated: a violation in
+ * pnpm-lock.yaml followed by an unreadable site/package-lock.json exited 2, reporting "I
+ * could not check" over a banned package the guard had already printed. CI failed either
+ * way — both are non-zero, so there was never a false green — but the reason it gives is
+ * the whole value of a guard that runs on every PR.
+ *
+ * It also no longer stops at the first unreadable lockfile: scanning the rest costs nothing
+ * and one run should report everything it can see.
+ */
 function main() {
   let violated = false;
+  let cannotRun = false;
   for (const { path, label, parse } of lockfiles) {
     if (!existsSync(path)) {
       console.error(`ADR-011 guard cannot run — missing lockfile: ${label}`);
-      process.exit(2);
+      cannotRun = true;
+      continue;
     }
     let offenders;
     try {
       offenders = parse(readFileSync(path, 'utf8'));
     } catch (err) {
       console.error(`ADR-011 guard cannot run — ${label}: ${err.message}`);
-      process.exit(2);
+      cannotRun = true;
+      continue;
     }
     if (offenders.size > 0) {
       violated = true;
@@ -156,7 +176,11 @@ function main() {
     }
   }
 
-  if (violated) process.exit(1);
+  if (violated) {
+    if (cannotRun) console.error('(note: at least one lockfile could not be scanned — the list above may be incomplete)');
+    process.exit(1);
+  }
+  if (cannotRun) process.exit(2);
   console.log('supply-chain ok: no signing/key-material packages in the dependency tree.');
 }
 

@@ -46,10 +46,24 @@ describe('core-30 dataset', () => {
     expect(cases.filter((c) => c.expect.canary_absent)).toHaveLength(2);
   });
 
-  it('every non-guardrail case names the tool(s) it expects', () => {
+  it('every non-guardrail case names the tool(s) it expects, required or accepted', () => {
     for (const c of cases) {
       if (c.expect.guardrail && c.expect.guardrail !== 'none') continue;
-      expect(c.expect.tools_expected?.length ?? 0).toBeGreaterThan(0);
+      const named = (c.expect.tools_expected?.length ?? 0) + (c.expect.tools_any_of?.length ?? 0);
+      expect(named).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps tools_any_of scarce — a case that accepts either tool stops testing tool selection', () => {
+    // Not a style rule: the field is only legitimate where a graded run produced the
+    // alternative AND both tools compute the figure server-side (dataset.ts). If this list
+    // grows, the growth should be a decision someone made, not drift.
+    const anyOf = cases.filter((c) => c.expect.tools_any_of !== undefined).map((c) => c.id);
+    expect(anyOf).toEqual(['flow-002']);
+    // The sibling stablecoin cases stay single-tool on purpose — they name stablecoins
+    // outright, so the specialised tool IS the expected answer.
+    for (const id of ['stable-001', 'stable-002', 'flow-001', 'flow-003-self-transfer']) {
+      expect(cases.find((c) => c.id === id)?.expect.tools_any_of).toBeUndefined();
     }
   });
 
@@ -77,6 +91,7 @@ describe('core-30 dataset', () => {
       id: c.id,
       face: c.face,
       tools_expected: c.expect.tools_expected ?? [],
+      tools_any_of: c.expect.tools_any_of ?? [],
       writes_allowed: c.expect.writes_allowed ?? [],
       no_tools: c.expect.no_tools ?? false,
       guardrail: c.expect.guardrail ?? null,

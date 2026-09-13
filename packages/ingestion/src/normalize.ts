@@ -18,19 +18,52 @@ const INTERNAL_SENTINEL_BASE = -1000;
  * non-numeric component falls back to text order — an unknown labelling scheme
  * still yields a total, deterministic order, which is all the caller needs.
  */
-function compareTraceIds(a: string, b: string): number {
+/**
+ * Decimal-digits only. `Number()` was the old test and it is far too generous for a trace
+ * label: it reads '' as 0, '0x10' as 16 and '1e3' as 1000, putting three non-numeric
+ * segments into the numeric class. Real Etherscan/Blockscout trace ids are digits and
+ * underscores, so nothing that actually occurs changes class under the stricter test.
+ */
+const DECIMAL_SEGMENT = /^[0-9]+$/;
+
+/**
+ * Order two trace labels segment by segment. Exported for its own property test.
+ *
+ * This must be a CONSISTENT comparator (a strict weak ordering), because `sort` is only
+ * defined for one and its result becomes the `log_index` sentinel on every internal
+ * transfer — half of the `UNIQUE (chain_id, tx_hash, log_index, token_id)` idempotency key
+ * (ADR-005). It previously was not: a numeric-vs-non-numeric pair fell through to a raw
+ * string comparison, which cycles against the numeric comparison used by numeric pairs —
+ * "9" < "10" < "1a" < "9". Sorting on a comparator that contradicts itself is
+ * implementation-defined, so the sentinel could depend on the engine and on arrival order.
+ *
+ * The rule that removes the cycle: the two classes are totally ordered against each other
+ * (every numeric segment sorts before every non-numeric one) instead of being compared by a
+ * measure that only makes sense inside one class.
+ */
+export function compareTraceIds(a: string, b: string): number {
   const pa = a.split('_');
   const pb = b.split('_');
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const xa = pa[i];
     const xb = pb[i];
+    // A prefix sorts before what extends it — "0_1" before "0_1_0".
     if (xa === undefined) return -1;
     if (xb === undefined) return 1;
     if (xa === xb) continue;
-    const na = Number(xa);
-    const nb = Number(xb);
-    if (Number.isInteger(na) && Number.isInteger(nb) && na !== nb) return na < nb ? -1 : 1;
-    if (!Number.isInteger(na) || !Number.isInteger(nb)) return xa < xb ? -1 : 1;
+    const numA = DECIMAL_SEGMENT.test(xa);
+    const numB = DECIMAL_SEGMENT.test(xb);
+    if (numA && numB) {
+      // Compare as BigInt, not Number: a pathological label longer than 2^53 would
+      // otherwise collapse distinct segments onto one float. "007" and "7" are the same
+      // number and fall through to the next segment, which is what equality should mean here.
+      const na = BigInt(xa);
+      const nb = BigInt(xb);
+      if (na !== nb) return na < nb ? -1 : 1;
+      continue;
+    }
+    if (numA !== numB) return numA ? -1 : 1;
+    return xa < xb ? -1 : 1;
   }
   return 0;
 }
@@ -184,7 +217,16 @@ export function normalize(
 
   for (const { it, arrival } of internalRows) {
     const txHash = it.hash.toLowerCase();
-    const n = sentinelRank.get(arrival) ?? 0;
+    // No `?? 0` fallback. Every arrival index is ranked above — the grouping loop walks
+    // exactly `internalRows` — so a miss means that invariant broke, and defaulting to 0
+    // would hand a SECOND row in the same tx the sentinel the first already has. That is
+    // the `UNIQUE (chain_id, tx_hash, log_index, token_id)` key (ADR-005): the page would
+    // either fail on the constraint or, under ON CONFLICT DO NOTHING, silently drop a real
+    // value move. Fail loudly where the invariant broke instead of one layer down.
+    const n = sentinelRank.get(arrival);
+    if (n === undefined) {
+      throw new Error(`internal-transfer sentinel rank missing for arrival index ${String(arrival)} (tx ${txHash})`);
+    }
     events.push({
       chainId: ctx.chainId,
       txHash,

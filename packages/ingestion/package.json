@@ -30,6 +30,7 @@
     "@types/node": "catalog:",
     "@types/pg": "catalog:",
     "eslint": "catalog:",
+    "fast-check": "catalog:",
     "pg": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",

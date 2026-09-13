@@ -122,6 +122,14 @@ reviewable diff, and `schema_version` discipline is enforced by CI comment).
     writes_allowed: [recon_suggest_matches]   # permitted route to the match id, not required
     must_cite: true
 
+- id: flow-002
+  face: A
+  question: "What was the net USDC flow (received minus sent) over the last quarter?"
+  setup: { fixture: smb-stables }
+  expect:
+    tools_any_of: [analytics_flows, analytics_stablecoin_movements]   # at least one, not all
+    must_cite: true
+
 - id: trace-001
   face: A
   prior_turns: ["What did this wallet spend on gas in June 2026?"]
@@ -169,8 +177,9 @@ session producer, so the hermetic `test` job needs no API key.
 
 **Graders — deterministic, no LLM in the gate:**
 
-- **G1 trajectory**: `tools_expected` ⊆ called tools; **no write tool** was called outside
-  `tools_expected ∪ writes_allowed`; and a `no_tools` case (the refusals) called nothing.
+- **G1 trajectory**: `tools_expected` ⊆ called tools; at least one of `tools_any_of` was
+  called; **no write tool** was called outside `tools_expected ∪ tools_any_of ∪
+  writes_allowed`; and a `no_tools` case (the refusals) called nothing.
   There is deliberately **no allowlist**. It used to be exhaustive — every call had to be
   named in `tools_allowed` — which scored path conformance rather than correctness: on the
   live run of 2026-09-08 every "disallowed tool" failure was one extra *read*
@@ -181,6 +190,34 @@ session producer, so the hermetic `test` job needs no API key.
   registry's own `readOnlyHint` annotation rather than being restated per case — a newly
   registered write tool is covered the day it lands. `writes_allowed` names a write the
   case permits but does not require.
+
+  `tools_any_of` is the **disjunction** `tools_expected` cannot express: a set of tools of
+  which at least one must be called, for a question two tools answer equally well. It exists
+  because of one measured failure — on the 2026-09-08 run `flow-002` ("the net USDC flow
+  (received minus sent) over the last quarter") was answered through
+  `analytics_stablecoin_movements` rather than the `analytics_flows` the case demanded, with
+  a correct figure, a citation and the coverage caveat surfaced. G1 scored a miss for a
+  choice that was not wrong. This is the same class the allowlist removal addressed one level
+  down.
+
+  **The bar for using it is deliberately high**, because a case that accepts either tool no
+  longer tests tool selection at all. Broaden a case only when (a) a **graded run** produced
+  the alternative — never speculatively — and (b) **both tools compute the figure
+  server-side**. The pass over the other 29 cases that introduced the field found no second
+  case that clears it, and `core-30.test.ts` pins that list so growth is a decision rather
+  than drift:
+
+  | Considered | Verdict |
+  |---|---|
+  | `stable-001`, `stable-002` | **No** — the question names stablecoins outright, so the specialised tool *is* the expected answer, and no graded run has failed them. Broadening on suspicion would leave G1 unable to discriminate between the two tools anywhere. |
+  | `cp-002` | **No** — `analytics_list_events` could surface the rows, but the agent would have to sum them. Fails (b): the LLM never computes (P1). |
+  | `flow-003-self-transfer` | **No** — its gap is the missing two-wallet fixture, not the tool choice; broadening would blur what the case measures. |
+
+  Members of `tools_any_of` are **sanctioned** for the write ban: an accepted answer that
+  happens to be a write tool is not an unsanctioned write. Validation rejects a set of one (a
+  plain expectation), a repeated member, overlap with `tools_expected` (satisfied by
+  construction), overlap with `writes_allowed` (an accepted answer and a merely permitted
+  call are different claims), and combination with `no_tools`.
 - **G2 numeric**: every expected number appears in the final answer (decimal-normalized
   string comparison — exact, no tolerance: the tools are deterministic, so is the truth).
   **Anti-fabrication**: every number in the answer (regex-extracted, format-normalized)
@@ -228,8 +265,13 @@ G4 3/3, G5 2/2.** `flow-003-self-transfer` passes. `flow-002` still does not, bu
 different reason, which is the point of measuring rather than assuming: the agent now sees
 the wallet and answers the "net USDC flow" question with `analytics_stablecoin_movements`
 — *flows restricted to verified stablecoins* — where the case demands `analytics_flows`.
-Two tools legitimately answer that question and `tools_expected` cannot say so; that is now
-its own known-gaps entry, not a model failure. G2 read 2/3 on that run because of a grader
+Two tools legitimately answer that question and `tools_expected` could not say so. **That is
+fixed, not deferred: `tools_any_of` (§5, G1) now carries the disjunction, and the case
+accepts either tool.** Note the fix is a grader fix — nothing was re-measured live, because
+`flow-002` is not in `SMOKE_IDS` and `evals-full` is the only job that spends API budget.
+What is proven is the grading logic (unit tests over both members, the write-sanction path,
+the refines) and that the dataset still validates; the next full 30×3 is what will show the
+case scoring green in a real run. G2 read 2/3 on that run because of a grader
 defect the same run exposed — "the **ERC-20** stream is still queued" scored as a
 fabricated −20 — fixed immediately after and confirmed green by `evals-smoke`, which
 carries `cover-001`.

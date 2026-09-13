@@ -60,8 +60,16 @@
   face: A
   question: "What was the net USDC flow (received minus sent) over the last quarter?"
   setup: { fixture: smb-stables }
+  # The only any-of case in the set, and it earned it on a graded run: on 2026-09-08 the
+  # agent answered through analytics_stablecoin_movements — "token flows restricted to
+  # verified stablecoins, with per-peg subtotals" — cited it and surfaced the coverage
+  # caveat, and G1 scored a miss for a choice that was not wrong. The question is genuinely
+  # both a flow question and a stablecoin one, and BOTH tools compute the figure server-side,
+  # which is the bar (dataset.ts). stable-001/002 deliberately did NOT get the same
+  # treatment: they name stablecoins outright, so the specialised tool is the expected
+  # answer and no run has failed them.
   expect:
-    tools_expected: [analytics_flows]
+    tools_any_of: [analytics_flows, analytics_stablecoin_movements]
     must_cite: true
 
 - id: flow-003-self-transfer

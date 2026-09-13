@@ -213,7 +213,12 @@ function confirmedFiat(tenantId: string) {
 export function mapStatusCounts(rows: { status: string; count: number }[]): ReconStatusResult['records'] {
   const records: ReconStatusResult['records'] = { ...ZERO_RECORD_COUNTS };
   for (const r of rows) {
-    if (r.status in records) {
+    // Object.hasOwn, not `in`: `in` walks the prototype chain, so a status column reading
+    // "toString" or "constructor" would pass the guard and then write a number over the
+    // key. The status values are a DB enum today, which is why this was never reachable —
+    // but the guard exists to make the 5-key contract shape (C7) true by construction, and
+    // a guard that can be satisfied by Object.prototype does not do that.
+    if (Object.hasOwn(records, r.status)) {
       (records as Record<string, number>)[r.status] = r.count;
     }
   }
