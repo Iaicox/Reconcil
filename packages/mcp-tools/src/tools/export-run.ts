@@ -7,7 +7,7 @@
  * register a row) but never destructive. Shared by both Face A export tools.
  */
 import { mkdir, rm, rmdir, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
@@ -16,7 +16,7 @@ import { isZero, type RenderedExport, type RenderedFile } from '@reconcil/export
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
-import { realpathAncestorWithinBase, realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
+import { isSinglePathSegment, realpathAncestorWithinBase, realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
 import { runWriteTool } from '../write-tx.js';
 import type { CloseData } from './close-pack-data.js';
 
@@ -103,7 +103,11 @@ export async function writeExportFiles(
   // outside the validated out_dir — still inside the root, so the post-mkdir check below
   // could not see it. Same argument that keeps the root parameter module-private, applied
   // to the other side of the join.
-  if (exportId !== basename(exportId) || exportId === '' || exportId === '.' || exportId === '..') {
+  // Names validated BEFORE any I/O — mkdir included. Checking them after `mkdir -p` left
+  // an empty `<exportId>/` orphaned under the export root on a bad name: no `exports` row,
+  // and a fresh uuid every retry so nothing ever reclaimed it. They need no filesystem to
+  // check, so there is no reason for them to run after one has been touched.
+  if (!isSinglePathSegment(exportId) || rendered.some((f) => !isSinglePathSegment(f.name))) {
     throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
   }
 
@@ -152,21 +156,6 @@ export async function writeExportFiles(
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, new Error(`export dir confinement failed: ${why}`));
     }
     const realDir = check.realTarget;
-    // Names checked BEFORE any write, so a bad one cannot leave a half-written directory.
-    for (const f of rendered) {
-      // Same guard as `exportId`, for the same reason: this is an exported seam, and a name
-      // like '../manifest.json' writes outside the per-export directory the check above just
-      // validated — while `files[].path` still reports it as inside. `wx` is no help there:
-      // the traversed target is a fresh name. The '', '.' and '..' cases are spelled out
-      // because `basename('..')` is '..', so the first clause alone lets it through and the
-      // write targets the PARENT of the validated directory, refused only incidentally by
-      // EISDIR. Today every name is renderer-generated, which is an argument about callers,
-      // not about the seam.
-      if (f.name !== basename(f.name) || f.name === '' || f.name === '.' || f.name === '..') {
-        throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
-      }
-    }
-
     // Independent writes, one round of I/O. Written through the RESOLVED directory — that
     // is the security property. REPORTED under the logical one: an export root that is
     // itself a symlink or bind-mount (macOS /var → /private/var) would otherwise hand the

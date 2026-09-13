@@ -11,7 +11,24 @@
  * this module never throws. Dependency-free (fs/promises + path only).
  */
 import { realpath } from 'node:fs/promises';
-import { dirname, resolve, sep } from 'node:path';
+import { basename, dirname, resolve, sep } from 'node:path';
+
+/**
+ * Is `name` a single, ordinary path segment — something that can be `join`ed onto a
+ * confined directory without leaving it?
+ *
+ * `basename(x) === x` alone is not enough: `basename('..')` is `'..'`, so the traversal
+ * passes and the join targets the PARENT of the validated directory. `''` and `'.'` both
+ * resolve to the directory itself. All three have to be named.
+ *
+ * Lives here rather than inline at each call site because export-run.ts had the same
+ * four-clause expression written out twice, each with its own copy of that `'..'`
+ * rationale — and the next seam that joins a caller-supplied component would have had to
+ * rediscover it.
+ */
+export function isSinglePathSegment(name: string): boolean {
+  return name !== '' && name !== '.' && name !== '..' && name === basename(name);
+}
 
 /**
  * Resolve `target` against `base`. Pure path math, no I/O. Returns the resolved absolute

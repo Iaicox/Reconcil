@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { classifyUnrunnable } from '../src/evals/runnability.js';
+import { UsageError, classifyUnrunnable } from '../src/evals/runnability.js';
 
 /** The shape the Anthropic SDK throws: a status plus the parsed error body. Other shapes —
  *  what a gateway might return — are covered separately below. */
@@ -115,5 +115,19 @@ describe('classifyUnrunnable', () => {
   it('carries a hint that says what to DO, not just what happened', () => {
     const c = classifyUnrunnable(apiError(400, 'invalid_request_error', 'Your credit balance is too low'));
     expect(c?.hint).toMatch(/billing|credit/i);
+  });
+});
+
+describe('UsageError', () => {
+  it('is classified as cannot-run — a bad invocation never started the gate', () => {
+    const c = classifyUnrunnable(new UsageError('--runs must be a positive integer (got: 0)'));
+    expect(c?.reason).toMatch(/--runs must be a positive integer/);
+    expect(c?.hint).toMatch(/never started/);
+  });
+
+  it('does not swallow an ordinary Error with the same message', () => {
+    // The class is the signal, not the text: a genuine failure that happens to mention
+    // arguments must still read as a gate failure.
+    expect(classifyUnrunnable(new Error('--runs must be a positive integer'))).toBeNull();
   });
 });

@@ -6,6 +6,7 @@
  * the gate passes vacuously over ZERO runs); and an unknown flag is a hard error, not a
  * silent no-op (a mistyped `--smoek` would otherwise fall through and run the full 30×3).
  */
+import { UsageError } from './runnability.js';
 import { coreDatasetPath } from '@reconcil/evals';
 
 import { DEFAULT_MODEL } from '../model.js';
@@ -40,14 +41,14 @@ export function parseArgs(argv: string[]): Args {
     else if (a === '--out') args.out = argv[++i] ?? args.out;
     // `run` (`evals run …`) and the bare `--` pnpm forwards (`evals -- --smoke`) are no-ops.
     else if (a === 'run' || a === '--') continue;
-    else throw new Error(`unknown argument: ${String(a)}`);
+    else throw new UsageError(`unknown argument: ${String(a)}`);
   }
   if (args.smoke) args.runs = 1;
   if (!Number.isInteger(args.runs) || args.runs < 1) {
-    throw new Error(`--runs must be a positive integer (got: ${String(args.runs)})`);
+    throw new UsageError(`--runs must be a positive integer (got: ${String(args.runs)})`);
   }
   if (!Object.hasOwn(DATASETS, args.suite)) {
-    throw new Error(`unknown suite: ${args.suite} (known: ${Object.keys(DATASETS).join(', ')})`);
+    throw new UsageError(`unknown suite: ${args.suite} (known: ${Object.keys(DATASETS).join(', ')})`);
   }
   return args;
 }

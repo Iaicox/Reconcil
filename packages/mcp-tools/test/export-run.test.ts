@@ -215,6 +215,20 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     await expect(readFile(join(root, 'june', 'close', 'run-uuid', 'b.json'), 'utf8')).resolves.toBe('squatted');
   });
 
+  it('a rejected name creates no directory at all — validation runs before mkdir', async () => {
+    // The name checks used to run AFTER `mkdir -p`, so a bad name left an empty <exportId>/
+    // under the export root with no `exports` row — and a fresh uuid on every retry, so
+    // nothing reclaimed it. They need no filesystem to perform, so they must not run after
+    // one has been touched.
+    await expect(
+      writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [
+        { name: `..${sep}escaped.json`, content: '{}', sha256: 'x'.repeat(64) },
+      ]),
+    ).rejects.toMatchObject({ code: 'INTERNAL' });
+
+    await expect(readdir(join(root, 'june', 'close'))).rejects.toThrow(/ENOENT/);
+  });
+
   it('still writes normally when no link is in the way — the guard is not refusing everything', async () => {
     const { dir, files } = await writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [file]);
     expect(dir).toBe(join(root, 'june', 'close', 'run-uuid'));

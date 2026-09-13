@@ -26,6 +26,16 @@ import Anthropic from '@anthropic-ai/sdk';
 /** Exit code for "the gate could not run" — 1 stays "the gate ran and failed". */
 export const EXIT_CANNOT_RUN = 2;
 
+/**
+ * A bad invocation: an unknown flag, `--runs 0`, a `--cases` id that is not in the dataset.
+ * Its own class because the exit code has to tell it apart from a gate failure — the suite
+ * never started, so reporting 1 ("the gate ran and missed") sends the reader to a diff that
+ * cannot explain it. Same reasoning that moved the missing-ANTHROPIC_API_KEY branch to 2.
+ */
+export class UsageError extends Error {
+  override readonly name = 'UsageError';
+}
+
 export interface Unrunnable {
   /** One line, for the top of a CI log. */
   reason: string;
@@ -86,6 +96,9 @@ function isUserAbort(err: unknown): boolean {
 }
 
 export function classifyUnrunnable(err: unknown): Unrunnable | null {
+  if (err instanceof UsageError) {
+    return { reason: err.message, hint: 'fix the invocation and run again — the gate never started' };
+  }
   const status = apiStatus(err);
   if (status === null) {
     if (isUserAbort(err)) {

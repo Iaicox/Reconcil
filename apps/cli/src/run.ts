@@ -25,7 +25,7 @@ import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
 import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
-import { EXIT_CANNOT_RUN, reportFailure } from './evals/runnability.js';
+import { EXIT_CANNOT_RUN, UsageError, reportFailure } from './evals/runnability.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
 import type { CaseResult, GateResult } from './evals/types.js';
 
@@ -130,7 +130,7 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   const selected = args.cases.length > 0 ? all.filter((c) => args.cases.includes(c.id)) : all;
   if (args.cases.length > 0 && selected.length !== args.cases.length) {
     const missing = args.cases.filter((id) => !all.some((c) => c.id === id));
-    throw new Error(`unknown case id(s): ${missing.join(', ')}`);
+    throw new UsageError(`unknown case id(s): ${missing.join(', ')}`);
   }
   const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : selected;
 
