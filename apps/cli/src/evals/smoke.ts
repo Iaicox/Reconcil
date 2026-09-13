@@ -74,5 +74,9 @@ export function selectSmokeDataset(all: readonly EvalCase[], ids: ReadonlySet<st
   ]
     .filter((s): s is string => s !== undefined)
     .join(' — ');
-  throw new Error(`smoke dataset mismatch: expected ${String(ids.size)} cases, got ${String(dataset.length)} (${detail})`);
+  // Detail first. The offsetting case — one id duplicated, another renamed away — reads
+  // "expected 6 cases, got 6", and a reader scanning CI takes matching counts for a spurious
+  // failure. The count was the trap this function stopped using; it must not stay the
+  // headline of the message.
+  throw new Error(`smoke dataset mismatch: ${detail} (selected ${String(dataset.length)} of ${String(ids.size)} named ids)`);
 }

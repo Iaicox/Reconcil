@@ -4,7 +4,8 @@
 added to the idempotency key — see decision 2) · 2026-07-24 (trace-level internal
 transfers activated — see decision 2) · 2026-08-06 (internal transfers wired into
 the worker's `native` stream; `n` re-specified from provider order to a stable
-per-tx rank — see decision 2)
+per-tx rank — see decision 2) · 2026-09-13 (the label path is taken only for
+trace labels in the decimal-path shape both providers send — see decision 2)
 
 ## Context
 
@@ -22,8 +23,19 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    (`txlistinternal`; a tx can carry several contract-initiated native inflows, so a
    single `-1` slot cannot hold them). *n* is 0-based and is the trace's **rank
    inside its parent tx under a stable order** — the provider's own trace label when
-   it sends one (Etherscan `traceId`, Blockscout `index`; both enumerate the call
-   tree in execution order), otherwise a `(from, to, value)` tuple. It is
+   it sends one **in the decimal-path shape both providers actually send** (Etherscan
+   `traceId`, Blockscout `index`: digits, optionally underscore-separated, `0` /
+   `67` / `0_1_2`; both enumerate the call tree in execution order), otherwise a
+   `(from, to, value)` tuple. *Amended 2026-09-13:* the shape restriction is new. The
+   label comparator has to be a total order over any string, so an unfamiliar labelling
+   scheme would still get ranked — but by a rule chosen for decimal paths, and the
+   ranking becomes the sentinel. Narrowing the label path to the shape that is actually
+   observed sends anything else to the tuple order, which is derived from the transfer
+   itself rather than from how a provider chose to name it, and so cannot shift when a
+   naming scheme does. The trade-off is accepted deliberately: a future provider whose
+   labels carry real ordering information in another shape would be ordered by tuple
+   instead, which is stable but loses execution order — at which point the right move is
+   to widen the shape test here, not to remove it. It is
    deliberately **not** arrival order: the sentinel is half of the idempotency key,
    so it must be a function of the row set alone, or a re-fetch that returns the same
    traces in a different order (the overlap boundary block, or the other provider

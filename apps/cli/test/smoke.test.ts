@@ -43,7 +43,10 @@ describe('selectSmokeDataset', () => {
   });
 
   it('throws over an empty dataset rather than passing vacuously with ZERO cases', () => {
-    expect(() => selectSmokeDataset([], SMOKE_IDS)).toThrow(/expected 6 cases, got 0/);
+    // Asserted on the DEFECT (which ids are gone), not on the counts: the counts are now a
+    // suffix precisely because they are the least informative part of the message.
+    expect(() => selectSmokeDataset([], SMOKE_IDS)).toThrow(/missing: cover-001, flow-001/);
+    expect(() => selectSmokeDataset([], SMOKE_IDS)).toThrow(/selected 0 of 6 named ids/);
   });
 
   it('throws naming duplicates when the source dataset carries a repeated id', () => {

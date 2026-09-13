@@ -6,7 +6,7 @@
  * the citation envelope. Export tools are non-read-only (they write files +
  * register a row) but never destructive. Shared by both Face A export tools.
  */
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rmdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
@@ -50,8 +50,19 @@ function exportRoot(): string {
  * exist yet — callers `mkdir -p` it right after). Never echoes the resolved server path in
  * the error — only the caller-supplied `out_dir` value, which the caller already knows.
  */
-export async function baseDir(outDir?: string, root: string = exportRoot()): Promise<string> {
-  const base = root;
+export async function baseDir(outDir?: string): Promise<string> {
+  return baseDirUnder(exportRoot(), outDir);
+}
+
+/**
+ * The same confinement, against a root the CALLER names. Module-private on purpose: an
+ * exported `baseDir(outDir, root)` would let any future caller pick its own anchor —
+ * `baseDir(agentSuppliedOutDir, '/')` confines to nothing — in the one helper whose entire
+ * job is "which path is the trusted anchor". The parameter exists only so
+ * `writeExportFiles` can read RECONCIL_EXPORT_DIR once and anchor both the validation and
+ * the post-mkdir re-check to that same value.
+ */
+async function baseDirUnder(base: string, outDir?: string): Promise<string> {
   if (outDir === undefined) return base;
 
   const resolved = resolveWithinBase(base, outDir);
@@ -98,7 +109,7 @@ export async function writeExportFiles(
   // two calls sharing a synchronous tick would be an invariant the next `await` breaks
   // silently.
   const root = exportRoot();
-  const dir = join(await baseDir(outDir, root), exportId);
+  const dir = join(await baseDirUnder(root, outDir), exportId);
 
   const files: { name: string; path: string; sha256: string }[] = [];
   try {
@@ -112,6 +123,13 @@ export async function writeExportFiles(
     // outside the root in a Linux container; see the branch's second review round.)
     const check = await realpathWithinBase(root, dir);
     if (!check.ok) {
+      // `mkdir -p` already ran, so a link planted during that window got a real directory
+      // created behind it, outside the root. No contents ever land there — that is what the
+      // check buys — but leaving the directory is a free write for the attacker and an
+      // orphan nobody reclaims (the next run mints a fresh exportId). Non-recursive rmdir:
+      // it removes only an empty directory, so it cannot destroy anything that was already
+      // there, and best-effort because failing to tidy up must not mask the refusal.
+      await rmdir(dir).catch(() => { /* nothing to reclaim, or not ours to remove */ });
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`);
     }
     const realDir = check.realTarget;

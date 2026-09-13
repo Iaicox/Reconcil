@@ -14,7 +14,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ToolError } from '../src/errors.js';
-import { readImportFile } from '../src/recon/import-fs.js';
+import { readExactly, readImportFile } from '../src/recon/import-fs.js';
+
+import type { ByteReader } from '../src/recon/import-fs.js';
 
 let dir: string;
 const saved = { importDir: process.env.RECONCIL_IMPORT_DIR, maxBytes: process.env.RECONCIL_IMPORT_MAX_BYTES };
@@ -85,5 +87,61 @@ describe('readImportFile — byte cap', () => {
   it('is fail-closed when RECONCIL_IMPORT_DIR is unset', async () => {
     delete process.env.RECONCIL_IMPORT_DIR;
     await expect(readImportFile('anything.csv')).rejects.toThrow(/not configured/);
+  });
+});
+
+/**
+ * `readExactly` against a fake reader. The grow/shrink branches guard a real mid-read
+ * mutation by a co-resident writer, which cannot be staged against a real file from a test —
+ * so the loop is driven directly. Without these the two most intricate branches in the file
+ * had no coverage at all, in a change whose own standard is that a guard no test can execute
+ * is a guard nobody knows still works.
+ */
+function reader(chunks: readonly string[]): ByteReader {
+  let i = 0;
+  return {
+    read(buf, offset, length) {
+      const chunk = chunks[i];
+      i += 1;
+      if (chunk === undefined || chunk === '') return Promise.resolve({ bytesRead: 0 });
+      const bytes = Buffer.from(chunk, 'utf8');
+      // Honour `length` the way a real read does — overrunning the buffer would be the
+      // fake's bug, not the subject's.
+      const n = Math.min(bytes.length, length);
+      bytes.copy(buf, offset, 0, n);
+      return Promise.resolve({ bytesRead: n });
+    },
+  };
+}
+
+describe('readExactly', () => {
+  it('returns the whole content when the file is exactly the size it was measured at', async () => {
+    await expect(readExactly(reader(['hello']), 5)).resolves.toBe('hello');
+  });
+
+  it('reassembles across several short reads — one read is not guaranteed to fill the buffer', async () => {
+    await expect(readExactly(reader(['he', 'l', 'lo']), 5)).resolves.toBe('hello');
+  });
+
+  it('refuses a file that GREW after the stat instead of returning a capped prefix', async () => {
+    // The writer appended: more bytes arrive than were measured. The buffer's one spare
+    // byte is what makes that observable at all.
+    await expect(readExactly(reader(['hello', '!!!']), 5)).rejects.toThrow(/changed size while it was being read/);
+  });
+
+  it('refuses a file that SHRANK after the stat instead of returning a truncated CSV', async () => {
+    // EOF arrives early. Returning buf.subarray(0, read) here is the silent-truncation bug:
+    // a row cut mid-line imported as a success.
+    await expect(readExactly(reader(['hel']), 5)).rejects.toThrow(/changed size while it was being read/);
+  });
+
+  it('reads an empty file as the empty string, not as a size mismatch', async () => {
+    await expect(readExactly(reader([]), 0)).resolves.toBe('');
+  });
+
+  it('surfaces both mutations as INVALID_INPUT, never as an internal fault', async () => {
+    for (const chunks of [['hello', '!'], ['hel']]) {
+      await expect(readExactly(reader(chunks), 5)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    }
   });
 });

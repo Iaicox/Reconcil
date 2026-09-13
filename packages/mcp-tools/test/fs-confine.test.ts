@@ -34,11 +34,20 @@ afterEach(async () => { await rm(root, { recursive: true, force: true }); });
  * regression test for the base-anchored escape — skipping on every developer machine and
  * running solely on CI's Linux. A junction needs no elevation, resolves through `realpath`
  * the same way, and the type argument is ignored on every non-Windows platform, so one call
- * covers both. The probe stays as a guard: if link creation is ever impossible, these skip
- * loudly rather than passing on an early return.
+ * covers both. The probe stays as a guard for an environment that genuinely cannot create
+ * links — but a SKIPPED security regression test is indistinguishable from a passing one in
+ * a green run, so `linksWork` is itself asserted below. If link creation ever stops working,
+ * that assertion fails rather than four cases quietly disappearing.
  */
 const linksWork = await (async (): Promise<boolean> => {
-  const d = await mkdtemp(join(tmpdir(), 'confine-probe-'));
+  let d: string;
+  try {
+    // Inside the try: a mkdtemp failure is a broken environment, not a missing privilege,
+    // and outside it would surface as an unhandled rejection at module load.
+    d = await mkdtemp(join(tmpdir(), 'confine-probe-'));
+  } catch {
+    return false;
+  }
   try {
     await mkdir(join(d, 'target'));
     await symlink(join(d, 'target'), join(d, 'probe'), 'junction');
@@ -51,6 +60,13 @@ const linksWork = await (async (): Promise<boolean> => {
 })();
 
 describe('realpathWithinBase — the post-mkdir look on the write path', () => {
+  it('directory links can be created here — the link cases below are NOT silently skipped', () => {
+    // The 4th review round's finding was that the escape regression test skipped on every
+    // Windows machine and ran only on CI. Junctions fixed that; this keeps it fixed, because
+    // it.runIf failing open would look exactly like success.
+    expect(linksWork).toBe(true);
+  });
+
   it('accepts a real directory inside the base, returning the resolved path to write through', async () => {
     const dir = join(base, 'a', 'b');
     await mkdir(dir, { recursive: true });

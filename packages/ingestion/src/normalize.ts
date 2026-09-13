@@ -18,16 +18,23 @@ const INTERNAL_SENTINEL_BASE = -1000;
  */
 const DECIMAL_SEGMENT = /^[0-9]+$/;
 
-/** A trace label of the shape both providers send: digits, optionally underscore-separated
- *  ("0", "67", "0_1_2"). Empty is not one — an unlabelled trace has no label at all. */
+/**
+ * A trace label of the shape both providers send: digits, optionally underscore-separated
+ * ("0", "67", "0_1_2"). Empty is not one — an unlabelled trace has no label at all.
+ *
+ * Every segment must carry at least one digit. A per-character "digit or underscore" scan
+ * looks equivalent and is not: it accepts "0_", "_" and "0__1", i.e. labels with EMPTY
+ * segments — which is precisely the shape this guard exists to keep away from
+ * `compareTraceIds`. An empty segment is the one case where the old and new comparators
+ * disagree on real input (the old one read '' as the number 0 via `Number('')`, tied, and
+ * fell to arrival order; the new one classifies it as non-numeric and separates it), so a
+ * provider emitting a trailing underscore would re-rank its traces and change the
+ * `log_index` sentinel — the ADR-005 double-insert this guard is the barrier against.
+ */
+const DECIMAL_TRACE_PATH = /^[0-9]+(?:_[0-9]+)*$/;
+
 function isDecimalTracePath(label: string): boolean {
-  if (label === '') return false;
-  for (let i = 0; i < label.length; i += 1) {
-    const c = label.charCodeAt(i);
-    const isDigit = c >= 0x30 && c <= 0x39;
-    if (!isDigit && c !== 0x5f) return false;
-  }
-  return true;
+  return DECIMAL_TRACE_PATH.test(label);
 }
 
 /**

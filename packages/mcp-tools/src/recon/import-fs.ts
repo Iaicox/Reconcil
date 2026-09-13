@@ -48,6 +48,46 @@ export function resolveConfinedPath(base: string, filePath: string): string {
   return target;
 }
 
+/** The subset of `FileHandle` `readExactly` needs — so the loop can be driven by a fake. */
+export interface ByteReader {
+  read(buf: Buffer, offset: number, length: number, position: null): Promise<{ bytesRead: number }>;
+}
+
+/**
+ * Read exactly `size` bytes from `reader`, or refuse.
+ *
+ * Bounded, not `fh.readFile()`. The caller's `stat` is a snapshot: a co-resident writer can
+ * append to the SAME inode between it and the read, and `readFile` follows to EOF, so the
+ * byte cap would stay advisory for exactly the planted-file case it exists for.
+ *
+ * The buffer is sized from the FILE, not from the cap — sizing it `cap + 1` made a 45-byte
+ * invoice CSV allocate 8 MB (above `Buffer.poolSize`, so a fresh un-pooled ArrayBuffer per
+ * call, multiplied by concurrent imports). The one spare byte makes GROWTH observable, and
+ * the final equality check makes SHRINKAGE observable: a short read means the writer
+ * truncated or rewrote the inode, and returning the prefix would hand the parser a row cut
+ * mid-line — 12 000 of 50 000 invoices — as a successful import. Both are the same event
+ * and get the same answer.
+ *
+ * Extracted and exported because it is the most intricate logic in this file and a real
+ * mid-read mutation cannot be staged from a test: a fake `ByteReader` can.
+ */
+export async function readExactly(reader: ByteReader, size: number): Promise<string> {
+  const buf = Buffer.allocUnsafe(size + 1);
+  let read = 0;
+  for (;;) {
+    const { bytesRead } = await reader.read(buf, read, buf.length - read, null);
+    if (bytesRead === 0) break;
+    read += bytesRead;
+    if (read > size) {
+      throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
+    }
+  }
+  if (read !== size) {
+    throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
+  }
+  return buf.subarray(0, read).toString('utf8');
+}
+
 /** Confine, defeat symlink escape, size-cap, then read. All errors are generic. */
 export async function readImportFile(filePath: string): Promise<string> {
   const base = importBaseDir();
@@ -99,34 +139,10 @@ export async function readImportFile(filePath: string): Promise<string> {
       throw new ToolError('INVALID_INPUT', `file exceeds the ${String(cap)}-byte import limit`);
     }
 
-    // Bounded read, not `fh.readFile()`. The stat above is a snapshot: a co-resident writer
-    // can append to the SAME inode between it and the read, and readFile follows to EOF, so
-    // the cap would still be advisory for exactly the planted-file case it exists for.
-    //
-    // The buffer is sized from the FILE, not from the cap — sizing it `cap + 1` made a
-    // 45-byte invoice CSV allocate 8 MB (above Buffer.poolSize, so a fresh un-pooled
-    // ArrayBuffer per call, multiplied by concurrent imports). The one spare byte is what
-    // makes growth observable: filling it means the file is no longer the file that was
-    // measured, which is the co-resident-writer case and not something to return silently
-    // truncated.
-    const buf = Buffer.allocUnsafe(stats.size + 1);
-    let read = 0;
-    for (;;) {
-      const { bytesRead } = await fh.read(buf, read, buf.length - read, null);
-      if (bytesRead === 0) break;
-      read += bytesRead;
-      if (read > stats.size) {
-        throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
-      }
-    }
-    // Symmetric: a SHORT read means the same writer truncated or rewrote the inode, and
-    // returning `buf.subarray(0, read)` would hand the parser a prefix of the CSV — a row
-    // cut mid-line, or 12 000 of 50 000 invoices — as a successful import. Growth and
-    // shrinkage are the same event and get the same answer.
-    if (read !== stats.size) {
-      throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
-    }
-    return buf.subarray(0, read).toString('utf8');
+    // AWAITed, not returned bare: `return promise` inside a try/finally runs the finally —
+    // and therefore fh.close() — before the promise settles, so the read lands on a closed
+    // descriptor.
+    return await readExactly(fh, stats.size);
   } catch (err) {
     // The cap is a ToolError already shaped for the caller; anything else is an fs fault
     // whose text must not leak (C6).
