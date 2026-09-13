@@ -12,10 +12,10 @@ allowBuilds:
   ssh2: false
 
 # typescript is capped at 6.x: 7.x is the native (tsgo) port and typescript-eslint
-# peers require <6.1. @types/node tracks the Node 22 runtime (engines, Dockerfile).
+# peers require <6.1. @types/node tracks the Node 24 runtime (.nvmrc, engines, Dockerfile).
 catalog:
   "@testcontainers/postgresql": ^12.0.0
-  "@types/node": ^22.10.0
+  "@types/node": ^24.0.0
   "@types/pg": ^8.20.0
   "decimal.js": ^10.4.0
   "drizzle-orm": ^0.45.2
@@ -24,7 +24,11 @@ catalog:
   pg: ^8.22.0
   tsx: ^4.19.0
   typescript: ~6.0.3
-  vitest: ^4.1.0
+  # Floor stated, not merely satisfied: 4.1.10 is inside ^4.1.0 and closes
+  # GHSA-82fw-gwwq-j7x9 (@vitest/mocker path traversal) only at 4.1.11, so a plain install would
+  # keep the vulnerable resolution with a green --frozen-lockfile (09-known-gaps.md,
+  # "Regenerating pnpm-lock.yaml does not reapply in-range security bumps").
+  vitest: ^4.1.11
   zod: ^4.0.0
 
 minimumReleaseAgeExclude:

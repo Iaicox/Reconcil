@@ -11,7 +11,12 @@ describe('stdio entrypoint guard (H13/H14 slice minors)', () => {
     // resolving quickly.
     const mod = await import('../src/stdio.js');
     expect(mod).toBeDefined();
-  });
+    // Explicit 30s budget, not vitest's 5s default. What this asserts is "resolves rather
+    // than hangs" — a booted server never resolves at all — so the number only has to be
+    // clear of a cold ESM transform of the whole src graph. Under `turbo run test` twelve
+    // packages compile at once and that import alone was measured at 4.05s on a warm cache,
+    // i.e. inside the default by a margin that made this a load-dependent red.
+  }, 30_000);
 
   // Shutdown ordering (idempotent flag → server.close() [cascades to the
   // transport, Protocol.close()] → pool.end() → forced-exit timer) mirrors

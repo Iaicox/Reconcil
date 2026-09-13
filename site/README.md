@@ -31,6 +31,17 @@ ESLint is pinned to `^9.0.0` here, deliberately *not* the root workspace catalog
 `context.getFilename()` (removed in ESLint 10) and crashes every run. Revisit once a newer
 `eslint-config-next`/`eslint-plugin-react` supports ESLint 10.
 
+## Dependency floors (`overrides`)
+
+`js-yaml` is pinned to `^4.3.2` in `package.json`'s `overrides`. It is a dev-only
+transitive (`@eslint/eslintrc` asks for `^4.3.0`), and `4.3.1` — which satisfies that range —
+carries GHSA-2883-xcg3-v3hh. npm will not move a transitive that already satisfies its parent,
+so `npm install` alone silently keeps the vulnerable resolution and `npm audit` is the only
+thing that notices. The override states the floor so a lockfile regeneration cannot revert it.
+Same failure mode, same remedy as the root workspace's catalog floors — see
+`docs/architecture/09-known-gaps.md`, "Regenerating `pnpm-lock.yaml` does not reapply in-range
+security bumps". Drop the override once `@eslint/eslintrc` raises its own range.
+
 ## Develop
 
 ```bash

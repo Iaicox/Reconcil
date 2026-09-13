@@ -77,13 +77,17 @@ export function parseInvoiceCsv(content: string, opts: ParseOptions = {}): Parse
 
   // Array mode (no `columns`): keeps per-row control so one ragged row is a row
   // error, not a whole-file throw. `relax_column_count` lets us count fields and
-  // report the mismatch ourselves.
+  // report the mismatch ourselves. That choice also kept this parser outside
+  // GHSA-8cw4-87c7-c6xx (csv-parse prototype replacement), which is reachable only
+  // through the `columns` path — the v7 bump was still taken, but the exposure was nil.
+  // No `as string[][]` here: v7 types the array-mode return, and asserting it back
+  // would be a lie waiting to happen if `columns` were ever added above.
   const rows = parse(content, {
     skip_empty_lines: true,
     trim: true,
     bom: true,
     relax_column_count: true,
-  }) as string[][];
+  });
 
   if (rows.length === 0) return { drafts: [], errors: [{ row: 0, code: 'EMPTY', message: 'CSV has no header row' }] };
 
