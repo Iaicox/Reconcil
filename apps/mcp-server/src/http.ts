@@ -10,7 +10,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, 
 import { Pool } from 'pg';
 
 import { parseBearerToken, resolveTenantByBearer } from './auth.js';
-import { DEFAULT_PORT, loadConfig, resolveAllowedHosts, resolveTrustProxy } from './config.js';
+import { DEFAULT_PORT, loadConfig, normalizeAllowedHosts, resolveAllowedHosts, resolveTrustProxy } from './config.js';
 import { createServer } from './server.js';
 import { installShutdown } from './shutdown.js';
 
@@ -196,20 +196,21 @@ export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   // backstop for a JS caller the compiler never saw. An empty list does not make the check
   // strict — the SDK guards it with `length > 0`, so it turns DNS-rebinding protection OFF.
   //
-  // Trimmed, and the TRIMMED value is what gets forwarded. The SDK compares the raw Host
-  // header against these strings exactly, so a padded ' good.example:8484 ' would pass a
-  // validation that trims and then match nothing at all — every request rejected, for a
-  // config that looked accepted. `resolveAllowedHosts` normalizes for this reason; the
-  // injected seam has to agree with it rather than merely be checked against it.
+  // Through the SAME normalizer the env path uses (config.ts), not a second check written
+  // at the seam: the two had different rules — the env path dropped blank entries, the seam
+  // threw on one — so `'a.example, ,b.example'` was valid configuration and a fatal
+  // argument. And the NORMALIZED value is what gets forwarded: the SDK compares the raw Host
+  // header against these strings exactly, so a padded ' good.example:8484 ' that merely
+  // passed validation would match nothing at all, rejecting every request.
   let allowedHosts: [string, ...string[]];
   if (deps.allowedHosts === undefined) {
     allowedHosts = resolveAllowedHosts({ PORT: DEFAULT_PORT });
   } else {
-    const [first, ...rest] = deps.allowedHosts.map((h) => h.trim());
-    if (first === undefined || first === '' || rest.some((h) => h === '')) {
+    const normalized = normalizeAllowedHosts(deps.allowedHosts);
+    if (normalized === null) {
       throw new Error('allowedHosts must name at least one non-empty host — omit it to use the defaults');
     }
-    allowedHosts = [first, ...rest];
+    allowedHosts = normalized;
   }
   const ipRateLimitPolicy = deps.ipRateLimit ?? { max: 600, timeWindow: '1 minute' };
   const tenantRateLimitPolicy = deps.tenantRateLimit ?? { max: 120, timeWindow: '1 minute' };

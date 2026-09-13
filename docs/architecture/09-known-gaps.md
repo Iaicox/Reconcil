@@ -105,20 +105,23 @@ NOTHING` stops matching, and the same value move is inserted twice into an appen
 table with no rollback path. Ingestion does re-serve rows: it re-fetches the overlap-by-one
 boundary block, and a provider failover can re-serve a window.
 
-Why this was accepted rather than migrated: the label shapes whose ordering actually moved
-are **leading zeros** (`007` vs `7`), **non-decimal notations** (`0x10`, `1e3`), and an
-empty segment — and none of them occurs. Every trace label recorded anywhere in this
-repo is plain digits and underscores (`0`, `1`, `10`, `0_1`, `0_2`, `0_10`, `0_1_2`), for
-which the old and new comparators agree exactly. The one other observed value, `''`, cannot
-reach the comparator at all: a group containing an unlabelled trace fails the `labelled`
-check in `normalize()` and is ordered by `compareTraceTuple` instead. There are also no
-production deployments — the validation gate is a business milestone, not a shipped
-product — so there is no pre-existing table to disagree with.
+Why this was accepted rather than migrated, and what now guards it: the label shapes whose
+ordering actually moved are **leading zeros** (`007` vs `7`), **non-decimal notations**
+(`0x10`, `1e3`), and an empty segment — and none of them occurs. Every trace label recorded
+anywhere in this repo is plain digits and underscores (`0`, `1`, `10`, `0_1`, `0_2`, `0_10`,
+`0_1_2`), for which the old and new comparators agree exactly. That was an argument about
+fixtures, so it is now also an invariant in code: `normalize()` takes the label-ordering path
+only when every label in the group is a plain decimal path (`isDecimalTracePath`), and any
+other shape — including one a future provider adapter might invent — falls to
+`compareTraceTuple`, which orders by from/to/value and so does not depend on how a provider
+chose to name its traces. `''` could never reach the comparator even before that, for the
+same reason. There are also no production deployments — the validation gate is a business
+milestone, not a shipped product — so there is no pre-existing table to disagree with.
 
-Trigger: before the first real deployment ingests mainnet history, or if a provider is ever
-added whose trace labels are not plain decimal paths — at which point re-deriving sentinels
-for already-stored internal transfers becomes a migration, not a comment. Where:
-`packages/ingestion/src/normalize.ts` (`compareTraceIds`, `sentinelRank`), ADR-005 d2.
+Trigger: before the first real deployment ingests mainnet history — at which point
+re-deriving sentinels for already-stored internal transfers becomes a migration, not a
+comment. Where: `packages/ingestion/src/normalize.ts` (`compareTraceIds`,
+`isDecimalTracePath`, `sentinelRank`), ADR-005 d2.
 *(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13)*
 
 ## Ledger
@@ -220,7 +223,9 @@ detectable) and never exceeds the cap. `fh.stat().isFile()` also
 refuses a FIFO/socket/device node, which reports size 0 and would otherwise sail past the
 cap and stream without bound. The export write path gained its own second look:
 `realpathAncestorWithinBase` can only vouch for segments that existed at validation time, so
-after `mkdir -p` the finished directory is re-resolved (`realpathDirWithinBase`), writes go
+after `mkdir -p` the finished directory is re-resolved (`realpathWithinBase`, anchored at
+the export ROOT rather than the out_dir-narrowed base — anchoring at the base resolves both
+sides through a planted symlink and passes the escape), writes go
 through the RESOLVED path, and files are written `{ flag: 'wx' }` — create, never follow or
 truncate — since the per-export `<uuid>/` is fresh and anything already at that path was
 planted. All of that lives in ONE helper (`writeExportFiles`) that every export tool routes

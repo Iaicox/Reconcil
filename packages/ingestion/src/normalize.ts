@@ -18,6 +18,18 @@ const INTERNAL_SENTINEL_BASE = -1000;
  */
 const DECIMAL_SEGMENT = /^[0-9]+$/;
 
+/** A trace label of the shape both providers send: digits, optionally underscore-separated
+ *  ("0", "67", "0_1_2"). Empty is not one — an unlabelled trace has no label at all. */
+function isDecimalTracePath(label: string): boolean {
+  if (label === '') return false;
+  for (let i = 0; i < label.length; i += 1) {
+    const c = label.charCodeAt(i);
+    const isDigit = c >= 0x30 && c <= 0x39;
+    if (!isDigit && c !== 0x5f) return false;
+  }
+  return true;
+}
+
 /**
  * Numeric order of two all-digit strings, without parsing either. `BigInt(x)` was correct
  * (a `Number` would collapse distinct labels past 2^53 onto one float) but it heap-allocates
@@ -227,9 +239,21 @@ export function normalize(
   }
   const sentinelRank = new Map<number, number>(); // arrival index → n
   for (const group of byParentTx.values()) {
-    // Per group: label order iff every trace in it carries a label (one page comes
-    // from one provider, so a mixed group is not a real shape — but be explicit).
-    const labelled = group.every(({ it }) => (it.traceId ?? '') !== '');
+    // Per group: label order iff every trace in it carries a label AND every label is a
+    // plain decimal path (one page comes from one provider, so a mixed group is not a real
+    // shape — but be explicit).
+    //
+    // The decimal-path half is what keeps the sentinel derivation honest. `compareTraceIds`
+    // orders unfamiliar label shapes too — it has to be a total order — but the RESULT of
+    // that ordering becomes the `log_index` sentinel, half of
+    // `UNIQUE (chain_id, tx_hash, log_index, token_id)` (ADR-005). A future provider adapter
+    // emitting some other labelling scheme would silently get its ordering from a rule
+    // nobody chose for it. Restricting the label path to the shape both current providers
+    // actually send — digits and underscores, the only shape in any recorded fixture — means
+    // an unfamiliar scheme falls to `compareTraceTuple` (from/to/value: provider-independent,
+    // and derived from the transfer itself rather than from how a provider chose to name it)
+    // instead. Loud in neither case, but deterministic in both.
+    const labelled = group.every(({ it }) => isDecimalTracePath(it.traceId ?? ''));
     [...group]
       .sort((a, b) => {
         const primary = labelled

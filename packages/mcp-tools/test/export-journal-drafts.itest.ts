@@ -60,7 +60,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await pool.query(
-    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls, exports, ingestion_checkpoints RESTART IDENTITY CASCADE',
+    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls, exports, ingestion_checkpoints, fx_rates RESTART IDENTITY CASCADE',
   );
   await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'acme', 'acme')`, [TENANT]);
   await pool.query(`INSERT INTO clients (id, tenant_id, name) VALUES ($1, $2, 'Client One')`, [CLIENT, TENANT]);

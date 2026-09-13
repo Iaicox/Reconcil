@@ -76,11 +76,28 @@ export function resolveAllowedHosts(
   // saying so in the type is what lets http.ts type its own seam the same way instead of
   // re-checking at runtime.
   if (cfg.RECONCIL_ALLOWED_HOSTS !== undefined) {
-    const [first, ...rest] = cfg.RECONCIL_ALLOWED_HOSTS.split(',').map((h) => h.trim()).filter((h) => h.length > 0);
-    if (first !== undefined) return [first, ...rest];
+    const hosts = normalizeAllowedHosts(cfg.RECONCIL_ALLOWED_HOSTS.split(','));
+    if (hosts !== null) return hosts;
   }
   const port = String(cfg.PORT);
   return [`localhost:${port}`, `127.0.0.1:${port}`, `mcp-server:${port}`];
+}
+
+/**
+ * Trim, drop blanks, and report `null` when nothing survives — the ONE normalization for
+ * this setting, used by both the env path above and `buildHttpApp`'s injected seam. They
+ * had a rule each: the env path filtered blanks out, the seam threw on one, so
+ * `'a.example, ,b.example'` was accepted as configuration and fatal as an argument. The
+ * caller decides what `null` means (defaults here, a thrown error at the seam, where there
+ * is nothing to fall back to); what neither gets to decide is what a host string is.
+ *
+ * Blanks are dropped rather than rejected because the SDK compares the raw Host header
+ * against these strings exactly: an untrimmed or empty entry cannot match anything, so it
+ * is noise, not intent.
+ */
+export function normalizeAllowedHosts(raw: readonly string[]): [string, ...string[]] | null {
+  const [first, ...rest] = raw.map((h) => h.trim()).filter((h) => h.length > 0);
+  return first === undefined ? null : [first, ...rest];
 }
 
 /**

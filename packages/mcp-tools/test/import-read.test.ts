@@ -22,6 +22,10 @@ const saved = { importDir: process.env.RECONCIL_IMPORT_DIR, maxBytes: process.en
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'import-read-'));
   process.env.RECONCIL_IMPORT_DIR = dir;
+  // Reset per test. Leaking a 4-byte cap out of the test above made the directory case
+  // below pass on the SIZE check (a directory stats at 4096 on Linux) rather than on the
+  // guard it names — a test that could not fail for its stated reason.
+  delete process.env.RECONCIL_IMPORT_MAX_BYTES;
 });
 afterEach(async () => {
   if (saved.importDir === undefined) delete process.env.RECONCIL_IMPORT_DIR;
@@ -70,8 +74,12 @@ describe('readImportFile — byte cap', () => {
   it('rejects a DIRECTORY at the path rather than treating it as a zero-byte file', async () => {
     // The non-regular-file guard. A directory is the portable stand-in for the FIFO/socket
     // case: those also report size 0, sail past the cap, and then stream without bound.
+    // The cap is set LARGE and the message pinned on purpose: with a small cap a directory
+    // (4096 bytes on Linux) trips the size check instead, and the test would stay green
+    // with the guard deleted.
+    process.env.RECONCIL_IMPORT_MAX_BYTES = '10000000';
     await mkdir(join(dir, 'adir'));
-    await expect(readImportFile('adir')).rejects.toThrow(ToolError);
+    await expect(readImportFile('adir')).rejects.toThrow(/not a regular file/);
   });
 
   it('is fail-closed when RECONCIL_IMPORT_DIR is unset', async () => {

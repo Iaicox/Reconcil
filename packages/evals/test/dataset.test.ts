@@ -107,7 +107,7 @@ describe('parseDataset', () => {
   expect: { tools_any_of: [analytics_flows, analytics_flows] }
 `,
       ),
-    ).toThrow(/tools_any_of/i);
+    ).toThrow(/may not repeat a tool/i);
   });
 
   it('throws when a tool is both required and merely one of the accepted answers', () => {
@@ -121,7 +121,7 @@ describe('parseDataset', () => {
   expect: { tools_expected: [analytics_flows], tools_any_of: [analytics_flows, analytics_stablecoin_movements] }
 `,
       ),
-    ).toThrow(/tools_any_of/i);
+    ).toThrow(/already requires/i);
   });
 
   it('throws when tools_any_of names a WRITE tool — the set would license calling all of them', () => {

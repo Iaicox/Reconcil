@@ -165,6 +165,20 @@ describe('buildHttpApp — DNS-rebinding Host validation (minor, defense-in-dept
     await expect(appWithHosts([])).rejects.toThrow(/at least one non-empty host/i);
   });
 
+  it('a blank entry AMONG real hosts is dropped, not fatal — one policy with the env path', async () => {
+    // config.ts filters blanks out of RECONCIL_ALLOWED_HOSTS, so the seam must too:
+    // 'a.example, ,b.example' used to be valid as configuration and fatal as an argument.
+    const app = await appWithHosts(['good.example:8484', ' ']);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer good', host: 'evil.example:8484' },
+      payload: rpc,
+    });
+    expect(res.json<{ error?: { message?: string } }>().error?.message).toContain('Invalid Host header');
+    await app.close();
+  });
+
   it('a blank allowedHosts entry is refused too — it can never match a Host header', async () => {
     await expect(appWithHosts([' '])).rejects.toThrow(/non-empty host/i);
   });

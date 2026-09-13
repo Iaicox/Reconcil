@@ -50,8 +50,8 @@ function exportRoot(): string {
  * exist yet — callers `mkdir -p` it right after). Never echoes the resolved server path in
  * the error — only the caller-supplied `out_dir` value, which the caller already knows.
  */
-export async function baseDir(outDir?: string): Promise<string> {
-  const base = exportRoot();
+export async function baseDir(outDir?: string, root: string = exportRoot()): Promise<string> {
+  const base = root;
   if (outDir === undefined) return base;
 
   const resolved = resolveWithinBase(base, outDir);
@@ -90,13 +90,15 @@ export async function writeExportFiles(
   exportId: string,
   rendered: readonly RenderedFile[],
 ): Promise<{ dir: string; files: { name: string; path: string; sha256: string }[] }> {
-  // Root captured ONCE and threaded through. `exportRoot()` reads the environment, and the
-  // post-mkdir check below must be anchored to the same root `baseDir` validated against —
-  // a second read could see a different RECONCIL_EXPORT_DIR (the export tests mutate it),
-  // making the re-check either vacuous against a wider root or a spurious INTERNAL against
-  // a narrower one.
+  // Root read ONCE and passed into both users. `exportRoot()` reads the environment, and
+  // the post-mkdir check below must be anchored to the same root `baseDir` validated
+  // against; two independent reads could see a different RECONCIL_EXPORT_DIR (the export
+  // tests mutate it), making the re-check either vacuous against a wider root or a spurious
+  // INTERNAL against a narrower one. Passing it in is what enforces that — relying on the
+  // two calls sharing a synchronous tick would be an invariant the next `await` breaks
+  // silently.
   const root = exportRoot();
-  const dir = join(await baseDir(outDir), exportId);
+  const dir = join(await baseDir(outDir, root), exportId);
 
   const files: { name: string; path: string; sha256: string }[] = [];
   try {

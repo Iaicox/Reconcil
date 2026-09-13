@@ -19,12 +19,13 @@ import { realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
  *  configurable at runtime and testable). */
 export function maxFileBytes(): number {
   const raw = Number(process.env.RECONCIL_IMPORT_MAX_BYTES);
-  // Safe-integer and upper-bounded, not merely finite-and-positive: the cap sizes a Buffer,
-  // and a fractional or absurd value (1e10) makes `Buffer.allocUnsafe` throw
-  // ERR_OUT_OF_RANGE — inside the try below, where it would be caught and reported as a bad
-  // `file_path`, diagnosing an operator's misconfiguration as hostile caller input.
-  const ceiling = 512 * 1024 * 1024;
-  return Number.isSafeInteger(raw) && raw > 0 && raw <= ceiling ? raw : 8_000_000;
+  // Finite and positive is the whole test. An upper ceiling was briefly added here on the
+  // theory that the cap sized a Buffer — it does not (the buffer is sized from the file's
+  // own stat), so the only thing an unusually large cap affects is the comparison below,
+  // which handles any finite number. A ceiling would instead have discarded a legitimate
+  // `RECONCIL_IMPORT_MAX_BYTES=1000000000` in silence and then rejected a 40 MB file
+  // naming an 8 MB limit the operator never configured.
+  return Number.isFinite(raw) && raw > 0 ? raw : 8_000_000;
 }
 
 /** Resolved import base dir, or null when `file_path` import is not configured. */
@@ -117,6 +118,13 @@ export async function readImportFile(filePath: string): Promise<string> {
       if (read > stats.size) {
         throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
       }
+    }
+    // Symmetric: a SHORT read means the same writer truncated or rewrote the inode, and
+    // returning `buf.subarray(0, read)` would hand the parser a prefix of the CSV — a row
+    // cut mid-line, or 12 000 of 50 000 invoices — as a successful import. Growth and
+    // shrinkage are the same event and get the same answer.
+    if (read !== stats.size) {
+      throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
     }
     return buf.subarray(0, read).toString('utf8');
   } catch (err) {
