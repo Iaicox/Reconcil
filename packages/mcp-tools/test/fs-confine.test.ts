@@ -1,8 +1,8 @@
 /**
  * `realpathWithinBase` as the write path's SECOND confinement look, after `mkdir -p`.
  * (It was briefly wrapped in a `realpathDirWithinBase` helper that collapsed the
- * unresolvable/escaped discriminant this module exists to keep distinct, for no gain over
- * calling it directly.)
+ * four-way discriminant this module exists to keep distinct — bad-path, escaped, unreadable
+ * and base-unusable — for no gain over calling it directly.)
  *
  * `realpathAncestorWithinBase` runs before the directory exists, so it can only vouch for
  * the deepest ancestor present at that moment. Every segment created afterwards was never
@@ -10,11 +10,15 @@
  * helper re-resolves the finished directory so the thing written into is the thing that was
  * validated.
  */
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+/** chmod means nothing on Windows, and nothing to root — under either, the permission test
+ *  below would assert a refusal that never happens. */
+const SKIP_PERMISSION_TEST = process.platform === 'win32' || process.getuid?.() === 0;
 
 import { realpathWithinBase } from '../src/fs-confine.js';
 
@@ -53,26 +57,54 @@ describe('realpathWithinBase — the post-mkdir look on the write path', () => {
     expect(await realpathWithinBase(base, base)).toEqual({ ok: true, realTarget: await realpath(base) });
   });
 
-  it('rejects a directory that does not exist — removed underneath us is not writable', async () => {
-    // The discriminant the dropped wrapper used to collapse: 'missing' (removed
-    // underneath us) is a different fact from 'escaped' (below), and only one of them means
-    // somebody tried something.
-    expect(await realpathWithinBase(base, join(base, 'never-created'))).toEqual({ ok: false, reason: 'missing' });
+  it('rejects a target that does not exist — removed underneath us is not writable', async () => {
+    // The discriminant the dropped wrapper used to collapse: 'bad-path' (removed underneath
+    // us) is a different fact from 'escaped' (below), and only one of them means somebody
+    // tried something.
+    expect(await realpathWithinBase(base, join(base, 'never-created'))).toEqual({ ok: false, reason: 'bad-path' });
   });
 
-  it('separates "not there" from "would not say" — they are not the same answer', async () => {
-    // Both used to be 'unresolvable', and the import edge turned that into INVALID_INPUT:
-    // a permission-denied directory under the import root was reported to the model as a
-    // bad path, advice to try another one when no path would have worked. A NUL byte is
-    // the one non-ENOENT realpath failure that can be staged on all three platforms
-    // (`path.resolve` passes it through; `realpath` rejects it with ERR_INVALID_ARG_VALUE),
-    // and it stands in for the EACCES/EIO/ELOOP cases that cannot be.
-    const bad = await realpathWithinBase(base, join(base, 'a\0b'));
-    expect(bad.ok).toBe(false);
-    expect(bad).toMatchObject({ reason: 'unreadable' });
-    // The error is carried, not swallowed: the caller needs it for a server-side log, and
-    // `reason` alone cannot express which fault it was.
-    expect((bad as { cause?: { code?: unknown } }).cause?.code).toBe('ERR_INVALID_ARG_VALUE');
+  it('blames the BASE when it is the base that will not resolve', async () => {
+    // The two realpaths shared one `try` for a round, so a missing import/export root came
+    // back as ENOENT and was read as "the target is not there" — the caller blamed for the
+    // operator's configuration, inside the helper that exists to keep the two apart. The
+    // target here is irrelevant and is never reached.
+    const gone = join(root, 'no-such-root');
+    const failure = await realpathWithinBase(gone, join(gone, 'anything'));
+    expect(failure).toMatchObject({ ok: false, reason: 'base-unusable' });
+    expect((failure as { cause?: { code?: unknown } }).cause?.code).toBe('ENOENT');
+  });
+
+  it('a malformed path belongs to the caller, not to the filesystem', async () => {
+    // A NUL byte: `path.resolve` passes it through (pure string math), so it survives the
+    // prefix check and reaches `realpath`, which rejects it in JS before any syscall. It
+    // describes the SHAPE of what was asked for — a different path fixes it — so it belongs
+    // with ENOENT, not with EACCES. Classified the other way for one round, which gave the
+    // two malformed-argument codes opposite owners.
+    expect(await realpathWithinBase(base, join(base, 'a\0b'))).toEqual({ ok: false, reason: 'bad-path' });
+  });
+
+  it.skipIf(SKIP_PERMISSION_TEST)('a target the filesystem will not resolve is not the caller argument', async () => {
+    // POSIX and non-root, and it runs on CI (`test` is a bare ubuntu-latest job with no
+    // `container:`, so it runs as `runner`). Dropping search permission on an intermediate
+    // directory makes `realpath` fail EACCES for a path that may be perfectly good — the
+    // case that must NOT come back as "your path is wrong".
+    //
+    // Skipped rather than faked where it cannot mean anything: Windows has no equivalent
+    // `fs.chmod` can express, and root ignores the mode entirely — under either, the call
+    // would SUCCEED and the assertion would go red for a reason that is not a defect. A
+    // test that quietly exercises nothing is worse than one that says it did not.
+    const locked = join(base, 'locked');
+    await mkdir(join(locked, 'inner'), { recursive: true });
+    await writeFile(join(locked, 'inner', 'f.csv'), 'x');
+    await chmod(locked, 0o000);
+    try {
+      const failure = await realpathWithinBase(base, join(locked, 'inner', 'f.csv'));
+      expect(failure).toMatchObject({ ok: false, reason: 'unreadable' });
+      expect((failure as { cause?: { code?: unknown } }).cause?.code).toBe('EACCES');
+    } finally {
+      await chmod(locked, 0o700);
+    }
   });
 
   it('rejects a sibling whose path merely shares the base prefix', async () => {

@@ -125,21 +125,36 @@ export async function readImportFile(filePath: string): Promise<string> {
   }
   const confined = resolveConfinedPath(base, filePath);
 
-  // Three answers, not two, and the third is the one that had been wrong. A path that is
-  // MISSING or that ESCAPES is a description of the argument the caller supplied.
-  // UNREADABLE is not: the path may be perfectly good and the filesystem simply would not
-  // say — EACCES on a directory under the import root, EIO, ELOOP. Reported as
-  // INVALID_INPUT, that told the model to try a different `file_path` when no path would
-  // have worked, and it is the branch every test here lands on, so the error the round
-  // before this one "walked every throw" for was the one it never looked at.
+  // Four answers, owned by three different people, and two of them were wrong in turn.
+  //
+  // BAD-PATH and ESCAPED describe the argument the caller supplied. UNREADABLE does not —
+  // the path may be perfectly good and the filesystem simply would not say (EACCES on a
+  // directory under the import root, EIO, ELOOP) — and reported as INVALID_INPUT it told
+  // the model to try a different `file_path` when no path would have worked.
+  //
+  // BASE-UNUSABLE is neither: RECONCIL_IMPORT_DIR is missing or is not a directory, which
+  // says nothing whatever about `file_path`. It shared a catch with the target realpath for
+  // one round, so it arrived as ENOENT, was read as "the path is not there", and blamed the
+  // caller for the operator's configuration — inside the very check that exists to stop
+  // that. It joins the documented exception beside it: INVALID_INPUT, because the caller
+  // CAN act (pass `content` instead), but saying so in its own words rather than borrowing
+  // the wrong ones. The underlying error is logged, never sent (C6).
   const check = await realpathWithinBase(base, confined);
   if (!check.ok) {
     if (check.reason === 'unreadable') {
       throw new ToolError('INTERNAL', 'the import file could not be read', undefined, check.cause);
     }
+    if (check.reason === 'base-unusable') {
+      throw new ToolError(
+        'INVALID_INPUT',
+        'file_path import is unavailable (the configured import directory cannot be used)',
+        'pass the CSV inline as `content`, or ask the operator to check RECONCIL_IMPORT_DIR',
+        check.cause,
+      );
+    }
     throw new ToolError(
       'INVALID_INPUT',
-      check.reason === 'missing'
+      check.reason === 'bad-path'
         ? 'file_path could not be resolved in the import directory'
         : 'file_path resolves outside the permitted import directory',
     );
@@ -162,10 +177,13 @@ export async function readImportFile(filePath: string): Promise<string> {
   // documents, and ADR-012 d7 rules on it explicitly: a refusal the caller does not own is
   // INTERNAL. An errno split at this site got that exactly backwards for one round.
   //
-  // NOT covered by a test, and stated rather than glossed: reaching this catch needs the
-  // file to disappear between the realpath and the open, which cannot be staged portably.
-  // What makes that acceptable here — and did not when this was a classifier — is that
-  // there is no longer a decision to get wrong: one code, one message, no input consulted.
+  // The race is not the only way in, and a comment here once said it was. On POSIX,
+  // `realpath` consults only SEARCH permission on the prefix, so a mode-000 file in a
+  // readable directory resolves fine and then fails `open` with EACCES — no race at all.
+  // (On Windows the same file fails at `realpath` instead, because realpath there must open
+  // the target; both platforms reach INTERNAL with this message, by different routes.)
+  // EMFILE and ENFILE arrive here the same way. What makes one unconditional answer right
+  // for all of them is that none is a statement about the argument.
   let fh;
   try {
     fh = await open(realTarget, 'r');
@@ -192,10 +210,12 @@ export async function readImportFile(filePath: string): Promise<string> {
     // of 1e16 meaning "effectively unlimited" is perfectly servable for a 45-byte CSV — an
     // earlier version guarded the CAP here and killed the tool outright for that config.
     // What is unservable is a FILE bigger than Node can allocate a Buffer for, and that is
-    // the operator's storage, not the caller's path. Without this guard `Buffer.allocUnsafe`
-    // throws ERR_OUT_OF_RANGE into the catch below, which now codes it INTERNAL too — so
-    // what this buys is no longer the CODE but the diagnosis: a stated size and limit,
-    // rather than a generic read failure the operator has to reproduce to understand.
+    // the operator's storage, not the caller's path. Without this guard the failure lands in
+    // the catch below as ERR_STRING_TOO_LONG from `buf.toString('utf8')` — NOT from
+    // `allocUnsafe`, which happily allocates past the string limit; that is the whole reason
+    // MAX_SERVABLE_SIZE is anchored on MAX_STRING_LENGTH, and a comment here asserted the
+    // opposite. Either way it is INTERNAL now, so what this guard buys is the diagnosis: a
+    // stated size and limit, rather than a generic read failure nobody can act on.
     if (stats.size > MAX_SERVABLE_SIZE) {
       throw new ToolError(
         'INTERNAL',

@@ -196,40 +196,52 @@ describe('readImportFile — who owns a failed read', () => {
   // The ownership rule (ADR-012 d7, 02-mcp-contracts.md §6.4) is stated as a principle, so
   // it has to hold for the ordinary fs faults too, not only for the mid-read mutation.
   //
-  // Driven END TO END through readImportFile, not against an exported predicate. The
-  // previous version tested a classifier directly and left the WIRING — that the read path
-  // consults it at all — with no executing test: restoring the old collapse-everything
-  // behaviour kept the whole suite green. A predicate nobody calls is not a guard.
+  // Driven END TO END through readImportFile, not against an exported predicate. An earlier
+  // version tested a classifier directly and left the WIRING — that the read path consults
+  // it at all — pinned by nothing: restoring the collapse-everything behaviour kept the
+  // whole suite green. A predicate nobody calls is not a guard.
   it('a path that is not there belongs to the caller — INVALID_INPUT', async () => {
-    // The MESSAGE too, not only the code: three branches answer INVALID_INPUT here (unset
-    // RECONCIL_IMPORT_DIR, missing, escaped), so a code-only assertion would go green even
-    // if the file-level beforeEach never ran — the opposite of what this measures. It lands
-    // on the realpath branch, NOT on open(): a missing file fails to resolve before a
-    // descriptor is ever asked for.
+    // The MESSAGE too, not only the code: several branches answer INVALID_INPUT here, so a
+    // code-only assertion would go green even if the file-level beforeEach never ran — the
+    // opposite of what this measures. It lands on the realpath branch, NOT on open(): a
+    // missing file fails to resolve before a descriptor is ever asked for.
     await expect(readImportFile('no-such-file.csv')).rejects.toMatchObject({
       code: 'INVALID_INPUT',
       message: 'file_path could not be resolved in the import directory',
     });
   });
 
-  it('a path the filesystem will not resolve for any other reason is INTERNAL', async () => {
-    // A NUL byte: `path.resolve` passes it through, so it survives the pure prefix check and
-    // reaches `realpath`, which rejects it with ERR_INVALID_ARG_VALUE — not a missing-file
-    // code. That is the one non-ENOENT resolve failure that can be staged on Linux, macOS
-    // and Windows alike, and it stands in for the EACCES/EIO/ELOOP cases that cannot.
-    //
-    // Before the split, this and every permission-denied directory under the import root
-    // came back as INVALID_INPUT: "your file_path is wrong", for a path that may be
-    // perfectly good on a filesystem that would not say.
-    const err = await readImportFile('a\0b.csv').then(
+  it('a malformed path belongs to the caller too, not to the filesystem', async () => {
+    // A NUL byte survives `path.resolve` (pure string math) and the prefix check, and is
+    // refused by `realpath` in JS before any syscall. It describes the SHAPE of what was
+    // asked for, so a different `file_path` fixes it — which is the definition this edge
+    // uses for caller-owned. Answered INTERNAL for one round, which gave the two
+    // malformed-argument codes (this and ENAMETOOLONG) opposite owners.
+    await expect(readImportFile('a\0b.csv')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      message: 'file_path could not be resolved in the import directory',
+    });
+  });
+
+  it('an unusable import ROOT is not reported as a bad file_path', async () => {
+    // The inversion this round exists to fix, and it lived inside the check that prevents
+    // it everywhere else: `realpath(base)` and `realpath(target)` shared one catch, so a
+    // missing RECONCIL_IMPORT_DIR arrived as ENOENT and was read as "the path is not
+    // there". The model was told its argument was wrong and would have retried other
+    // paths, none of which could work.
+    process.env.RECONCIL_IMPORT_DIR = join(dir, 'not-a-real-root');
+    const err = await readImportFile('anything.csv').then(
       () => { throw new Error('expected a rejection'); },
       (e: unknown) => e as ToolError,
     );
-    expect(err.code).toBe('INTERNAL');
-    // Generic on the wire (C6); the real fault rides the cause, server-side only.
-    expect(err.message).toBe('the import file could not be read');
-    expect(err.message).not.toContain('a\0b.csv');
-    expect((err.cause as { code?: unknown } | undefined)?.code).toBe('ERR_INVALID_ARG_VALUE');
+    expect(err.message).not.toContain('could not be resolved');
+    expect(err.message).toMatch(/import directory cannot be used/);
+    // It stays INVALID_INPUT — the documented exception, because the caller CAN act on it —
+    // but the hint has to say HOW, or the code is just as misleading as the message was.
+    expect(err.code).toBe('INVALID_INPUT');
+    expect(err.hint).toMatch(/content/);
+    // The operator's fault is logged, never sent (C6).
+    expect((err.cause as { code?: unknown } | undefined)?.code).toBe('ENOENT');
   });
 
   it('a directory is refused on its stat, not on its open — the ordering still holds', async () => {

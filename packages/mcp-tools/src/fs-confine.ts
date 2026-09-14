@@ -43,50 +43,69 @@ export function resolveWithinBase(base: string, target: string): string | null {
 }
 
 /**
- * Codes that mean the path simply is not there. Everything else a `realpath` can raise —
- * EACCES, EIO, ELOOP, EMFILE, or a non-errno like ERR_INVALID_ARG_VALUE — describes the
- * state of the filesystem rather than the shape of the path, and the caller cannot tell
- * from its side which it got. (EACCES is the interesting one: another path might well have
- * been readable, so "nothing you can do" is not strictly true — but "your path is wrong" is
- * false, and of the two available answers only one does not misdirect.)
+ * Codes that describe the SHAPE of the path that was asked for, rather than the state of
+ * the filesystem it was asked about: absent, not a directory chain, too long to be a name,
+ * or malformed (a NUL byte, which Node rejects in JS before any syscall). Whoever supplied
+ * the path can fix all four by supplying a different one.
  *
- * The distinction exists because callers turn it into an error CODE. Collapsing both into
- * one 'unresolvable' meant a permission-denied directory under the import root was reported
- * to the model as a bad `file_path` — advice to try another path, when no path would have
- * worked — and it made the read edge state one ownership rule (ADR-012 d7) and follow
- * another. Decided here rather than at the call site because this is the only place that
- * still has the error object; `reason` alone cannot carry it.
+ * Everything else a `realpath` can raise — EACCES, EIO, ELOOP, EMFILE — says the path may
+ * be perfectly good and the filesystem will not say. (EACCES is the interesting one: another
+ * path might well have been readable, so "nothing you can do" is not strictly true — but
+ * "your path is wrong" is false, and of the two available answers only one misdirects.)
+ *
+ * The distinction exists because callers turn it into an error CODE, and one collapsed set
+ * meant a permission-denied directory under the import root was reported to the model as a
+ * bad `file_path` — advice to try another path, when no path would have worked.
  */
-const MISSING_CODES = new Set(['ENOENT', 'ENOTDIR', 'ENAMETOOLONG']);
+const PATH_SHAPE_CODES = new Set(['ENOENT', 'ENOTDIR', 'ENAMETOOLONG', 'ERR_INVALID_ARG_VALUE']);
+
+function isPathShapeFault(err: unknown): boolean {
+  const code: unknown = (err as { code?: unknown })?.code;
+  return typeof code === 'string' && PATH_SHAPE_CODES.has(code);
+}
 
 export type ConfinementFailure =
-  | { ok: false; reason: 'missing' | 'escaped' }
-  | { ok: false; reason: 'unreadable'; cause: unknown };
+  | { ok: false; reason: 'bad-path' | 'escaped' }
+  | { ok: false; reason: 'unreadable' | 'base-unusable'; cause: unknown };
 
 /**
  * Realpath both `base` and `target` and re-check confinement past symlinks. `target` must
  * already exist (the read-path shape: a file that is about to be read).
  *
- * Three distinct failures, because callers owe the caller three distinct answers:
- * `'missing'` — the path is not there, which is the supplied argument's own defect;
- * `'unreadable'` — it may well be there, but the filesystem would not say, which is not;
- * `'escaped'` — it resolved outside the base. The `unreadable` case carries the error so a
- * caller can log it server-side without it reaching the wire (C6).
+ * Four distinct failures, because they are owned by three different people:
+ *  - `'bad-path'` — the supplied path is absent, malformed or not a directory chain;
+ *  - `'escaped'` — it resolved outside the base;
+ *  - `'unreadable'` — it may be there, but the filesystem would not say (EACCES, EIO, ELOOP);
+ *  - `'base-unusable'` — the BASE itself did not resolve, which is the operator's
+ *    configuration and says nothing at all about `target`.
+ *
+ * The last one is why the two realpaths are no longer in one `try`. Sharing a catch made a
+ * missing RECONCIL_IMPORT_DIR come back as ENOENT and be reported to the model as "your
+ * file_path could not be resolved" — the exact ownership inversion this discriminant exists
+ * to prevent, hidden inside the function that prevents it everywhere else.
+ *
+ * The two not-the-caller's cases carry the error so a caller can log it server-side without
+ * it reaching the wire (C6).
  */
 export async function realpathWithinBase(
   base: string,
   target: string,
 ): Promise<{ ok: true; realTarget: string } | ConfinementFailure> {
   let realBase: string;
-  let realTarget: string;
   try {
     realBase = await realpath(base);
+  } catch (err) {
+    return { ok: false, reason: 'base-unusable', cause: err };
+  }
+
+  let realTarget: string;
+  try {
     realTarget = await realpath(target);
   } catch (err) {
-    const code: unknown = (err as { code?: unknown })?.code;
-    if (typeof code === 'string' && MISSING_CODES.has(code)) return { ok: false, reason: 'missing' };
+    if (isPathShapeFault(err)) return { ok: false, reason: 'bad-path' };
     return { ok: false, reason: 'unreadable', cause: err };
   }
+
   if (realTarget !== realBase && !realTarget.startsWith(realBase + sep)) {
     return { ok: false, reason: 'escaped' };
   }

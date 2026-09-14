@@ -78,17 +78,21 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
      the model its `out_dir` is bad would be false. The server-side cause records which.
 
      The split is about OWNERSHIP, not about `out_dir`, so it governs the read edge the same
-     way — and the dividing line there is CONFINEMENT. Before it, a failure describes the
-     supplied path: missing (`ENOENT`) is `INVALID_INPUT`, while a `realpath` that fails for
-     any other reason (`EACCES`, `EIO`, `ELOOP`) is `INTERNAL`, because the path may be
-     perfectly good and the filesystem will not say. After it, NOTHING is the caller's: a
-     `file_path` that resolved and then vanished before `open`, or changed size between its
-     `stat` and its last byte, is the residual race and the co-resident writer, not a bad
-     argument. Written as `INVALID_INPUT` until 2026-09-14, which invited the one recovery
-     that cannot work — retrying with a different path — and discarded the operator's only
-     signal that something is racing writes in their import directory. An errno test at the
-     post-confinement sites was a later attempt at the same rule and got it backwards: there,
-     `ENOENT` means the file went away, not that the caller named nothing.
+     way. The test is what a refusal is a statement ABOUT, not where in the sequence it
+     happens: an amendment that drew the line at confinement was contradicted by the
+     `INVALID_INPUT` checks that follow it (a FIFO, a file over the cap) and had to be
+     withdrawn. A statement about the REQUEST — absent, malformed, too long, escaping, not a
+     regular file, over the cap — is `INVALID_INPUT`, and a different path fixes it. A
+     statement about the FILESYSTEM is `INTERNAL`: a `realpath` refused with `EACCES`, `EIO`
+     or `ELOOP`, where the path may be perfectly good and the filesystem will not say; a
+     `file_path` that resolved and then vanished or was denied before `open`; one that
+     changed size between its `stat` and its last byte. Written as `INVALID_INPUT` until
+     2026-09-14, which invited the one recovery that cannot work — retrying with a different
+     path — and discarded the operator's only signal that something is racing writes in
+     their import directory. Two later attempts got the boundary wrong in turn: an errno
+     test at the post-confinement sites (where `ENOENT` means the file went away, not that
+     the caller named nothing), and a shared `try` over both realpaths, which blamed the
+     caller for an unusable import ROOT.
    - **"Never a write outside the configured base" was too strong.** No export CONTENT is
      ever written outside the root — that is the guarantee, and it holds. But `mkdir -p`
      runs before the post-creation check can fire, so a link planted in that window does get

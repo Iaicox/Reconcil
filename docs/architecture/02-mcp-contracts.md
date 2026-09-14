@@ -409,26 +409,31 @@ output: { inserted: number; skipped_duplicates: number;
 `RECONCIL_IMPORT_DIR`, never a location of its own, and — unlike the export root — this edge
 is FAIL-CLOSED, so with no `RECONCIL_IMPORT_DIR` configured `file_path` is refused outright.
 
-The error contract follows OWNERSHIP, the rule §6.5 and ADR-012 d7 state for `out_dir`, and
-the dividing line is CONFINEMENT: everything before it describes the supplied path,
-everything after it describes the filesystem.
+The error contract follows OWNERSHIP, the rule §6.5 and ADR-012 d7 state for `out_dir`. The
+question is not WHERE in the sequence a refusal happens — an earlier wording drew the line at
+confinement and was contradicted by the two `INVALID_INPUT` checks that follow it — but what
+the refusal is a statement ABOUT: the thing the caller asked for, or the condition of the
+filesystem it was asked about.
 
-- `INVALID_INPUT` — the caller's to fix, and all of it decided at or before confinement. A
-  `..` traversal or an absolute path that escapes; a path that is simply not there
-  (`ENOENT`, `ENOTDIR`, `ENAMETOOLONG` from `realpath`); a path that resolves outside the
-  directory; a non-regular file (FIFO, socket, device — refused on its `stat`, because
-  `open` on a directory succeeds on every platform); a file over the byte cap.
-- `INTERNAL` — nobody's argument. `realpath` failing for any OTHER reason (`EACCES`, `EIO`,
-  `ELOOP`, or a non-errno): the path may be perfectly good and the filesystem will not say,
-  so "your `file_path` is wrong" is false and "try another path" is not a recovery. Then
-  everything past confinement: a file that vanishes between `realpath` and `open` (the
-  residual race in 09-known-gaps.md), one mutated between its `stat` and its last byte by a
-  co-resident writer, one larger than V8 can hold as a string, and any fault on the open
-  descriptor. Past confinement the argument has already been validated, so no errno there
-  can mean "the caller named something that is not there".
-- The single exception: an unset `RECONCIL_IMPORT_DIR` is `INVALID_INPUT` although the
-  operator owns it, because the caller CAN act on it — the tool takes `content` as well, and
-  inline CSV needs no import directory.
+- `INVALID_INPUT` — a statement about the request. A `..` traversal or an absolute path that
+  escapes; a path that is absent, malformed (a NUL byte) or too long to be a name; a path
+  that resolves outside the directory; a target that is not a regular file (FIFO, socket,
+  device — refused on its `stat`, because `open` on a directory succeeds on every platform);
+  a file over the byte cap. Some of these are only knowable after confinement; that does not
+  make them the filesystem's fault. A different `file_path` fixes every one.
+- `INTERNAL` — a statement about the filesystem. `realpath` failing with anything that is
+  not about the path's shape (`EACCES`, `EIO`, `ELOOP`): the path may be perfectly good and
+  the filesystem will not say, so "your `file_path` is wrong" is false and "try another
+  path" is not a recovery. A file that vanishes between `realpath` and `open`, or is denied
+  there (on POSIX `realpath` consults only search permission on the prefix, so a mode-000
+  file resolves and then fails to open — no race needed). One mutated between its `stat` and
+  its last byte by a co-resident writer. One larger than V8 can hold as a string. Any fault
+  on the open descriptor.
+- The exception, and its only member: the import root itself. Unset, or configured but
+  unusable (missing, or not a directory), is `INVALID_INPUT` although the operator owns it —
+  because the caller CAN act, and the hint says how: pass the CSV inline as `content`. It
+  gets its own message rather than borrowing "file_path could not be resolved", which blamed
+  the argument for the configuration.
 
 Every message is generic; the path, the errno and the underlying fs error stay server-side
 on `Error.cause` (C6).
