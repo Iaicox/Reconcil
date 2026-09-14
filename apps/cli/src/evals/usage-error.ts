@@ -16,7 +16,11 @@ export class UsageError extends Error {
 }
 
 /**
- * Values appearing more than once, in first-seen order, each reported once.
+ * Values appearing more than once, each reported once, in first-REPETITION order — the
+ * order in which the duplicates were detected, not the order the values first appeared.
+ * `['b','a','a','b']` gives `['a','b']`. Both callers print this into an error message, so
+ * a reader matching it against their input would otherwise get a misleading account of
+ * which id was hit first.
  *
  * Here rather than in smoke.ts because both callers are about reporting a bad invocation,
  * and this module is the one they can both reach without pulling in the Anthropic SDK.
@@ -29,4 +33,21 @@ export function findDuplicates(list: readonly string[]): string[] {
     else seen.add(id);
   }
   return [...dupes];
+}
+
+/**
+ * Join the named defects of an id mismatch into one message, skipping the empty ones.
+ *
+ * Shared because both callers had grown the same shape — and because an empty result is the
+ * failure mode that keeps recurring here: every version of this that reported only SOME of
+ * the ways a selection can be wrong eventually produced an error naming nothing. Returning
+ * null rather than '' makes the caller decide what to do about that, instead of throwing a
+ * blank message.
+ */
+export function describeIdMismatch(parts: readonly (readonly [label: string, ids: readonly string[]])[]): string | null {
+  const detail = parts
+    .filter(([, ids]) => ids.length > 0)
+    .map(([label, ids]) => `${label}: ${ids.join(', ')}`)
+    .join(' — ');
+  return detail === '' ? null : detail;
 }

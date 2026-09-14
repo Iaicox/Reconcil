@@ -32,6 +32,10 @@ export { UsageError };
 /** Exit code for "the gate could not run" — 1 stays "the gate ran and failed". */
 export const EXIT_CANNOT_RUN = 2;
 
+/** How long to wait for stderr to flush before exiting anyway. Long enough that a healthy
+ *  pipe always wins, short enough that a stalled one costs seconds rather than the job. */
+const FLUSH_TIMEOUT_MS = 2_000;
+
 /**
  * None of these reasons claims "so no case ever ran". They used to, and it is not knowable
  * here: credit runs out, a key is rotated, or a permission is revoked MID-suite far more
@@ -219,23 +223,35 @@ export async function reportAndExit(code: number, lines: readonly string[]): Pro
   // Node exits 1 — silently downgrading a classified EXIT_CANNOT_RUN. Worse, a callback
   // that never fires lets the loop drain and the process exit 0: a gate that could not run
   // reported GREEN, which this module's own header forbids.
+  // Set FIRST, before anything that can go wrong. Applied only by the `process.exit` below,
+  // the code would be conditional on getting there — and a throw from `write` on a destroyed
+  // stderr rejects this function, the callers `void` it, and Node exits 1, silently
+  // downgrading a classified EXIT_CANNOT_RUN.
   process.exitCode = code;
   try {
-    for (const line of lines) {
-      await new Promise<void>((resolve) => {
-        // `resolve` on both paths: the write callback receives an error rather than
-        // throwing, and a failure to print must not change the exit code already set.
-        process.stderr.write(`${line}
+    // BOUNDED. `write` calls back when the chunk reaches the OS, which never happens if
+    // stderr is a pipe whose reader has stalled or whose buffer is full — a CI runner
+    // harvesting logs, a wrapper that stopped draining. Awaiting that without a bound turned
+    // "the gate could not run, here is the code" into a job that hangs to its timeout and
+    // reports AS a timeout: the one outcome this module exists to prevent, reached through
+    // the flush that was added to prevent a different one. The race keeps the flush when
+    // stderr is healthy and gives it up when it is not; the exit code is already set either
+    // way, and that is the part CI reads.
+    await Promise.race([
+      (async () => {
+        for (const line of lines) {
+          await new Promise<void>((resolve) => {
+            // `resolve` on both paths: the callback receives an error rather than throwing,
+            // and a failure to print must not change the exit code already set.
+            process.stderr.write(`${line}
 `, () => { resolve(); });
-      });
-    }
+          });
+        }
+      })(),
+      new Promise<void>((resolve) => { setTimeout(resolve, FLUSH_TIMEOUT_MS).unref(); }),
+    ]);
   } catch {
-    // Swallowed deliberately. `process.exitCode = 2` does NOT survive an unhandled
-    // rejection — Node exits 1 — so letting a throw escape here silently downgrades a
-    // classified "could not run" into "the gate ran and found a regression", which is the
-    // one outcome this module exists to prevent. Verified: `node -e "process.exitCode=2;
-    // Promise.reject(new Error('x'))"` exits 1. Losing the message is bad; losing the
-    // code is worse, because the code is what CI reads.
+    // Swallowed deliberately: losing the message is bad, losing the code is worse.
   }
   process.exit(code);
 }

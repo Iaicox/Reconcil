@@ -38,6 +38,12 @@ async function main(): Promise<void> {
   }
 }
 
+/** 'eval gate' for the command that HAS a gate, 'cli' otherwise — so one command cannot
+ *  report two vocabularies depending on which failure it hits. `cli evals --runs 0` came
+ *  through here as "cli COULD NOT RUN" while `cli evals` with no key said "eval gate COULD
+ *  NOT RUN" from run.ts: same command, same code, two framings. */
+const failureLabel = (): string => (process.argv[2] === 'evals' ? 'eval gate' : 'cli');
+
 main().catch(async (err: unknown) => {
   // Labelled 'cli', not 'eval gate': this catch sees `repl` too, and the eval vocabulary
   // ("so no case ever ran", "re-run the job") is wrong for a command that runs no cases in
@@ -47,5 +53,5 @@ main().catch(async (err: unknown) => {
   // meant to stop: `reconcil` with no arguments loading the whole SDK graph to print a
   // usage string. The docstring in usage-error.ts states that property; this keeps it true.
   const { reportFailure } = await import('./evals/runnability.js');
-  await reportFailure('cli', err);
+  await reportFailure(failureLabel(), err);
 });

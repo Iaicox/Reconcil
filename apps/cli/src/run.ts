@@ -26,7 +26,7 @@ import { dbResolver } from './evals/resolver.js';
 import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
 import { EXIT_CANNOT_RUN, reportAndExit, reportFailure, unrunnableLines } from './evals/runnability.js';
-import { UsageError, findDuplicates } from './evals/usage-error.js';
+import { UsageError, describeIdMismatch, findDuplicates } from './evals/usage-error.js';
 import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
 import type { CaseResult, GateResult } from './evals/types.js';
 
@@ -136,27 +136,28 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   // paying for the whole suite. It filters the dataset only; the prompt, the tools and
   // every schema the model sees are identical either way.
   const selected = args.cases.length > 0 ? all.filter((c) => args.cases.includes(c.id)) : all;
-  if (args.cases.length > 0 && selected.length !== args.cases.length) {
-    // Two distinct ways the counts can disagree, and the message has to say which. A
-    // duplicated id ('--cases flow-001,flow-001') makes the lengths differ while every id
-    // exists, so reporting only the missing ones produced "unknown case id(s): " with
-    // nothing after the colon — an error naming nothing, under a hint that says "fix the
-    // invocation".
-    const missing = args.cases.filter((id) => !all.some((c) => c.id === id));
-    const repeated = findDuplicates(args.cases);
-    const detail = [
-      missing.length > 0 ? `unknown case id(s): ${missing.join(', ')}` : undefined,
-      repeated.length > 0 ? `repeated case id(s): ${repeated.join(', ')}` : undefined,
-    ].filter((x): x is string => x !== undefined).join(' — ');
-    // A THIRD way the counts can disagree: the dataset itself carrying a duplicate id (the
-    // loader does not enforce uniqueness — only core-30.test.ts does). Then nothing is
-    // missing and nothing is repeated in the ARGUMENT, and `detail` is empty — an error
-    // naming nothing, which is the defect this block was rewritten to fix.
-    throw new UsageError(
-      detail === ''
-        ? `--cases matched ${String(selected.length)} case(s) for ${String(args.cases.length)} id(s) — the dataset has a duplicate id`
-        : detail,
-    );
+  // Set membership and duplicates, NOT lengths. A count can be satisfied by the wrong set:
+  // `--cases a,b` against a dataset with no `a` and two `b`s gives selected.length === 2 ===
+  // args.cases.length, so neither branch fires and the run silently executes `b` twice and
+  // never runs `a` — on the command that spends live API budget. Same trap removed from
+  // selectSmokeDataset in this branch and left standing here, eighty lines away.
+  const selectedIds = new Set(selected.map((c) => c.id));
+  const missing = args.cases.filter((id) => !selectedIds.has(id));
+  const repeated = findDuplicates(args.cases);
+  const datasetDupes = findDuplicates(selected.map((c) => c.id));
+  if (args.cases.length > 0 && (missing.length > 0 || repeated.length > 0 || datasetDupes.length > 0)) {
+    // Three distinct defects, each named on its own so the message can never be empty: an
+    // id that is not in the dataset, an id repeated in the ARGUMENT, and a duplicate in the
+    // DATASET (the loader does not enforce uniqueness — only core-30.test.ts does).
+    const detail = describeIdMismatch([
+      ['unknown case id(s)', missing],
+      ['repeated case id(s)', repeated],
+      ['duplicate id(s) in the dataset', datasetDupes],
+    ]);
+    // `?? ` is not dead: the guard fires only when one of the three is non-empty, but
+    // stating the fallback keeps a future fourth condition from producing a blank message,
+    // which is the defect this block has now been rewritten for twice.
+    throw new UsageError(detail ?? '--cases did not select the requested set');
   }
   // `--smoke --cases gas-001` validated the ids, could hard-fail on them, and then ran the
   // six smoke cases instead — a narrowing option quietly running something else, on the

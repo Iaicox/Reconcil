@@ -10,7 +10,7 @@
  */
 import type { EvalCase } from '@reconcil/evals';
 
-import { findDuplicates } from './usage-error.js';
+import { UsageError, describeIdMismatch, findDuplicates } from './usage-error.js';
 
 /**
  * The ids, as an ARRAY. A `new Set([...])` literal absorbs a duplicate silently, and
@@ -33,10 +33,13 @@ export function buildSmokeIds(list: readonly string[]): ReadonlySet<string> {
   // report PASS" — and the duplicate guard inherited the hole from the length check it
   // replaced: an empty set makes `missing` and `unexpected` both empty, so
   // selectSmokeDataset returns [] and the gate passes over nothing.
-  if (list.length === 0) throw new Error('smoke id list is empty — that would run zero cases and report a pass');
+  // UsageError, not Error: these are "the gate could not run", and a plain Error maps to
+  // exit 1 — which the documented contract reads as "the gate ran and found a regression",
+  // pointing CI at the branch for a dataset or id-list defect.
+  if (list.length === 0) throw new UsageError('smoke id list is empty — that would run zero cases and report a pass');
   const dupes = findDuplicates(list);
   if (dupes.length > 0) {
-    throw new Error(`smoke id list contains duplicate id(s): ${dupes.join(', ')}`);
+    throw new UsageError(`smoke id list contains duplicate id(s): ${dupes.join(', ')}`);
   }
   return new Set(list);
 }
@@ -56,6 +59,12 @@ export const SMOKE_IDS: ReadonlySet<string> = buildSmokeIds(SMOKE_ID_LIST);
  * duplicate guard on the id list above exists to prevent, one layer out.
  */
 export function selectSmokeDataset(all: readonly EvalCase[], ids: ReadonlySet<string> = SMOKE_IDS): EvalCase[] {
+  // Guarded HERE too, not only in buildSmokeIds. `ids` is a caller-supplied parameter, and
+  // this is the function that actually returns the dataset the gate runs over: an empty set
+  // makes `missing` and `unexpected` both empty, so the early return below hands back [],
+  // runSuite loops zero times, every metric aggregates non-applicable and the gate reports
+  // PASS over ZERO cases. Fixing that one layer up left the function that has the hole.
+  if (ids.size === 0) throw new UsageError('smoke id set is empty — that would run zero cases and report a pass');
   const dataset = all.filter((c) => ids.has(c.id));
 
   const foundIds = dataset.map((c) => c.id);
@@ -64,15 +73,13 @@ export function selectSmokeDataset(all: readonly EvalCase[], ids: ReadonlySet<st
   const unexpected = findDuplicates(foundIds);
   if (missing.length === 0 && unexpected.length === 0) return dataset;
 
-  const detail = [
-    missing.length > 0 ? `missing: ${missing.join(', ')}` : undefined,
-    unexpected.length > 0 ? `unexpected (duplicate ids in dataset): ${unexpected.join(', ')}` : undefined,
-  ]
-    .filter((s): s is string => s !== undefined)
-    .join(' — ');
+  const detail = describeIdMismatch([
+    ['missing', missing],
+    ['unexpected (duplicate ids in dataset)', unexpected],
+  ]) ?? 'the selection did not match the named ids';
   // Detail first. The offsetting case — one id duplicated, another renamed away — reads
   // "expected 6 cases, got 6", and a reader scanning CI takes matching counts for a spurious
   // failure. The count was the trap this function stopped using; it must not stay the
   // headline of the message.
-  throw new Error(`smoke dataset mismatch: ${detail} (selected ${String(dataset.length)} of ${String(ids.size)} named ids)`);
+  throw new UsageError(`smoke dataset mismatch: ${detail} (selected ${String(dataset.length)} of ${String(ids.size)} named ids)`);
 }

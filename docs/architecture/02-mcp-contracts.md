@@ -531,13 +531,18 @@ never as a location of its own — a `..` traversal or an absolute path that esc
 is rejected as `INVALID_INPUT` before anything is created, the same confinement discipline
 `recon_import_invoices`' `file_path` applies to reads (§6.4) against `RECONCIL_IMPORT_DIR`.
 
-Two refusals the caller does NOT own are `INTERNAL`, not `INVALID_INPUT`: a symlink planted
-between validation and use, and a redirect to a different location *inside* the export root.
-Both are refused before any content is written and the server-side cause records which — but
-the caller's `out_dir` was already valid at that point, so blaming it would be false. The
-guarantee is that no export CONTENT is written outside the root; a directory can be created
-there by `mkdir -p` in the race window before the post-creation check fires (best-effort
-removed). See ADR-012 d7, amended 2026-09-13, for why that is the achievable form.
+A refusal the caller does NOT own — a symlink planted between validation and use that sends
+the path outside the root — is `INTERNAL`, not `INVALID_INPUT`: the caller's `out_dir` was
+already valid at that point, so blaming it would be false, and the server-side cause records
+which. The guarantee is that no export CONTENT is written outside the root; a directory can
+be created there by `mkdir -p` in the race window before the post-creation check fires
+(best-effort removed).
+
+A link that stays INSIDE the export root is followed, not refused — it is the operator's own
+layout (`<root>/current -> <root>/2026-09`). The `file_path` on the `exports` row and the
+`path` in the response are therefore the RESOLVED location, never the spelled one: a
+redirect is permitted but must never be invisible in the audit trail. See ADR-012 d7 for the
+three rules this replaced and why each was wrong.
 The one difference: the export root is not fail-closed (it defaults to `<cwd>/exports`
 rather than refusing every call), since export write locations already had a safe default
 before `out_dir` existed.

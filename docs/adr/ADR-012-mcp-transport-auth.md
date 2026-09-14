@@ -85,27 +85,36 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
 
    What the implementation actually does now, since two steps grew to several: prefix check
    → `realpath` of the deepest existing ancestor → single-path-segment checks on every
-   caller-supplied component (`exportId`, each rendered file name) → `mkdir -p` → a walk from
-   the export ROOT down to the finished directory refusing any segment that is a link →
-   writes through the resolved directory with `{ flag: 'wx' }` → cleanup of anything this
-   call created.
+   caller-supplied component (`exportId`, each rendered file name) → `mkdir -p` → `realpath`
+   of the finished directory, required to stay inside `realpath` of the ROOT → writes
+   through, AND reporting of, the resolved directory → cleanup of anything this call created.
 
-   That post-creation step took three attempts, and what it asks is the part worth recording.
-   The property wanted is "nothing redirected this path after it was validated", and the two
-   earlier spellings both tried to encode it as a comparison between PATHS. Anchored at the
-   out_dir-narrowed base, both operands resolved through the planted link and the check was
+   That post-creation step took four attempts, and what it asks is the part worth recording.
+   Three of them answered a question that was not the guarantee above. Anchored at the
+   out_dir-narrowed base, both operands resolved through a planted link and the check was
    blind to it: with `<root>/june` pointing at `<root>/tenant-b`, an export asked for under
    `june/close` was accepted while its bytes landed in tenant-b and every reported path said
    june. Re-anchored at `realpath(root)` plus the relative path it saw that — but compared a
    caller-spelled string against a realpath'd one, so a second export under `June/Close`
-   after a first under `june/close` was REFUSED on a case-insensitive filesystem, a valid
-   request broken on the main success path.
+   after one under `june/close` was REFUSED on a case-insensitive filesystem. Refusing every
+   link between root and target fixed the casing and broke `<root>/current -> <root>/2026-09`,
+   an ordinary operator layout that had always worked.
 
-   Walking the segments and refusing a link asks the question directly. `lstat` reports the
-   entry rather than its target (Windows junctions included), and path spelling is resolved
-   by the OS, so casing stops being part of the answer. The export root's OWN link-ness is
-   not examined: a symlinked or bind-mounted root (macOS `/var` → `/private/var`) is the
-   operator's configuration, not a redirect of the caller's path.
+   Containment between two REALPATH'd paths is the rule that matches the guarantee. Both
+   sides are resolved, so casing is not part of the answer; a link is followed wherever it
+   goes and judged on where it landed.
+
+   **A link that stays inside the root is honoured, not refused** — it is the operator's
+   arrangement, and the export root is theirs to lay out. What must not happen is the audit
+   trail lying about where the files are, so the `exports` row and the tool response carry
+   the RESOLVED path. A redirect is therefore permitted and never invisible. The cost is
+   that an operator whose root is itself a symlink or bind-mount (macOS `/var` →
+   `/private/var`) sees the resolved prefix rather than the one they configured; both name
+   the same directory and only one of them is checkable. The stricter rule — refuse any link
+   on the path — was implemented and rejected: it buys protection against a co-resident
+   writer redirecting an export to another location inside the root, which under this threat
+   model can already read those files, and it costs a layout self-hosters actually use.
+   Revisit if the export root is ever shared between tenants.
 
    The deeper question — whether a confinement this shaped should
    be built out of `realpath` at all — is recorded in `09-known-gaps.md` for the ADR sweep.

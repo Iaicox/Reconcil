@@ -6,7 +6,7 @@
  * the citation envelope. Export tools are non-read-only (they write files +
  * register a row) but never destructive. Shared by both Face A export tools.
  */
-import { mkdir, open, realpath, rm, rmdir } from 'node:fs/promises';
+import { mkdir, open, rm, rmdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import type { Warning } from '@reconcil/core';
@@ -16,7 +16,7 @@ import { isZero, type RenderedExport, type RenderedFile } from '@reconcil/export
 import type { ToolContext } from '../context.js';
 import type { ToolEnvelope } from '../envelope.js';
 import { ToolError } from '../errors.js';
-import { isLinkFreeDescendant, isSinglePathSegment, realpathAncestorWithinBase, resolveWithinBase } from '../fs-confine.js';
+import { isSinglePathSegment, realpathAncestorWithinBase, realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
 import { runWriteTool } from '../write-tx.js';
 import type { CloseData } from './close-pack-data.js';
 
@@ -107,6 +107,14 @@ export async function writeExportFiles(
   // an empty `<exportId>/` orphaned under the export root on a bad name: no `exports` row,
   // and a fresh uuid every retry so nothing ever reclaimed it. They need no filesystem to
   // check, so there is no reason for them to run after one has been touched.
+  // An empty render is a caller defect, not an export. Unchecked it created the
+  // `<exportId>/` directory, returned `files: []`, and export-journal-drafts.ts then read
+  // `files[0]!.path` — a raw TypeError escaping the tool instead of a ToolError (C6), with
+  // runExport registering a `done` exports row pointing at an empty directory.
+  if (rendered.length === 0) {
+    throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined,
+      new Error('nothing was rendered'));
+  }
   const badSegment = !isSinglePathSegment(exportId)
     ? `exportId ${JSON.stringify(exportId)}`
     : rendered.map((f) => f.name).find((n) => !isSinglePathSegment(n));
@@ -132,18 +140,24 @@ export async function writeExportFiles(
 
   try {
     await mkdir(dir, { recursive: true });
-    // Is anything on the way from the export ROOT down to this directory a link?
+    // Does the finished directory still resolve INSIDE the export root?
     //
-    // That is the whole post-creation question, and asking it directly replaced two
-    // path-comparison spellings that each got it wrong in a different direction (see
-    // `isLinkFreeDescendant`). The root is the anchor because it is the one path a writer
-    // inside the export tree cannot move; the root's OWN link-ness is the operator's
-    // configuration and deliberately not examined.
-    const [linkFree, resolved] = await Promise.all([
-      isLinkFreeDescendant(root, dir),
-      realpath(dir).catch(() => null),
-    ]);
-    if (!linkFree || resolved === null) {
+    // That is the whole post-creation question, and getting here took four attempts worth
+    // recording, because three of them answered a different one. Anchored at the
+    // out_dir-narrowed base, both operands resolved through a planted link and the check was
+    // blind to it. Re-anchored at `realpath(root)` plus the relative path, it saw that but
+    // compared a caller-spelled string against a realpath'd one, so a second export under
+    // `June/Close` after one under `june/close` was refused on a case-insensitive
+    // filesystem. Refusing every link on the way fixed the casing but broke an ordinary
+    // operator layout (`<root>/current -> <root>/2026-09`), which worked before any of this.
+    //
+    // Containment between two REALPATH'd paths is the rule that matches the guarantee the
+    // ADR actually makes: no export content outside the root. Both sides are resolved, so
+    // casing is not part of the answer; a link is followed wherever it goes and then judged
+    // on where it landed. A link inside the root is the operator's arrangement and is
+    // honoured; one leaving it is refused.
+    const check = await realpathWithinBase(root, dir);
+    if (!check.ok) {
       // `mkdir -p` already ran, so a link planted in that window may have got a real
       // directory created behind it. Best-effort, and it removes AT MOST THE LEAF: a
       // non-recursive rmdir cannot take back the intermediate levels `mkdir -p` created,
@@ -152,9 +166,9 @@ export async function writeExportFiles(
       // tidying, not containment, and failing to tidy must never mask the refusal.
       await rmdir(dir).catch(() => { /* a link, or levels above it — not reclaimable here */ });
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined,
-        new Error(`export dir confinement failed: ${linkFree ? 'unresolvable' : 'a path segment is a link'}`));
+        new Error(`export dir confinement failed: ${check.reason}`));
     }
-    const realDir = resolved;
+    const realDir = check.realTarget;
     // Independent writes, one round of I/O. Written through the RESOLVED directory — that
     // is the security property. REPORTED under the logical one: an export root that is
     // itself a symlink or bind-mount (macOS /var → /private/var) would otherwise hand the
@@ -177,7 +191,7 @@ export async function writeExportFiles(
         } finally {
           await handle.close().catch(() => { /* the write already succeeded or failed */ });
         }
-        return { name: f.name, path: join(dir, f.name), sha256: f.sha256 };
+        return { name: f.name, path: join(realDir, f.name), sha256: f.sha256 };
       }),
     );
     const failure = written.find((r) => r.status === 'rejected');
@@ -199,7 +213,7 @@ export async function writeExportFiles(
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, failure.reason);
     }
     const files = written.map((r) => (r as PromiseFulfilledResult<{ name: string; path: string; sha256: string }>).value);
-    return { dir, files };
+    return { dir: realDir, files };
   } catch (err) {
     if (err instanceof ToolError) throw err;
     throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined, err);

@@ -25,8 +25,16 @@ beforeEach(async () => {
   process.env.RECONCIL_EXPORT_DIR = root;
 });
 
+const savedExportDir = process.env.RECONCIL_EXPORT_DIR;
+
 afterEach(async () => {
-  delete process.env.RECONCIL_EXPORT_DIR;
+  // Restored, not deleted. A developer with RECONCIL_EXPORT_DIR exported in their shell
+  // would otherwise lose it for the rest of the worker, and any later test in that process
+  // would silently fall back to <cwd>/exports and write into the repo. import-read.test.ts
+  // saves and restores for the same reason — and its own comment records a leaked value
+  // making a neighbouring test pass for the wrong reason.
+  if (savedExportDir === undefined) delete process.env.RECONCIL_EXPORT_DIR;
+  else process.env.RECONCIL_EXPORT_DIR = savedExportDir;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -150,22 +158,37 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     }
   });
 
-  it('refuses a redirect to ANOTHER location inside the root, not just an escape from it', async () => {
-    // Containment alone is satisfied here: the link points at a sibling directory that IS
-    // under the export root. But the write would land in someone else's folder while the
-    // exports row and the tool response still name <root>/june/close/<uuid> — an audit
-    // trail pointing at a directory holding none of the bytes. Only equality against
-    // realpath(base)/exportId catches it.
-    await mkdir(join(root, 'june', 'close'), { recursive: true });
-    const sibling = join(root, 'tenant-b-exports');
-    await mkdir(sibling, { recursive: true });
-    await symlink(sibling, join(root, 'june', 'close', 'run-uuid'), 'junction');
+  it('follows a link that stays inside the root, and REPORTS where the bytes went', async () => {
+    // Policy: a link inside the export root is the operator's arrangement (`current ->
+    // 2026-09` is a routine layout, and refusing every link broke it). What must not happen
+    // is the audit trail lying about where the files are — so the `exports` row and the tool
+    // response carry the RESOLVED path. A redirect is then permitted but never invisible.
+    await mkdir(join(root, 'tenant-b', 'close'), { recursive: true });
+    await symlink(join(root, 'tenant-b'), join(root, 'june'), 'junction');
 
-    await expect(
-      writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [file]),
-    ).rejects.toMatchObject({ code: 'INTERNAL' });
+    const r = await writeExportFiles('export_close_pack', join('june', 'close'), 'run-uuid', [file]);
+    expect(r.dir).toBe(join(root, 'tenant-b', 'close', 'run-uuid'));
+    expect(r.files[0]!.path).toBe(join(root, 'tenant-b', 'close', 'run-uuid', file.name));
+    await expect(readFile(r.files[0]!.path, 'utf8')).resolves.toBe(file.content);
+  });
 
-    expect(await readdir(sibling)).toEqual([]);
+  it('refuses a link that leaves the root, wherever on the path it sits', async () => {
+    // The guarantee ADR-012 d7 makes: no export CONTENT outside the root. Staged at an
+    // out_dir SEGMENT rather than at the export-id leaf, because a check anchored at the
+    // narrowed base resolves both operands through the link and cannot see this at all.
+    const outside = await mkdtemp(join(tmpdir(), 'reconcil-outside-'));
+    try {
+      await mkdir(join(outside, 'close'), { recursive: true });
+      await symlink(outside, join(root, 'june'), 'junction');
+
+      await expect(
+        writeExportFiles('export_close_pack', join('june', 'close'), 'run-uuid', [file]),
+      ).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+
+      expect(await readdir(join(outside, 'close'))).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it('refuses an exportId that is not a single path segment', async () => {
@@ -227,23 +250,6 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     ).rejects.toMatchObject({ code: 'INTERNAL' });
 
     await expect(readdir(join(root, 'june', 'close'))).rejects.toThrow(/ENOENT/);
-  });
-
-  it('refuses a redirect through a SEGMENT of out_dir, not only one at the export-id leaf', async () => {
-    // The case the previous version claimed to close and did not — proved against the built
-    // package before this test existed. `<root>/june` links to `<root>/tenant-b`, and
-    // `<root>/tenant-b/close` is real, so BOTH earlier layers passed: the pre-mkdir ancestor
-    // check saw a link resolving INSIDE the root (not an escape), and the equality check
-    // built `expected` from `realpath(base)` — the same link both sides resolved through.
-    // The bytes landed in tenant-b while dir, files[].path and the exports row said june.
-    await mkdir(join(root, 'tenant-b', 'close'), { recursive: true });
-    await symlink(join(root, 'tenant-b'), join(root, 'june'), 'junction');
-
-    await expect(
-      writeExportFiles('export_close_pack', 'june/close', 'run-uuid', [file]),
-    ).rejects.toMatchObject({ code: 'INTERNAL' });
-
-    expect(await readdir(join(root, 'tenant-b', 'close'))).toEqual([]);
   });
 
   it('still accepts an export ROOT that is itself a link — the benign shape', async () => {

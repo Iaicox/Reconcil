@@ -12,12 +12,18 @@
  * processes rather than because it needs a database.
  */
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
 const CLI_ROOT = fileURLToPath(new URL('..', import.meta.url));
+/** tsx's PUBLISHED entry. Reaching into `node_modules/tsx/dist/cli.mjs` bound these tests to
+ *  a path that is not part of its surface: a minor inside `^4.19.0` that relocates the file
+ *  makes all six fail with an ENOENT the `catch` below flattens into "expected 2, got -1",
+ *  saying nothing about the contract they measure. */
+const TSX = createRequire(import.meta.url).resolve('tsx/cli');
 
 interface Run { code: number; stderr: string; stdout: string }
 
@@ -26,7 +32,7 @@ function run(entry: string, args: string[], env: Record<string, string | undefin
   try {
     const stdout = execFileSync(
       process.execPath,
-      [join(CLI_ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs'), join(CLI_ROOT, 'src', entry), ...args],
+      [TSX, join(CLI_ROOT, 'src', entry), ...args],
       { encoding: 'utf8', stdio: 'pipe', env: { ...process.env, ...env }, cwd: CLI_ROOT },
     );
     return { code: 0, stderr: '', stdout };
