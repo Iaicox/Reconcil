@@ -506,7 +506,7 @@ number is gone.) The reconciliation from 32 ledger lines:
   Thirteen by the known-gaps sweep: `compareTraceIds`' inconsistent comparator,
   `sentinelRank`'s silent `?? 0`, the unordered price/FX ref hydration, `mapStatusCounts`'
   bare `in`, the `destroy()` RST race, `HttpDeps.allowedHosts = []`, the untested
-  `out_dir` `""`/`"."`, `migrate.itest.ts`'s wrong container comment, the `SMOKE_IDS`
+  `out_dir` `""`/`"."`, `migrate.itest.ts`'s wrong container comment, the smoke id list's
   duplicate hazard, `export-dir.test.ts`'s unpinned `rejects.toThrow()`, the supply-chain
   guard's conflated exit codes, `flow-002`'s over-specified `tools_expected`, and the
   `--passWithNoTests` inconsistency.
@@ -515,10 +515,11 @@ number is gone.) The reconciliation from 32 ledger lines:
   is worth auditing rather than merely appending to. (a) The `--passWithNoTests` entry named
   `db` and `recon`; `recon` had since gained three hermetic tests, and `db`'s `test/` holds
   only `*.itest.ts`, so there the flag is load-bearing and removing it would have broken the
-  hermetic job — the "fix" the entry asked for was a bug. (b) The `SMOKE_IDS` entry was
-  nearly closed as already-handled, because `selectSmokeDataset` throws on duplicates — but
-  it throws on duplicates in the DATASET, not in the literal, which is a different mistake
-  and was still silent. (c) The TOCTOU entry (kept, rewritten) understated the half that had
+  hermetic job — the "fix" the entry asked for was a bug. (b) The smoke-id-list entry (the symbol was
+  `SMOKE_IDS` then; it is `SMOKE_ID_LIST` behind `smokeIds()` now) was nearly closed as
+  already-handled, because `selectSmokeDataset` throws on duplicates — but it throws on
+  duplicates in the DATASET, not in the literal, which is a different mistake and was still
+  silent. (c) The TOCTOU entry (kept, rewritten) understated the half that had
   a real consequence and overstated the half that did not.
 
 - **±0**: the `## Pricing` heading, empty since PR #66 removed both of its entries, is gone.

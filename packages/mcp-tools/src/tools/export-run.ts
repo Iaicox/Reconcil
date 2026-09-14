@@ -89,7 +89,7 @@ async function baseDirUnder(base: string, outDir?: string): Promise<string> {
  *  - writes go through the RESOLVED directory with `{ flag: 'wx' }` — create, never follow
  *    or truncate. The directory is a fresh UUID, so anything already at that path was
  *    planted, and a plain `writeFile` would follow it straight out of the export root.
- *    Reported paths stay in the LOGICAL vocabulary (see below).
+ *    Reported paths are the RESOLVED ones (see below).
  */
 export async function writeExportFiles(
   toolName: string,
@@ -115,9 +115,10 @@ export async function writeExportFiles(
     throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined,
       new Error('nothing was rendered'));
   }
+  const names = rendered.map((f) => f.name);
   const badSegment = !isSinglePathSegment(exportId)
     ? `exportId ${JSON.stringify(exportId)}`
-    : rendered.map((f) => f.name).find((n) => !isSinglePathSegment(n));
+    : names.find((n) => !isSinglePathSegment(n));
   if (badSegment !== undefined) {
     // The model sees the generic message (C6); the cause records WHICH component was
     // refused, server-side. Every other branch here attaches one for the same reason —
@@ -125,6 +126,43 @@ export async function writeExportFiles(
     // a filesystem fault.
     throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined,
       new Error(`not a single path segment: ${badSegment}`));
+  }
+
+  // Two rendered files that want the same name never both get written: `wx` lets one
+  // through and rejects the other with EEXIST. Left to run, that is diagnosed as the wrong
+  // thing entirely — EEXIST inside a freshly minted UUID directory is the ONE signal that
+  // says a co-resident writer planted something there, which is why the writes use `wx` at
+  // all. A renderer emitting `manifest.json` twice would raise that alarm about itself, and
+  // the operator reading the INTERNAL cause cannot tell the two apart.
+  //
+  // Compared case-INSENSITIVELY. `Manifest.json` and `manifest.json` are two names and one
+  // file on Windows and on macOS: on Linux the export would materialise with both, anywhere
+  // else with whichever wrote last, silently — an export that is not the same export
+  // depending on the host. Refusing the pair everywhere is the only answer that keeps the
+  // bundle identical across the three. Nothing legitimate is caught: close-pack renders six
+  // distinct `*_<slug>.csv` plus manifest.json, pdf-summary renders summary.pdf plus
+  // manifest.json, and journal-drafts renders exactly one file (its name carries an
+  // upper-case `_DRAFT`, which is why this compares folded rather than assuming lower-case).
+  //
+  // Written as a loop, not `names.find((n) => !seen.add(n.toLowerCase()))`. `Set.add`
+  // returns the SET, never a boolean, so `!set` is always false and that one-liner was a
+  // guard that could not fire — shipped once already, with two tests that passed anyway:
+  // `wx` threw EEXIST on this machine's case-insensitive filesystem and produced the same
+  // INTERNAL the guard would have, so both went green while proving nothing. On Linux the
+  // case pair would have been written twice and the test would have gone red in CI.
+  const seen = new Set<string>();
+  let duplicate: string | undefined;
+  for (const n of names) {
+    const folded = n.toLowerCase();
+    if (seen.has(folded)) {
+      duplicate = n;
+      break;
+    }
+    seen.add(folded);
+  }
+  if (duplicate !== undefined) {
+    throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined,
+      new Error(`rendered files collide on name: ${JSON.stringify(duplicate)}`));
   }
 
   // Root read ONCE and passed into both users. `exportRoot()` reads the environment, and
@@ -169,11 +207,14 @@ export async function writeExportFiles(
         new Error(`export dir confinement failed: ${check.reason}`));
     }
     const realDir = check.realTarget;
-    // Independent writes, one round of I/O. Written through the RESOLVED directory — that
-    // is the security property. REPORTED under the logical one: an export root that is
-    // itself a symlink or bind-mount (macOS /var → /private/var) would otherwise hand the
-    // operator, and the exports row, paths that do not correspond to the root they
-    // configured. Both name the same file; only one is the operator's own vocabulary.
+    // Independent writes, one round of I/O. Both written AND reported through the RESOLVED
+    // directory: if a link inside the root sent the bytes somewhere other than the spelled
+    // path, the `exports` row and the tool response have to say where they actually are.
+    // Reporting the spelled path is what made a redirect invisible — the row said `june`
+    // while the files sat in `tenant-b`. The cost is that an operator whose root is itself
+    // a symlink or bind-mount (macOS /var → /private/var) sees the resolved prefix rather
+    // than the one they configured; both name the same directory, and only one of them is
+    // checkable against where the bytes went.
     // `created` records which names this call brought into existence, which is NOT the same
     // as which writes succeeded. `wx` creates the entry and then writes it, so a write that
     // fails part-way (ENOSPC, EIO) leaves a TRUNCATED file behind while settling as

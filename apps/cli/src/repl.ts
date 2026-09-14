@@ -21,6 +21,8 @@ import type { ToolContext } from '@reconcil/mcp-tools';
 import { Pool } from 'pg';
 
 import { buildRunnableTools, buildSystemPrompt, type Invocation } from './agent/core.js';
+import { EXIT_CANNOT_RUN, reportAndExit, unrunnableLines } from './evals/runnability.js';
+import { UsageError } from './evals/usage-error.js';
 import { DEFAULT_MODEL } from './model.js';
 
 /** One line of REPL input, classified. Slash commands are handled locally; everything else is a question. */
@@ -65,10 +67,31 @@ const HELP = `Commands:
 Anything else is asked to the assistant. Ask about balances, flows, gas,
 counterparties, or stablecoin movements for the tracked wallets.`;
 
-function modelFromArgv(argv: string[]): string {
-  const i = argv.indexOf('--model');
-  const value = i >= 0 ? argv[i + 1] : undefined;
-  return value !== undefined && value !== '' ? value : DEFAULT_MODEL;
+/**
+ * The REPL's argv, under the same discipline as `evals` (evals/args.ts).
+ *
+ * It was `argv.indexOf('--model')` + `argv[i + 1]`, which is the exact defect the `value()`
+ * helper in args.ts carries a five-line docstring about, twenty lines away: `repl --model`
+ * with the id forgotten fell back to the default in silence, and a mistyped `--modle opus`
+ * was a no-op that ran the default model without a word — on the command that bills for
+ * every turn. Fixed in one parser and left standing in the other.
+ *
+ * UsageError, so main.ts's catch classifies it as "the gate could not run, fix the
+ * invocation" (exit 2) rather than letting a raw throw exit 1.
+ */
+export function parseReplArgs(argv: readonly string[]): { model: string } {
+  let model = DEFAULT_MODEL;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--model') {
+      const v = argv[++i];
+      // `--model --verbose` would otherwise send "--verbose" to the API as a model id.
+      if (v === undefined || v === '' || v.startsWith('--')) throw new UsageError('--model needs a value');
+      model = v;
+    } else if (a === '--') continue;
+    else throw new UsageError(`unknown argument: ${String(a)}`);
+  }
+  return { model };
 }
 
 /**
@@ -77,21 +100,40 @@ function modelFromArgv(argv: string[]): string {
  * the default. Not unit-tested (interactive I/O) — verified by a manual demo run.
  */
 export async function runRepl(argv: string[] = process.argv.slice(3)): Promise<void> {
+  // FIRST, before the environment is consulted at all — the discipline the docstring on
+  // parseReplArgs claims to share with the eval runner, where parseArgs is runEvals' first
+  // statement. Placed after the two checks below, `repl --modle opus` on a machine with no
+  // DATABASE_URL reported the missing variable and never mentioned the typo: the operator
+  // fixes the environment, runs again, and only then learns the flag was wrong.
+  const { model } = parseReplArgs(argv);
+
   const databaseUrl = process.env['DATABASE_URL'];
   if (databaseUrl === undefined || databaseUrl === '') {
-    console.error('DATABASE_URL is required — point the REPL at a running stack (docker compose up).');
-    process.exitCode = 1;
-    return;
+    // Through reportAndExit at EXIT_CANNOT_RUN, not console.error + exitCode 1. "The
+    // environment cannot support this run" is the textbook 2 under this branch's contract,
+    // and 1 means "it ran and failed" — which is what both of these branches said. runEvals
+    // routes the identical missing-key condition through this same reporter; one command
+    // carrying both conventions is how the contract went false for the eval runner before.
+    return reportAndExit(EXIT_CANNOT_RUN, unrunnableLines(
+      {
+        reason: 'DATABASE_URL is unset, and the REPL talks to a running stack',
+        hint: 'start the stack (docker compose up) and point DATABASE_URL at it',
+      },
+      'repl',
+    ));
   }
   if (!process.env['ANTHROPIC_API_KEY']) {
-    console.error('ANTHROPIC_API_KEY is required to run the demo agent (the only place it is needed).');
-    process.exitCode = 1;
-    return;
+    return reportAndExit(EXIT_CANNOT_RUN, unrunnableLines(
+      {
+        reason: 'ANTHROPIC_API_KEY is unset, and the demo agent is the only thing that needs it',
+        hint: 'set the key in the environment, then start the REPL again',
+      },
+      'repl',
+    ));
   }
 
   const slug = process.env['SELF_HOST_TENANT_SLUG'] ?? 'self-host';
   const name = process.env['SELF_HOST_TENANT_NAME'] ?? 'Self-hosted';
-  const model = modelFromArgv(argv);
   // Captured once at startup: a session left open across midnight keeps this date — fine for a demo.
   const referenceDate = new Date().toISOString().slice(0, 10);
 

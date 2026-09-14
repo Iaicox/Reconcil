@@ -39,10 +39,13 @@ describe('parseArgs', () => {
     // The expensive failure: an empty `cases` means "no filter", so `--cases` with the value
     // forgotten ran 30 x 3 of live traffic instead of the handful being investigated — the
     // same outcome the unknown-flag guard prevents, reached through the narrowing option.
-    // Two distinct causes, two distinct messages: no token at all vs a token with no ids in
-    // it. Pinned separately so a change to one cannot quietly start covering the other.
+    // Three distinct causes, pinned separately so a change to one cannot quietly start
+    // covering another: no token at all, an empty token, and a token carrying no ids. The
+    // middle one moved when value() started refusing '' for every flag — it used to reach
+    // the split-and-filter below and report "at least one case id", which described the
+    // token's contents rather than the fact that there was no token worth reading.
     expect(() => parseArgs(['--cases'])).toThrow(/--cases needs a value/);
-    expect(() => parseArgs(['--cases', ''])).toThrow(/at least one case id/);
+    expect(() => parseArgs(['--cases', ''])).toThrow(/--cases needs a value/);
     expect(() => parseArgs(['--cases', ' , , '])).toThrow(/at least one case id/);
   });
 
@@ -65,5 +68,42 @@ describe('parseArgs', () => {
     for (const argv of [['--smoek'], ['--runs', '0'], ['--suite', 'nope'], ['--cases']]) {
       expect(() => parseArgs(argv), JSON.stringify(argv)).toThrow(UsageError);
     }
+  });
+});
+
+describe('--runs beside --smoke', () => {
+  it('defaults to one run under --smoke', () => {
+    expect(parseArgs(['--smoke']).runs).toBe(1);
+  });
+
+  it('honours an explicit --runs instead of overwriting it', () => {
+    // `if (args.smoke) args.runs = 1` ran unconditionally, so a value the operator typed was
+    // discarded without a word. Six cases three times is a legitimate way to chase a flaky
+    // one; 1 is the smoke DEFAULT, not an override.
+    expect(parseArgs(['--smoke', '--runs', '3']).runs).toBe(3);
+    expect(parseArgs(['--runs', '3', '--smoke']).runs).toBe(3);
+  });
+
+  it('still validates --runs when --smoke is present', () => {
+    // The ordering defect that mattered: the override ran FIRST, so `--smoke --runs abc`
+    // replaced NaN with 1 and reported nothing. The guard against a vacuous zero-run gate
+    // was disabled by the flag standing next to it.
+    // One alternative, not `/positive integer|needs a value/`. Every one of these five
+    // reaches the integer guard — `value()` returns '' unchanged (it is neither undefined
+    // nor --prefixed) and `Number('')` is 0 — so the second branch was unreachable and the
+    // assertion would have stayed green if the first guard stopped firing.
+    for (const bad of ['abc', '0', '-1', '1.5']) {
+      expect(() => parseArgs(['--smoke', '--runs', bad]), bad).toThrow(/positive integer/);
+    }
+    // '' is refused one step earlier, by value(). It used to reach the integer guard as 0
+    // and print "--runs must be a positive integer (got: )" — a message whose entire
+    // subject is the value it then fails to show.
+    expect(() => parseArgs(['--smoke', '--runs', ''])).toThrow(/--runs needs a value/);
+  });
+
+  it('reports the raw token, not what it parsed to', () => {
+    // `String(args.runs)` printed "got: NaN", which describes the parse rather than the
+    // input the operator has to correct.
+    expect(() => parseArgs(['--runs', 'abc'])).toThrow(/got: abc/);
   });
 });

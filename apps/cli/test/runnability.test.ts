@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { UsageError, classifyUnrunnable } from '../src/evals/runnability.js';
+import { DatasetError, UsageError, classifyUnrunnable } from '../src/evals/runnability.js';
 
 /** The shape the Anthropic SDK throws: a status plus the parsed error body. Other shapes —
  *  what a gateway might return — are covered separately below. */
@@ -118,11 +118,77 @@ describe('classifyUnrunnable', () => {
   });
 });
 
+describe('DatasetError', () => {
+  it('is cannot-run, and points at the dataset rather than at the invocation', () => {
+    // The whole reason the class exists, and nothing executed it: with this branch deleted
+    // a DatasetError falls through every other test in this file to `null`, which
+    // reportFailure turns into exit 1 — "the gate ran and found a regression" — for a suite
+    // that never started. Mutation-checked: `if (false && err instanceof DatasetError)`
+    // left all 85 unit tests and all 6 exit-contract tests green.
+    const c = classifyUnrunnable(new DatasetError('duplicate id(s) in the dataset: bal-001'));
+    expect(c).not.toBeNull();
+    expect(c?.reason).toContain('duplicate id(s) in the dataset');
+    expect(c?.hint).toMatch(/dataset/);
+  });
+
+  it('sends the reader somewhere different from a UsageError', () => {
+    // Both exit 2, so the CODE cannot tell them apart — the hint is the only thing that
+    // says whether to open the diff or re-read the command line. If these ever converge,
+    // splitting the classes bought nothing.
+    const dataset = classifyUnrunnable(new DatasetError('x'))?.hint;
+    const usage = classifyUnrunnable(new UsageError('x'))?.hint;
+    expect(dataset).toBeDefined();
+    expect(dataset).not.toBe(usage);
+    expect(usage).toMatch(/invocation/);
+    expect(dataset).not.toMatch(/invocation/);
+  });
+
+  it('does not swallow an ordinary Error carrying the same text', () => {
+    expect(classifyUnrunnable(new Error('duplicate id(s) in the dataset: bal-001'))).toBeNull();
+  });
+});
+
 describe('UsageError', () => {
-  it('is classified as cannot-run — a bad invocation never started the gate', () => {
+  it('is classified as cannot-run, with a remedy that names no command', () => {
     const c = classifyUnrunnable(new UsageError('--runs must be a positive integer (got: 0)'));
     expect(c?.reason).toMatch(/--runs must be a positive integer/);
-    expect(c?.hint).toMatch(/never started/);
+    // Neutral on purpose: main.ts routes repl through this same classifier, so a hint
+    // saying "the gate never started" described a gate the command does not have.
+    expect(c?.hint).toMatch(/fix the invocation/);
+    expect(c?.hint).not.toMatch(/gate|job|suite/);
+  });
+
+  it('holds EVERY classified hint to the no-command rule, not just this one', () => {
+    // The previous version checked three words on one hint, so "branch", "secret" and
+    // "under test" all survived the round that was supposed to remove them — in the 401
+    // hint, which the classifier's own docstring calls the likeliest repl failure there is.
+    // Every error below classifies as cannot-run; each is asserted, so a new branch that
+    // reintroduces the vocabulary fails here rather than in a reader's terminal.
+    const classified = [
+      new UsageError('bad flag'),
+      new DatasetError('duplicate id'),
+      apiError(400, 'invalid_request_error', 'Your credit balance is too low'),
+      apiError(401, 'authentication_error', 'invalid x-api-key'),
+      apiError(403, 'permission_error', 'not allowed'),
+      apiError(429, 'rate_limit_error', 'slow down'),
+      apiError(502, 'api_error', 'bad gateway'),
+      apiError(529, 'overloaded_error', 'overloaded'),
+    ];
+    for (const err of classified) {
+      const c = classifyUnrunnable(err);
+      expect(c, String(err)).not.toBeNull();
+      // `job`/`gate`/`suite`/`branch` name a CI shape repl does not have; `secret` names
+      // where CI keeps the key, not where an operator does; `under test` names a test run.
+      // Split into WORDS rather than matched as substrings: the 502 reason legitimately
+      // says "gateway", which contains "gate". A word-boundary regex would say the same
+      // thing, but this file already had one silently turn into a literal backspace on its
+      // way through an editing script — and it passed, matching nothing.
+      const words = new Set(`${c!.reason} ${c!.hint}`.toLowerCase().split(/[^a-z]+/));
+      for (const banned of ['gate', 'job', 'suite', 'branch', 'secret']) {
+        expect(words.has(banned), `${String(err)} :: ${banned}`).toBe(false);
+      }
+      expect(`${c!.reason} ${c!.hint}`.toLowerCase(), String(err)).not.toContain('under test');
+    }
   });
 
   it('does not swallow an ordinary Error with the same message', () => {

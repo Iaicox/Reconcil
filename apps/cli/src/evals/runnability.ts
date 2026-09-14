@@ -22,12 +22,12 @@ import { inspect } from 'node:util';
 
 import Anthropic from '@anthropic-ai/sdk';
 
-import { UsageError } from './usage-error.js';
+import { DatasetError, UsageError } from './usage-error.js';
 
 
 /** Re-exported for callers that already reach for the classifier; the class itself lives in
  *  its own SDK-free module so the argv router and the arg parser stay light. */
-export { UsageError };
+export { DatasetError, UsageError };
 
 /** Exit code for "the gate could not run" — 1 stays "the gate ran and failed". */
 export const EXIT_CANNOT_RUN = 2;
@@ -102,9 +102,29 @@ function isUserAbort(err: unknown): boolean {
   return err instanceof Anthropic.APIUserAbortError;
 }
 
+/**
+ * Classify an error as "the run could not start" (exit 2) or not (null ⇒ exit 1).
+ *
+ * EVERY remedy returned from here names no command, and that took two passes to get right.
+ * They said "re-run the job", "the suite did not complete", "the branch is not implicated",
+ * "the ANTHROPIC_API_KEY secret", "the code under test" — CI and eval vocabulary, and
+ * `repl` reaches every one of them through main.ts's shared catch (a rejected key is the
+ * likeliest repl failure there is). The caller's LABEL names the command on the first line;
+ * a hint naming a different one is the same defect the label was added to fix, one layer
+ * down. `runnability.test.ts` holds every classified hint to that rule.
+ *
+ * The rule is about THIS function only. A caller that builds its own `Unrunnable` knows
+ * which command it is — run.ts's missing-key hint says "re-run the job", repl.ts's says
+ * "start the REPL again" — and both are correct precisely because they are not shared.
+ */
 export function classifyUnrunnable(err: unknown): Unrunnable | null {
   if (err instanceof UsageError) {
-    return { reason: err.message, hint: 'fix the invocation and run again — the gate never started' };
+    return { reason: err.message, hint: 'fix the invocation and run again — nothing was started' };
+  }
+  if (err instanceof DatasetError) {
+    // Still "could not run" (exit 2 — the suite never started), but the remedy points at
+    // the diff, not at the environment or the command line.
+    return { reason: err.message, hint: 'the eval dataset or smoke id list is inconsistent — fix the dataset, not the environment' };
   }
   const status = apiStatus(err);
   if (status === null) {
@@ -121,7 +141,7 @@ export function classifyUnrunnable(err: unknown): Unrunnable | null {
     return isConnectionFault(err)
       ? {
           reason: 'the API could not be reached, so the run did not complete',
-          hint: 'retry; if it recurs, check ANTHROPIC_BASE_URL and network egress — the code under test is not implicated',
+          hint: 'retry; if it recurs, check ANTHROPIC_BASE_URL and network egress — the code here is not implicated',
         }
       : null;
   }
@@ -133,8 +153,8 @@ export function classifyUnrunnable(err: unknown): Unrunnable | null {
     case 504:
       // A gateway's own failure, not the API's. Same class as no response at all.
       return {
-        reason: `the API gateway returned ${String(status)}, so the suite did not complete`,
-        hint: 're-run the job; if it recurs, check the ANTHROPIC_BASE_URL gateway — the branch is not implicated',
+        reason: `the API gateway returned ${String(status)}, so the run did not complete`,
+        hint: 'run it again; if it recurs, check the ANTHROPIC_BASE_URL gateway — the code here is not implicated',
       };
     case 400:
       // ONLY the billing shape. Every other 400 is a request this code built wrong, which
@@ -142,28 +162,28 @@ export function classifyUnrunnable(err: unknown): Unrunnable | null {
       return /credit balance/i.test(message)
         ? {
             reason: 'the Anthropic account has no credit left',
-            hint: 'top up the key in Plans & Billing, then re-run the job — nothing about this branch is implicated',
+            hint: 'top up the key in Plans & Billing, then run it again — nothing here is implicated',
           }
         : null;
     case 401:
       return {
         reason: 'the API key was rejected',
-        hint: 'check the ANTHROPIC_API_KEY secret (rotated? wrong workspace?), then re-run the job',
+        hint: 'check ANTHROPIC_API_KEY (rotated? wrong workspace?), then run it again',
       };
     case 403:
       return {
         reason: 'the API key is not permitted to use this model or workspace',
-        hint: 'check the key\'s workspace and model permissions, then re-run the job',
+        hint: 'check the key\'s workspace and model permissions, then run it again',
       };
     case 429:
       return {
         reason: 'the API rate- or usage-limited this run',
-        hint: 're-run the job; if it recurs, the suite needs pacing rather than a code change',
+        hint: 'run it again; if it recurs, it needs pacing rather than a code change',
       };
     case 529:
       return {
         reason: 'the API is overloaded',
-        hint: 're-run the job — this says nothing about the branch',
+        hint: 'run it again — this says nothing about the code here',
       };
     default:
       // 500s included: an API fault mid-suite is worth investigating, not excusing.
@@ -180,9 +200,11 @@ export function classifyUnrunnable(err: unknown): Unrunnable | null {
  *
  * The LABEL is a parameter because `main.ts` routes every command through the same catch.
  * Reporting a `repl` failure as "eval gate COULD NOT RUN … so no case ever ran" was wrong
- * three ways: no eval case existed in that run, there is no CI job to re-run, and
- * 04-testing.md defines exit 2 as the eval runner's contract specifically. The classified
- * REASON ("the API key was rejected") is shared; the framing around it is not.
+ * three ways: no eval case existed in that run, there is no CI job to re-run, and a reader
+ * sent to the eval gate's documentation would find no command of that name. (04-testing.md
+ * now states repl's exit codes alongside the runner's — it did not when the label was
+ * added, and the fix was to document repl rather than to keep borrowing the gate's name.)
+ * The classified REASON ("the API key was rejected") is shared; the framing is not.
  */
 export function unrunnableLines(u: Unrunnable, label: string): string[] {
   return [`${label} COULD NOT RUN: ${u.reason}`, `  → ${u.hint}`];
@@ -223,10 +245,6 @@ export async function reportAndExit(code: number, lines: readonly string[]): Pro
   // Node exits 1 — silently downgrading a classified EXIT_CANNOT_RUN. Worse, a callback
   // that never fires lets the loop drain and the process exit 0: a gate that could not run
   // reported GREEN, which this module's own header forbids.
-  // Set FIRST, before anything that can go wrong. Applied only by the `process.exit` below,
-  // the code would be conditional on getting there — and a throw from `write` on a destroyed
-  // stderr rejects this function, the callers `void` it, and Node exits 1, silently
-  // downgrading a classified EXIT_CANNOT_RUN.
   process.exitCode = code;
   try {
     // BOUNDED. `write` calls back when the chunk reaches the OS, which never happens if

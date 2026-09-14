@@ -76,6 +76,14 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
      and a redirect to a different location *inside* the root — are refused as `INTERNAL`:
      by then the caller's argument has already passed, the fault is not theirs, and telling
      the model its `out_dir` is bad would be false. The server-side cause records which.
+
+     The split is about OWNERSHIP, not about `out_dir`, so it governs the read edge the same
+     way: a `file_path` that passed confinement and `realpath` and named a regular file
+     under the cap, and then changed size between its `stat` and its last byte, is
+     `INTERNAL`. The argument was valid; a co-resident writer was not. Written as
+     `INVALID_INPUT` until 2026-09-14, which invited the one recovery that cannot work —
+     retrying with a different path — and discarded the operator's only signal that
+     something is racing writes in their import directory.
    - **"Never a write outside the configured base" was too strong.** No export CONTENT is
      ever written outside the root — that is the guarantee, and it holds. But `mkdir -p`
      runs before the post-creation check can fire, so a link planted in that window does get

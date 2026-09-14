@@ -126,23 +126,48 @@ describe('readExactly', () => {
   it('refuses a file that GREW after the stat instead of returning a capped prefix', async () => {
     // The writer appended: more bytes arrive than were measured. The buffer's one spare
     // byte is what makes that observable at all.
-    await expect(readExactly(reader(['hello', '!!!']), 5)).rejects.toThrow(/changed size while it was being read/);
+    await expect(readExactly(reader(['hello', '!!!']), 5)).rejects.toMatchObject({ code: 'INTERNAL' });
+    await expect(readExactly(reader(['hello', '!!!']), 5)).rejects.toThrow(/changed while it was being read/);
   });
 
   it('refuses a file that SHRANK after the stat instead of returning a truncated CSV', async () => {
     // EOF arrives early. Returning buf.subarray(0, read) here is the silent-truncation bug:
     // a row cut mid-line imported as a success.
-    await expect(readExactly(reader(['hel']), 5)).rejects.toThrow(/changed size while it was being read/);
+    await expect(readExactly(reader(['hel']), 5)).rejects.toMatchObject({ code: 'INTERNAL' });
+    await expect(readExactly(reader(['hel']), 5)).rejects.toThrow(/changed while it was being read/);
   });
 
   it('reads an empty file as the empty string, not as a size mismatch', async () => {
     await expect(readExactly(reader([]), 0)).resolves.toBe('');
   });
 
-  it('surfaces both mutations as INVALID_INPUT, never as an internal fault', async () => {
+  it('blames the server, not the caller — a mid-read mutation is not a bad file_path', async () => {
+    // This assertion used to pin INVALID_INPUT. It was written to record the behaviour that
+    // existed, not to argue for it, and the contract has since stated the opposite rule for
+    // the symmetric case on the export side (§6.5): "a refusal the caller does NOT own … is
+    // INTERNAL, not INVALID_INPUT: the caller's out_dir was already valid at that point, so
+    // blaming it would be false."
+    //
+    // It is exactly that here. `file_path` passed confinement, passed realpath, and named a
+    // regular file under the cap; then a co-resident writer — the threat this entire module
+    // is built against — changed it underneath. INVALID_INPUT tells the agent to fix its
+    // argument, and the only fix that shape suggests is trying a different path, which
+    // cannot help. It also throws away the operator's one signal that someone is racing
+    // writes in the import directory.
     for (const chunks of [['hello', '!'], ['hel']]) {
-      await expect(readExactly(reader(chunks), 5)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+      await expect(readExactly(reader(chunks), 5)).rejects.toMatchObject({ code: 'INTERNAL' });
     }
+  });
+
+  it('keeps the underlying detail server-side, off the wire (C6)', async () => {
+    // The cause says which direction it moved and by how much; the message the agent sees
+    // says neither, and names no path.
+    const err = await readExactly(reader(['hello', '!!!']), 5).then(
+      () => { throw new Error('expected a rejection'); },
+      (e: unknown) => e as ToolError,
+    );
+    expect(err.message).toBe('the import file changed while it was being read');
+    expect((err.cause as Error).message).toMatch(/grew past the 5-byte size/);
   });
 });
 

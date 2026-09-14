@@ -25,6 +25,12 @@ const CLI_ROOT = fileURLToPath(new URL('..', import.meta.url));
  *  saying nothing about the contract they measure. */
 const TSX = createRequire(import.meta.url).resolve('tsx/cli');
 
+/** The non-blank lines of a stderr blob — the "two-line shape" assertions compare against
+ *  this rather than each splitting the string themselves. */
+function reportLines(stderr: string): string[] {
+  return stderr.trim().split('\n').filter((l) => l.trim() !== '');
+}
+
 interface Run { code: number; stderr: string; stdout: string }
 
 /** Run a CLI entrypoint through tsx and report what the process actually did. */
@@ -62,7 +68,7 @@ describe('exit-code contract — 2 means the gate could not run', () => {
     expect(r.stderr).toContain('eval gate COULD NOT RUN');
     expect(r.stderr).toMatch(/ANTHROPIC_API_KEY is unset/);
     // The two-line shape, not one line or three — the format both entrypoints share.
-    expect(r.stderr.trim().split('\n').filter((l) => l.trim() !== '')).toHaveLength(2);
+    expect(reportLines(r.stderr)).toHaveLength(2);
   }, 60_000);
 
   it('the SAME fault through `main.ts evals` gets the same code — the two routes agree', () => {
@@ -73,11 +79,28 @@ describe('exit-code contract — 2 means the gate could not run', () => {
     expect(r.stderr).toContain('COULD NOT RUN');
   }, 60_000);
 
-  it('a non-evals command does NOT borrow the eval vocabulary', () => {
+  it('a non-evals command names ITSELF, and cannot-run means 2 there too', () => {
     // `cli repl` runs no cases and has no CI job to re-run; labelling its failures
-    // "eval gate ... so no case ever ran" was wrong three ways.
-    const r = run('main.ts', ['repl'], { ANTHROPIC_API_KEY: '' });
+    // "eval gate ... so no case ever ran" was wrong three ways. Asserting only the ABSENCE
+    // of the eval label — which is what this test used to do — was satisfied by "cli COULD
+    // NOT RUN" and by the exit code 1 these gates used to produce, so neither the label nor
+    // the code was actually pinned.
+    const r = run('main.ts', ['repl'], { ANTHROPIC_API_KEY: '', DATABASE_URL: '' });
     expect(r.stderr).not.toContain('eval gate COULD NOT RUN');
+    expect(r.stderr).toContain('repl COULD NOT RUN');
+    // 2, not 1: the environment cannot support the run. These gates printed and set 1.
+    expect(r.code).toBe(2);
+      expect(reportLines(r.stderr)).toHaveLength(2);
+  }, 60_000);
+
+  it('a bad repl flag is reported as repl, through main.ts s shared catch', () => {
+    // The other route to the label: this one goes through failureLabel() rather than
+    // through runRepl's own reportAndExit call, and the two used to disagree — a bad flag
+    // said "cli" while a missing DATABASE_URL said "repl", for the same command.
+    const r = run('main.ts', ['repl', '--modle', 'opus'], { ANTHROPIC_API_KEY: 'sk-test', DATABASE_URL: 'postgres://x' });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('repl COULD NOT RUN');
+    expect(r.stderr).toMatch(/unknown argument: --modle/);
   }, 60_000);
 
   it('printing survives the exit — the message is not lost to an unflushed pipe', () => {

@@ -274,7 +274,8 @@ the wallet and answers the "net USDC flow" question with `analytics_stablecoin_m
 Two tools legitimately answer that question and `tools_expected` could not say so. **That is
 fixed, not deferred: `tools_any_of` (§5, G1) now carries the disjunction, and the case
 accepts either tool.** Note the fix is a grader fix — nothing was re-measured live, because
-`flow-002` is not in `SMOKE_IDS` and `evals-full` is the only job that spends API budget.
+`flow-002` is not in the smoke subset (`SMOKE_ID_LIST`, `apps/cli/src/evals/smoke.ts`) and
+`evals-full` is the only job that spends API budget.
 What is proven is the grading logic (unit tests over both members, the write-sanction path,
 the refines) and that the dataset still validates; the next full 30×3 is what will show the
 case scoring green in a real run. G2 read 2/3 on that run because of a grader
@@ -296,7 +297,7 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 | `test` | PR + main | unit + property + contract |
 | `schema-parity` | PR + main | `scripts/check-schema-parity.sh`: drizzle migrations vs `schema.sql` applied to two fresh DBs (disposable postgres:16), `pg_dump --schema-only` diff must be empty |
 | `integration` | PR + main | Postgres service container, fixture ingest, ledger assertions |
-| `evals-smoke` | PR (repo secrets only, skipped on forks) | 6-case subset (`SMOKE_IDS`), 1 run — catches contract drift cheaply |
+| `evals-smoke` | PR (repo secrets only, skipped on forks) | 6-case subset (`SMOKE_ID_LIST`), 1 run — catches contract drift cheaply |
 | `evals-full` | manual (`workflow_dispatch`) / pre-demo | 30 cases × 3 runs, publishes scorecard artifact |
 | `e2e-smoke` | weekly cron + manual (`workflow_dispatch`) / pre-release | real compose stack up, stdio MCP client, 3 tool calls, assert envelopes — proves P10 self-host boots (`pnpm smoke:compose`, `apps/mcp-server/src/compose-smoke.ts`). Off the per-PR path (cost), but ON the weekly canary: it needs no API key, and before 2026-09-07 it had never executed once — the first dispatch found the documented `cp .env.example .env && docker compose up` path already broken |
 
@@ -309,15 +310,38 @@ runner exits **1** when the suite ran and missed the gate, and **2** when it cou
 all. Every route to 2, because the exit code is the contract a CI reader applies: the account
 out of credit, a rejected or unpermitted key, rate limiting, an overloaded API, a gateway
 5xx, no response at all (connection refused, DNS, timeout), a bad invocation (an unknown
-flag, `--runs 0`, an unknown `--cases` id), a missing `ANTHROPIC_API_KEY`, and a deliberate
-abort. Both are red — mapping an unrunnable gate to a pass, or to a silent skip, is how a
-suite stops running and nobody notices — but a 2 says the branch is not implicated and no
-amount of reading the diff will help. It prints one line and a hint instead of the error
-object. The classification is deliberately narrow and asymmetric (`evals/runnability.ts`):
-a misread gate failure gets dismissed as "not my problem", while a misread environment
-fault merely gets investigated, so a `400` counts only for the billing shape — every other
-`400` is a request this code built wrong, which is exactly what the gate is for — and a
-`500` is not classified at all.
+flag, `--runs 0`, an unknown `--cases` id), a missing `ANTHROPIC_API_KEY`, an inconsistent
+dataset or smoke id list, and a deliberate abort. Both are red — mapping an unrunnable gate
+to a pass, or to a silent skip, is how a suite stops running and nobody notices. It prints
+one line and a hint instead of the error object.
+
+A 2 does NOT mean "read no further". It splits three ways, and the hint is what says which:
+
+- **The environment** — credit, key, limits, gateway, network, abort. No amount of reading
+  the diff will help; run it again, or fix the key.
+- **The invocation** — an unknown flag, `--runs 0`, `--cases` with an id the dataset does
+  not have. The command line is wrong; the branch is not implicated. (`UsageError`)
+- **The dataset** — the suite could not be ASSEMBLED: a smoke id that no longer resolves, a
+  duplicate id in `core-30.yaml`, a selection that would run zero cases. This one IS in the
+  diff, so 1 looks like the intuitive code — but 1 asserts the gate RAN and graded
+  something, and here it never started. (`DatasetError`)
+
+The last two are separated in code (`evals/usage-error.ts`) because they exit the same way
+and send the reader to opposite places. In the fourteenth round a dataset defect was
+reported as a `UsageError` — "fix the invocation", for a renamed case id nobody could fix
+from the command line; before that round the same defects were plain `Error`s and exited 1.
+
+`repl` shares all of this. It exits **2** for the same class of cause (no `DATABASE_URL`, no
+`ANTHROPIC_API_KEY`, a bad flag) and prints the same two lines, labelled `repl` rather than
+`eval gate`. That label is the only per-command text in the pair: every remedy
+`classifyUnrunnable` returns is written to name no command, because `repl` has no gate, no
+job and no cases — a call site that builds its own may name one, since it knows which it is.
+
+The classification is deliberately narrow and asymmetric (`evals/runnability.ts`): a misread
+gate failure gets dismissed as "not my problem", while a misread environment fault merely
+gets investigated, so a `400` counts only for the billing shape — every other `400` is a
+request this code built wrong, which is exactly what the gate is for — and a `500` is not
+classified at all.
 
 This exists because of a real run: on 2026-09-13 `evals-smoke` went red with a 40-line
 `BadRequestError` dump whose content was one sentence, "Your credit balance is too low".

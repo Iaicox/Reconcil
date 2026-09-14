@@ -26,8 +26,8 @@ import { dbResolver } from './evals/resolver.js';
 import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
 import { EXIT_CANNOT_RUN, reportAndExit, reportFailure, unrunnableLines } from './evals/runnability.js';
-import { UsageError, describeIdMismatch, findDuplicates } from './evals/usage-error.js';
-import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
+import { UsageError } from './evals/usage-error.js';
+import { selectNamedCases, selectSmokeDataset, smokeIds } from './evals/smoke.js';
 import type { CaseResult, GateResult } from './evals/types.js';
 
 /** DATABASE_URL if provided, else a throwaway container. Returns db + a disposer. */
@@ -129,36 +129,12 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
 
   // parseArgs validated args.suite is a known DATASETS key.
   const all = loadDataset(DATASETS[args.suite]!());
-  // H16: assert the smoke filter matched every SMOKE_ID before any container/provisioning
-  // work (fail fast, cheap) — a renamed/removed id must fail loudly, not silently shrink the
-  // live PR gate (or, if all six drift, run ZERO cases and report PASS).
-  // --cases narrows to specific ids, for investigating a handful of failures without
-  // paying for the whole suite. It filters the dataset only; the prompt, the tools and
-  // every schema the model sees are identical either way.
-  const selected = args.cases.length > 0 ? all.filter((c) => args.cases.includes(c.id)) : all;
-  // Set membership and duplicates, NOT lengths. A count can be satisfied by the wrong set:
-  // `--cases a,b` against a dataset with no `a` and two `b`s gives selected.length === 2 ===
-  // args.cases.length, so neither branch fires and the run silently executes `b` twice and
-  // never runs `a` — on the command that spends live API budget. Same trap removed from
-  // selectSmokeDataset in this branch and left standing here, eighty lines away.
-  const selectedIds = new Set(selected.map((c) => c.id));
-  const missing = args.cases.filter((id) => !selectedIds.has(id));
-  const repeated = findDuplicates(args.cases);
-  const datasetDupes = findDuplicates(selected.map((c) => c.id));
-  if (args.cases.length > 0 && (missing.length > 0 || repeated.length > 0 || datasetDupes.length > 0)) {
-    // Three distinct defects, each named on its own so the message can never be empty: an
-    // id that is not in the dataset, an id repeated in the ARGUMENT, and a duplicate in the
-    // DATASET (the loader does not enforce uniqueness — only core-30.test.ts does).
-    const detail = describeIdMismatch([
-      ['unknown case id(s)', missing],
-      ['repeated case id(s)', repeated],
-      ['duplicate id(s) in the dataset', datasetDupes],
-    ]);
-    // `?? ` is not dead: the guard fires only when one of the three is non-empty, but
-    // stating the fallback keeps a future fourth condition from producing a blank message,
-    // which is the defect this block has now been rewritten for twice.
-    throw new UsageError(detail ?? '--cases did not select the requested set');
-  }
+  // H16: assert the selection matched what was named BEFORE any container/provisioning work
+  // (fail fast, cheap). --cases narrows to specific ids, for investigating a handful of
+  // failures without paying for the whole suite; it filters the dataset only, and the
+  // prompt, the tools and every schema the model sees are identical either way. The guards
+  // live in smoke.ts because run.ts cannot be exercised without a container and a key.
+  const selected = selectNamedCases(all, args.cases);
   // `--smoke --cases gas-001` validated the ids, could hard-fail on them, and then ran the
   // six smoke cases instead — a narrowing option quietly running something else, on the
   // command that spends money. Refused rather than guessed at: intersecting them would make
@@ -166,7 +142,7 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   if (args.smoke && args.cases.length > 0) {
     throw new UsageError('--smoke and --cases both select cases — pass one or the other');
   }
-  const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : selected;
+  const dataset = args.smoke ? selectSmokeDataset(all, smokeIds()) : selected;
 
   // Route recon-backed exports (a Face B journal-draft case's export_journal_drafts) to a
   // throwaway dir instead of cwd/exports (baseDir default). withTempExportDir owns creation

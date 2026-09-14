@@ -82,22 +82,33 @@ export interface ByteReader {
  * mid-line — 12 000 of 50 000 invoices — as a successful import. Both are the same event
  * and get the same answer.
  *
+ * INTERNAL, not INVALID_INPUT — the same rule the export side already states (contract
+ * §6.5): "a refusal the caller does NOT own … is INTERNAL, not INVALID_INPUT: the caller's
+ * out_dir was already valid at that point, so blaming it would be false." A file that
+ * changes between `stat` and the last byte is the co-resident WRITER this whole module is
+ * built against; `file_path` was valid when it was checked and is still valid now. Telling
+ * the agent its argument was bad invites the one recovery that cannot work — trying a
+ * different path — and costs the operator the only signal that says someone is racing
+ * writes in their import directory. The cause carries which direction it moved, server-side.
+ *
  * Extracted and exported because it is the most intricate logic in this file and a real
  * mid-read mutation cannot be staged from a test: a fake `ByteReader` can.
  */
 export async function readExactly(reader: ByteReader, size: number): Promise<string> {
   const buf = Buffer.allocUnsafe(size + 1);
   let read = 0;
+  const mutated = (detail: string): ToolError =>
+    new ToolError('INTERNAL', 'the import file changed while it was being read', undefined, new Error(detail));
   for (;;) {
     const { bytesRead } = await reader.read(buf, read, buf.length - read, null);
     if (bytesRead === 0) break;
     read += bytesRead;
     if (read > size) {
-      throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
+      throw mutated(`grew past the ${String(size)}-byte size it was stat'd at`);
     }
   }
   if (read !== size) {
-    throw new ToolError('INVALID_INPUT', 'file_path changed size while it was being read');
+    throw mutated(`stat'd at ${String(size)} bytes, read ${String(read)} — truncated or rewritten mid-read`);
   }
   return buf.subarray(0, read).toString('utf8');
 }

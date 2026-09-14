@@ -38,16 +38,26 @@ async function main(): Promise<void> {
   }
 }
 
-/** 'eval gate' for the command that HAS a gate, 'cli' otherwise — so one command cannot
- *  report two vocabularies depending on which failure it hits. `cli evals --runs 0` came
- *  through here as "cli COULD NOT RUN" while `cli evals` with no key said "eval gate COULD
- *  NOT RUN" from run.ts: same command, same code, two framings. */
-const failureLabel = (): string => (process.argv[2] === 'evals' ? 'eval gate' : 'cli');
+/** The command names itself — so one command cannot report two vocabularies depending on
+ *  which failure it hits. `cli evals --runs 0` came through here as "cli COULD NOT RUN"
+ *  while `cli evals` with no key said "eval gate COULD NOT RUN" from run.ts: same command,
+ *  same code, two framings. `repl` then grew the same split — its own environment gates
+ *  report "repl COULD NOT RUN" while a bad flag arrived here as "cli" — so it is named
+ *  here too. 'cli' is left for the argv that reaches no command at all. */
+const failureLabel = (): string => {
+  switch (process.argv[2]) {
+    case 'evals': return 'eval gate';
+    case 'repl': return 'repl';
+    default: return 'cli';
+  }
+};
 
 main().catch(async (err: unknown) => {
-  // Labelled 'cli', not 'eval gate': this catch sees `repl` too, and the eval vocabulary
-  // ("so no case ever ran", "re-run the job") is wrong for a command that runs no cases in
-  // no job. The classification itself is shared — a rejected key is a rejected key.
+  // Labelled by `failureLabel()`, not a fixed 'cli': this catch sees `repl` too, where the
+  // eval vocabulary ("so no case ever ran", "re-run the job") is wrong for a command that
+  // runs no cases in no job — but it ALSO sees `evals`, where that vocabulary is the right
+  // one and run.ts's own catch already uses it. The classification is shared either way: a
+  // rejected key is a rejected key.
   // Imported HERE, on the failure path only. runnability.ts pulls in @anthropic-ai/sdk at
   // top level, and a static import re-created exactly what splitting UsageError out was
   // meant to stop: `reconcil` with no arguments loading the whole SDK graph to print a

@@ -405,6 +405,17 @@ output: { inserted: number; skipped_duplicates: number;
                            untrusted?: { counterparty_name: string } }> }
 ```
 
+`file_path` is MODEL-CONTROLLED and therefore hostile (H2): it is a subpath under
+`RECONCIL_IMPORT_DIR`, never a location of its own, and — unlike the export root — this edge
+is FAIL-CLOSED, so with no `RECONCIL_IMPORT_DIR` configured `file_path` is refused outright.
+A `..` traversal, an absolute path that escapes, a non-regular file, or a file over the byte
+cap is `INVALID_INPUT`. A refusal the caller does NOT own is `INTERNAL`, by the same
+ownership rule §6.5 applies to `out_dir` (ADR-012 d7): a path that passed confinement,
+`realpath` and the cap and then changed size between its `stat` and its last byte was
+mutated by a co-resident writer, and blaming the argument would both be false and suggest
+the one recovery — retry with a different path — that cannot work. Every message is generic;
+the path and the underlying fs error stay server-side (C6).
+
 **`recon_suggest_matches`** — deterministic matching engine run (ADR-010).
 ```ts
 input:  { period?: Period; client_id?: string; record_ids?: string[];          // UUIDs (external_records.id)
@@ -534,9 +545,9 @@ is rejected as `INVALID_INPUT` before anything is created, the same confinement 
 A refusal the caller does NOT own — a symlink planted between validation and use that sends
 the path outside the root — is `INTERNAL`, not `INVALID_INPUT`: the caller's `out_dir` was
 already valid at that point, so blaming it would be false, and the server-side cause records
-which. The guarantee is that no export CONTENT is written outside the root; a directory can
-be created there by `mkdir -p` in the race window before the post-creation check fires
-(best-effort removed).
+which. The read side applies the same split — see §6.4. The guarantee is that no export
+CONTENT is written outside the root; a directory can be created there by `mkdir -p` in the
+race window before the post-creation check fires (best-effort removed).
 
 A link that stays INSIDE the export root is followed, not refused — it is the operator's own
 layout (`<root>/current -> <root>/2026-09`). The `file_path` on the `exports` row and the

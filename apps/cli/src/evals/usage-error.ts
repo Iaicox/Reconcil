@@ -16,6 +16,20 @@ export class UsageError extends Error {
 }
 
 /**
+ * The suite could not be assembled: a smoke id that no longer resolves, a duplicate in the
+ * dataset, an id list that would select nothing.
+ *
+ * Distinct from `UsageError` because the remedy is the opposite one. A bad invocation is
+ * fixed at the command line and the branch is not implicated; a dataset defect IS in the
+ * diff under review. Reporting one as the other was the third variant of the same mistake
+ * this exit-code work keeps making: exit 1 says "the gate ran and missed" (it never ran),
+ * and a UsageError hint says "fix the invocation" (the invocation was fine).
+ */
+export class DatasetError extends Error {
+  override readonly name = 'DatasetError';
+}
+
+/**
  * Values appearing more than once, each reported once, in first-REPETITION order — the
  * order in which the duplicates were detected, not the order the values first appeared.
  * `['b','a','a','b']` gives `['a','b']`. Both callers print this into an error message, so

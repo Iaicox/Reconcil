@@ -9,7 +9,7 @@
  * must resolve to a subpath *under* the export root, never an arbitrary write location.
  * Mirrors `import-fs.test.ts` (the read-path counterpart) in intent.
  */
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 
@@ -18,10 +18,31 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ToolError } from '../src/errors.js';
 import { writeExportFiles } from '../src/tools/export-run.js';
 
+/**
+ * The message the caller sees is generic by contract (C6) — every failure in this writer
+ * reads "…failed to write export files" — so asserting on it cannot tell one refusal from
+ * another. The server-side `cause` is what names the defect, and it is the only thing that
+ * distinguishes a guard firing from `wx` raising EEXIST on the same path.
+ */
+async function causeOf(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+  } catch (err) {
+    return ((err as ToolError).cause as Error | undefined)?.message ?? '(no cause)';
+  }
+  return '(resolved — expected a rejection)';
+}
+
 let root: string;
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'reconcil-export-root-'));
+  // REALPATH'd. `writeExportFiles` reports the resolved directory, so comparing its output
+  // against a raw `mkdtemp` path is apples-to-oranges wherever the temp root is itself a
+  // link: macOS `os.tmpdir()` is `/var/folders/…` with `/var -> /private/var`, and a CI
+  // runner's `C:UsersRUNNER~1…` short name expands the same way. Without this the suite
+  // is green only on machines whose temp dir happens to be already resolved — which is why
+  // it passed locally and would not have on macOS.
+  root = await realpath(await mkdtemp(join(tmpdir(), 'reconcil-export-root-')));
   process.env.RECONCIL_EXPORT_DIR = root;
 });
 
@@ -216,6 +237,52 @@ describe('writeExportFiles — a symlinked out_dir SEGMENT cannot redirect the w
     ).rejects.toMatchObject({ code: 'INTERNAL' });
 
     await expect(readFile(join(root, 'june', 'close', 'escaped.json'), 'utf8')).rejects.toThrow(/ENOENT/);
+  });
+
+  it('refuses two rendered files that want the same name, before touching the disk', async () => {
+    // Left to run, one write wins and the other comes back EEXIST — inside a freshly minted
+    // UUID directory, which is the one place EEXIST is supposed to mean "a co-resident
+    // writer planted this". A renderer emitting the name twice would raise that alarm about
+    // itself, and the INTERNAL cause the operator reads cannot tell the two apart.
+    await expect(
+      writeExportFiles('export_close_pack', 'june/close', 'dupe-uuid', [
+        { name: 'manifest.json', content: '{"a":1}', sha256: 'a'.repeat(64) },
+        { name: 'manifest.json', content: '{"b":2}', sha256: 'b'.repeat(64) },
+      ]),
+    ).rejects.toMatchObject({ code: 'INTERNAL' });
+    // The CAUSE, not just the code. Both these assertions used to be satisfied by `wx`
+    // alone — EEXIST lands in the same `ToolError('INTERNAL', …)` and its cleanup removes
+    // the directory — so the test passed with the guard deleted, which is how a guard that
+    // could never fire (`!seen.add(…)`: Set.add returns the Set) shipped green.
+    await expect(causeOf(() => writeExportFiles('export_close_pack', 'june/close', 'dupe-uuid', [
+      { name: 'manifest.json', content: '{"a":1}', sha256: 'a'.repeat(64) },
+      { name: 'manifest.json', content: '{"b":2}', sha256: 'b'.repeat(64) },
+    ]))).resolves.toMatch(/collide on name/);
+    // Refused BEFORE mkdir, like the segment checks beside it. Asserted on `june` rather
+    // than on the leaf: the leaf is also absent after the `wx` path's cleanup, so only the
+    // un-created PARENT distinguishes "refused before any I/O" from "wrote, failed, tidied".
+    await expect(readdir(join(root, 'june'))).rejects.toThrow(/ENOENT/);
+  });
+
+  it('refuses names that differ only in case — one file on Windows and macOS, two on Linux', async () => {
+    // Not pedantry: written as-is, Linux materialises both and the other two hosts keep
+    // whichever landed last, silently. The same export would not be the same export
+    // depending on where it ran.
+    await expect(
+      writeExportFiles('export_close_pack', 'june/close', 'case-uuid', [
+        { name: 'manifest.json', content: '{"a":1}', sha256: 'a'.repeat(64) },
+        { name: 'Manifest.json', content: '{"b":2}', sha256: 'b'.repeat(64) },
+      ]),
+    ).rejects.toMatchObject({ code: 'INTERNAL' });
+    // On a case-SENSITIVE filesystem (CI is ubuntu-latest/ext4) these are two paths, both
+    // `wx` opens succeed and writeExportFiles RESOLVES — so without a working guard this
+    // assertion is not merely weak, it is red. It passed on Windows only because NTFS folds
+    // case and `wx` raised EEXIST for us.
+    await expect(causeOf(() => writeExportFiles('export_close_pack', 'june/close', 'case-uuid', [
+      { name: 'manifest.json', content: '{"a":1}', sha256: 'a'.repeat(64) },
+      { name: 'Manifest.json', content: '{"b":2}', sha256: 'b'.repeat(64) },
+    ]))).resolves.toMatch(/collide on name/);
+    await expect(readdir(join(root, 'june'))).rejects.toThrow(/ENOENT/);
   });
 
   it('a failed write leaves no partial export behind', async () => {
