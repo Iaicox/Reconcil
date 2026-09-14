@@ -7,11 +7,15 @@
  * read — `readFile()` follows to EOF, so a writer appending to the same inode between the
  * stat and the read would still have walked past it.
  */
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+/** chmod means nothing on Windows, and nothing to root — under either, the permission
+ *  cases below would assert a refusal that never happens. */
+const SKIP_PERMISSION_TESTS = process.platform === 'win32' || process.getuid?.() === 0;
 
 import { ToolError } from '../src/errors.js';
 import { readExactly, readImportFile } from '../src/recon/import-fs.js';
@@ -244,6 +248,37 @@ describe('readImportFile — who owns a failed read', () => {
     expect((err.cause as { code?: unknown } | undefined)?.code).toBe('ENOENT');
   });
 
+  it('a component inside the base that is a FILE is the caller path, not a broken root', async () => {
+    // ENOTDIR's old double duty, now separable: with the base positively stat'd as a
+    // directory, a non-directory component can only be INSIDE it, which the caller chose.
+    // Windows reports ENOENT for the same shape, so this assertion holds on either — but it
+    // only EXERCISES ENOTDIR on POSIX. Removing ENOTDIR from the shape codes therefore
+    // passes on a Windows dev box and fails on CI; that is stated here so the next reader
+    // does not mutation-test it locally and conclude the assertion is dead.
+    await writeFile(join(dir, 'a-file.csv'), 'x');
+    await expect(readImportFile(join('a-file.csv', 'child.csv'))).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      message: 'file_path could not be resolved in the import directory',
+    });
+  });
+
+  it('an import ROOT that is a FILE is the operator config, and says so', async () => {
+    // `realpath` succeeds on a regular file, so splitting the two realpaths was not enough:
+    // a base pointing at a file sailed through and the failure surfaced as the TARGET's
+    // ENOTDIR — a shape code, blamed on the caller, with no hint. No errno can separate
+    // "the base is a file" from "something inside it is"; one stat can.
+    const notADir = join(dir, 'root-is-a-file');
+    await writeFile(notADir, 'x');
+    process.env.RECONCIL_IMPORT_DIR = notADir;
+    const err = await readImportFile('anything.csv').then(
+      () => { throw new Error('expected a rejection'); },
+      (e: unknown) => e as ToolError,
+    );
+    expect(err.message).not.toContain('could not be resolved');
+    expect(err.message).toMatch(/import directory cannot be used/);
+    expect(err.hint).toMatch(/content/);
+  });
+
   it('a directory is refused on its stat, not on its open — the ordering still holds', async () => {
     // `open(dir, 'r')` SUCCEEDS on all three platforms, so the non-regular-file guard is
     // what refuses it, and it is the caller's argument being described. Asserted because
@@ -254,5 +289,71 @@ describe('readImportFile — who owns a failed read', () => {
       code: 'INVALID_INPUT',
       message: 'file_path is not a regular file',
     });
+  });
+});
+
+/**
+ * The POSIX-only end-to-end cases, in one block so CI pins the WIRING even though a Windows
+ * dev box cannot run them.
+ *
+ * This is the hole that kept reopening. A permission fault is the natural way to reach
+ * `unreadable` and the `open()` catch, `fs.chmod` expresses nothing on Windows, so the
+ * coverage kept being written against the helper instead — and each time, the mapping from
+ * helper result to ToolError went unpinned. Round 20 even removed the one end-to-end pin
+ * that existed, by reclassifying the NUL case it was riding on.
+ *
+ * Skipped under root as well as on Windows: root ignores the mode, the call would SUCCEED,
+ * and the assertion would go red for something that is not a defect.
+ */
+describe.skipIf(SKIP_PERMISSION_TESTS)('readImportFile — permission faults (POSIX)', () => {
+  it('an unreadable directory under the root is INTERNAL, not a bad file_path', async () => {
+    // Dropping search permission on an intermediate directory makes `realpath` fail EACCES
+    // for a path that may be perfectly good. Mutation target: flipping the `unreadable` row
+    // of CONFINEMENT_ERRORS to INVALID_INPUT must fail here.
+    const locked = join(dir, 'locked');
+    await mkdir(join(locked, 'inner'), { recursive: true });
+    await writeFile(join(locked, 'inner', 'f.csv'), 'a,b\n1,2\n');
+    await chmod(locked, 0o000);
+    try {
+      const err = await readImportFile(join('locked', 'inner', 'f.csv')).then(
+        () => { throw new Error('expected a rejection'); },
+        (e: unknown) => e as ToolError,
+      );
+      expect(err.code).toBe('INTERNAL');
+      expect(err.message).toBe('the import file could not be read');
+      expect((err.cause as { code?: unknown } | undefined)?.code).toBe('EACCES');
+    } finally {
+      await chmod(locked, 0o700);
+    }
+  });
+
+  it('an over-long component is a caller path fault — the last shape code with nothing on it', async () => {
+    // NAME_MAX is 255 on Linux and macOS, so a 300-character component is ENAMETOOLONG.
+    // Windows collapses it to ENOENT, which is why this lives in the POSIX block: it is the
+    // only place the code can be reached as itself rather than as a synonym.
+    await expect(readImportFile('x'.repeat(300))).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      message: 'file_path could not be resolved in the import directory',
+    });
+  });
+
+  it('an unreadable FILE reaches the open() catch, and that is INTERNAL too', async () => {
+    // The site a comment claimed could only be reached by the realpath→open race. On POSIX
+    // `realpath` consults only SEARCH permission on the prefix, so a mode-000 file in a
+    // readable directory resolves fine and fails at `open` with EACCES — no race, and the
+    // one branch in this module that had never been executed by anything.
+    const f = join(dir, 'unreadable.csv');
+    await writeFile(f, 'a,b\n1,2\n');
+    await chmod(f, 0o000);
+    try {
+      const err = await readImportFile('unreadable.csv').then(
+        () => { throw new Error('expected a rejection'); },
+        (e: unknown) => e as ToolError,
+      );
+      expect(err.code).toBe('INTERNAL');
+      expect(err.message).toBe('the import file could not be read');
+    } finally {
+      await chmod(f, 0o600);
+    }
   });
 });

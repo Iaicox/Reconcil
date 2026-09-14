@@ -262,8 +262,16 @@ auth-path latency ever becomes a measured concern. Where: `apps/mcp-server/src/a
 ## Exporters
 
 **Whether `realpath`-based confinement is the right shape at all.** The ACCURACY half of this
-entry is closed: ADR-012 d7 and `02-mcp-contracts.md` were amended 2026-09-13 to say what the
-implementation actually does and guarantees. Filing it as "belongs with the ADR sweep, not
+entry was declared closed on 2026-09-13, when ADR-012 d7 and `02-mcp-contracts.md` were first
+amended. It reopened twice and was amended again on 2026-09-14: the rule stated there was
+wrong about WHERE the boundary lies (it said "after confinement nothing is the caller's",
+while two `INVALID_INPUT` checks legitimately follow it), and then silent about the one
+exception the code relies on. "Amended" is not the same as "accurate", and three review
+rounds in a row found a drifted copy rather than a wrong behaviour — which is why the
+classification now lives in one compiler-checked table (`recon/import-fs.ts`) with the
+documents describing it rather than restating it.
+
+Filing it as "belongs with the ADR sweep, not
 the branch that surfaced it" was wrong — the deviation was introduced by that same branch,
 and CLAUDE.md's rule ("deviating from an ADR requires editing that ADR") has no later-is-fine
 clause. The branch amended ADR-005 d2 for its behaviour change while deferring this one; that
@@ -272,7 +280,8 @@ inconsistency is what review caught.
 What remains is the design question. Five review rounds went into this path, each adding a
 mechanism: prefix check → realpath of the deepest existing ancestor → single-segment checks
 on every caller-supplied component → `mkdir -p` → realpath of the finished directory,
-anchored at the ROOT and required to equal `realpath(base)/exportId` → `{ flag: 'wx' }` →
+anchored at the ROOT and required to be CONTAINED in it (equality was tried and refused a
+legitimate differently-cased path) → `{ flag: 'wx' }` →
 cleanup of partial writes → `rmdir` of the orphan on refusal. Each was found by review, not
 chosen by design, and each narrows a window the previous one left.
 

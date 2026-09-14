@@ -93,6 +93,19 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
      test at the post-confinement sites (where `ENOENT` means the file went away, not that
      the caller named nothing), and a shared `try` over both realpaths, which blamed the
      caller for an unusable import ROOT.
+
+     There is exactly one exception, and it is written down because "the caller can act on
+     it" is true of every failure on these edges and so cannot be what selects it: the BASE
+     itself. An import root that is unset, missing, or not a directory makes the whole
+     `file_path` input unavailable rather than any particular path wrong — and the tool also
+     takes `content`. That is `INVALID_INPUT` with a hint naming the alternative, in its own
+     words rather than borrowing `file_path`'s. `INTERNAL` there would say "nothing you can
+     do" about the one case where something can be.
+
+     The base is STATED to be a directory (`stat`), never inferred from what the target's
+     realpath does. `realpath` succeeds on a regular file, so a root pointing at one used to
+     surface as the target's `ENOTDIR` — a path-shape code, blamed on the caller, with no
+     hint — and no errno can separate "the base is a file" from "a component inside it is".
    - **"Never a write outside the configured base" was too strong.** No export CONTENT is
      ever written outside the root — that is the guarantee, and it holds. But `mkdir -p`
      runs before the post-creation check can fire, so a link planted in that window does get

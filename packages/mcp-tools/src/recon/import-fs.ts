@@ -14,7 +14,7 @@ import { open } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { ToolError } from '../errors.js';
-import { realpathWithinBase, resolveWithinBase } from '../fs-confine.js';
+import { realpathWithinBase, resolveWithinBase, type ConfinementFailure } from '../fs-confine.js';
 
 /** Max bytes for a `file_path` import (operator knob; read at call time so it is
  *  configurable at runtime and testable). */
@@ -41,6 +41,46 @@ export function maxFileBytes(): number {
  * not be read" — the exact misdiagnosis the guard exists to prevent, after paying for it.
  */
 const MAX_SERVABLE_SIZE = bufferConstants.MAX_STRING_LENGTH;
+
+/**
+ * The ownership rule, as a TABLE rather than as prose repeated in four places.
+ *
+ * It had been an if/if/ternary chain here, an unconditional INTERNAL below, a paragraph in
+ * ADR-012 d7 and another in 02-mcp-contracts.md §6.4 — and three review rounds running found
+ * a copy that had drifted from the others rather than a behaviour that was wrong. One copy,
+ * and `Record<ConfinementFailure['reason'], …>` makes the compiler check that every member
+ * of the union has an answer: a fifth reason added to fs-confine.ts will not build until it
+ * is decided here.
+ *
+ * The rule itself: is the refusal a statement about the REQUEST, or about the condition of
+ * the FILESYSTEM? Not about where in the sequence it happened — `!isFile()` and the byte cap
+ * come later and are still the caller's.
+ *
+ * `base-unusable` is the one entry that is not decided by that rule, and it is worth being
+ * explicit about why, because "the caller can act on it" is true of every failure here and
+ * so cannot be the reason. It is this: the caller supplied `file_path`, the tool ALSO takes
+ * `content`, and an import directory that cannot be used makes the whole `file_path` input
+ * unavailable rather than any particular path wrong. INVALID_INPUT with a hint says exactly
+ * that; INTERNAL would say "nothing you can do" about the one case where something can be.
+ */
+const CONFINEMENT_ERRORS: Record<
+  ConfinementFailure['reason'],
+  { code: 'INVALID_INPUT' | 'INTERNAL'; message: string; hint?: string }
+> = {
+  // About the request: absent, malformed, too long, or a component that is not a directory.
+  'bad-path': { code: 'INVALID_INPUT', message: 'file_path could not be resolved in the import directory' },
+  // About the request: it resolved, and it resolved somewhere it may not go.
+  escaped: { code: 'INVALID_INPUT', message: 'file_path resolves outside the permitted import directory' },
+  // About the filesystem: EACCES, EIO, ELOOP. The path may be perfectly good and it will
+  // not say, so "try another path" is not a recovery.
+  unreadable: { code: 'INTERNAL', message: 'the import file could not be read' },
+  // About the operator's configuration, and about the `file_path` input as a whole.
+  'base-unusable': {
+    code: 'INVALID_INPUT',
+    message: 'file_path import is unavailable (the configured import directory cannot be used)',
+    hint: 'pass the CSV inline as `content`, or ask the operator to check RECONCIL_IMPORT_DIR',
+  },
+};
 
 /** Resolved import base dir, or null when `file_path` import is not configured. */
 export function importBaseDir(): string | null {
@@ -125,39 +165,11 @@ export async function readImportFile(filePath: string): Promise<string> {
   }
   const confined = resolveConfinedPath(base, filePath);
 
-  // Four answers, owned by three different people, and two of them were wrong in turn.
-  //
-  // BAD-PATH and ESCAPED describe the argument the caller supplied. UNREADABLE does not —
-  // the path may be perfectly good and the filesystem simply would not say (EACCES on a
-  // directory under the import root, EIO, ELOOP) — and reported as INVALID_INPUT it told
-  // the model to try a different `file_path` when no path would have worked.
-  //
-  // BASE-UNUSABLE is neither: RECONCIL_IMPORT_DIR is missing or is not a directory, which
-  // says nothing whatever about `file_path`. It shared a catch with the target realpath for
-  // one round, so it arrived as ENOENT, was read as "the path is not there", and blamed the
-  // caller for the operator's configuration — inside the very check that exists to stop
-  // that. It joins the documented exception beside it: INVALID_INPUT, because the caller
-  // CAN act (pass `content` instead), but saying so in its own words rather than borrowing
-  // the wrong ones. The underlying error is logged, never sent (C6).
   const check = await realpathWithinBase(base, confined);
   if (!check.ok) {
-    if (check.reason === 'unreadable') {
-      throw new ToolError('INTERNAL', 'the import file could not be read', undefined, check.cause);
-    }
-    if (check.reason === 'base-unusable') {
-      throw new ToolError(
-        'INVALID_INPUT',
-        'file_path import is unavailable (the configured import directory cannot be used)',
-        'pass the CSV inline as `content`, or ask the operator to check RECONCIL_IMPORT_DIR',
-        check.cause,
-      );
-    }
-    throw new ToolError(
-      'INVALID_INPUT',
-      check.reason === 'bad-path'
-        ? 'file_path could not be resolved in the import directory'
-        : 'file_path resolves outside the permitted import directory',
-    );
+    const { code, message, hint } = CONFINEMENT_ERRORS[check.reason];
+    // The cause rides only on the two reasons that carry one; C6 keeps it server-side.
+    throw new ToolError(code, message, hint, 'cause' in check ? check.cause : undefined);
   }
   const realTarget = check.realTarget;
 
@@ -180,10 +192,11 @@ export async function readImportFile(filePath: string): Promise<string> {
   // The race is not the only way in, and a comment here once said it was. On POSIX,
   // `realpath` consults only SEARCH permission on the prefix, so a mode-000 file in a
   // readable directory resolves fine and then fails `open` with EACCES — no race at all.
-  // (On Windows the same file fails at `realpath` instead, because realpath there must open
-  // the target; both platforms reach INTERNAL with this message, by different routes.)
-  // EMFILE and ENFILE arrive here the same way. What makes one unconditional answer right
-  // for all of them is that none is a statement about the argument.
+  // (Not reproducible on Windows at all: `fs.chmod` there sets only the read-only
+  // attribute, so neither call fails — which is why the tests for this are POSIX-only and
+  // run on CI rather than on a developer's machine.) EMFILE and ENFILE arrive here the same
+  // way. What makes one unconditional answer right for all of them is that none is a
+  // statement about the argument.
   let fh;
   try {
     fh = await open(realTarget, 'r');

@@ -203,13 +203,14 @@ export async function writeExportFiles(
       // (ENOTDIR). No contents ever land there — that is what the check buys — so this is
       // tidying, not containment, and failing to tidy must never mask the refusal.
       await rmdir(dir).catch(() => { /* a link, or levels above it — not reclaimable here */ });
-      // The reason AND, where there is one, the underlying error. 'unreadable' and
-      // 'base-unusable' carry a cause precisely so an operator is not left staring at a
-      // one-word diagnosis for the most opaque refusal this writer has; dropping it here
-      // would have given the split's benefit to one of its two consumers.
-      const detail = new Error(`export dir confinement failed: ${check.reason}`);
+      // The reason AND, where there is one, the underlying error — interpolated into the
+      // MESSAGE, not chained as a nested cause. `serializeError` (core/logger.ts) emits only
+      // { name, message, kind } and drops `cause` by design (ADR-011), so a chained one
+      // reaches neither the wire (correct) nor the log (the entire point). Chaining it was
+      // a no-op dressed as a fix for exactly one round.
+      const why = 'cause' in check ? `: ${String((check.cause as Error | undefined)?.message ?? check.cause)}` : '';
       throw new ToolError('INTERNAL', `${toolName} failed to write export files`, undefined,
-        'cause' in check ? new Error(detail.message, { cause: check.cause }) : detail);
+        new Error(`export dir confinement failed: ${check.reason}${why}`));
     }
     const realDir = check.realTarget;
     // Independent writes, one round of I/O. Both written AND reported through the RESOLVED

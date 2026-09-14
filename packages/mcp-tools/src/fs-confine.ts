@@ -10,7 +10,7 @@
  * exist yet). Callers own the domain-specific `ToolError` (message/hint differ per tool) —
  * this module never throws. Dependency-free (fs/promises + path only).
  */
-import { realpath } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, resolve, sep } from 'node:path';
 
 /**
@@ -49,7 +49,11 @@ export function resolveWithinBase(base: string, target: string): string | null {
  * the path can fix all four by supplying a different one.
  *
  * Everything else a `realpath` can raise — EACCES, EIO, ELOOP, EMFILE — says the path may
- * be perfectly good and the filesystem will not say. (EACCES is the interesting one: another
+ * be perfectly good and the filesystem will not say. ELOOP is the deliberate judgement in
+ * that list: a symlink cycle IS deterministic per path, so by the letter of the rule above
+ * it could be the caller's. It is not treated that way, because the cycle is an arrangement
+ * somebody made inside the operator's directory, and telling the model "your path is wrong"
+ * would send it hunting for a better one instead of surfacing a planted loop. (EACCES is the interesting one: another
  * path might well have been readable, so "nothing you can do" is not strictly true — but
  * "your path is wrong" is false, and of the two available answers only one misdirects.)
  *
@@ -76,13 +80,20 @@ export type ConfinementFailure =
  *  - `'bad-path'` — the supplied path is absent, malformed or not a directory chain;
  *  - `'escaped'` — it resolved outside the base;
  *  - `'unreadable'` — it may be there, but the filesystem would not say (EACCES, EIO, ELOOP);
- *  - `'base-unusable'` — the BASE itself did not resolve, which is the operator's
- *    configuration and says nothing at all about `target`.
+ *  - `'base-unusable'` — the BASE is missing, or is not a directory, which is the
+ *    operator's configuration and says nothing at all about `target`.
  *
- * The last one is why the two realpaths are no longer in one `try`. Sharing a catch made a
- * missing RECONCIL_IMPORT_DIR come back as ENOENT and be reported to the model as "your
- * file_path could not be resolved" — the exact ownership inversion this discriminant exists
- * to prevent, hidden inside the function that prevents it everywhere else.
+ * The last one is why the two realpaths are no longer in one `try`, and why the base is
+ * STATED to be a directory rather than inferred. Sharing a catch made a missing
+ * RECONCIL_IMPORT_DIR come back as ENOENT and be read as "your file_path could not be
+ * resolved". Splitting the catch fixed that case and left the neighbouring one: `realpath`
+ * succeeds on a regular FILE, so a base pointing at one sailed through and the failure
+ * surfaced as the TARGET's ENOTDIR — still in the shape codes, still blamed on the caller.
+ *
+ * That is the inference this function kept getting wrong. ENOTDIR was doing double duty —
+ * "a component inside the base is a file" (the caller's) and "the base itself is a file"
+ * (the operator's) — and no errno can separate those. One `stat` can, so one `stat` does,
+ * and the code set below goes back to being a statement about the caller's path only.
  *
  * The two not-the-caller's cases carry the error so a caller can log it server-side without
  * it reaching the wire (C6).
@@ -94,6 +105,12 @@ export async function realpathWithinBase(
   let realBase: string;
   try {
     realBase = await realpath(base);
+    // Positively checked, not inferred from what happens to `target` afterwards. `stat`
+    // rather than `lstat`: a base that is a symlink to a directory is an ordinary operator
+    // layout, and the export side honours exactly that shape.
+    if (!(await stat(realBase)).isDirectory()) {
+      return { ok: false, reason: 'base-unusable', cause: new Error('the configured base is not a directory') };
+    }
   } catch (err) {
     return { ok: false, reason: 'base-unusable', cause: err };
   }
