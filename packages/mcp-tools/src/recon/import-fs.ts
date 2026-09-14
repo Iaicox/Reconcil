@@ -42,6 +42,36 @@ export function maxFileBytes(): number {
  */
 const MAX_SERVABLE_SIZE = bufferConstants.MAX_STRING_LENGTH;
 
+/**
+ * Does this filesystem error mean the CALLER named something that is not there?
+ *
+ * The ownership split (ADR-012 d7) is the rule, and applying it needs the errno: ENOENT and
+ * its neighbours say the path the caller supplied does not resolve to a file, which is the
+ * caller's to fix. EACCES, EIO, ELOOP, EMFILE and everything else are the operator's
+ * storage or the process's own limits — the argument was fine, and answering INVALID_INPUT
+ * tells the model to try a different path when no path would have worked. Both were
+ * collapsed into INVALID_INPUT, which made the read edge state one rule and follow another.
+ *
+ * Unknown/absent codes are treated as NOT caller-owned: an unrecognised fault is exactly the
+ * case where blaming the argument is a guess, and INTERNAL keeps the detail in the cause
+ * where an operator can read it.
+ */
+const CALLER_OWNED_FS_CODES = new Set(['ENOENT', 'ENOTDIR', 'ENAMETOOLONG', 'EISDIR', 'EINVAL']);
+
+export function isCallerOwnedFsFault(err: unknown): boolean {
+  const code: unknown = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && CALLER_OWNED_FS_CODES.has(code);
+}
+
+/** The generic refusal for a read that failed, coded by who owns it. Message identical
+ *  either way — the caller learns nothing about the server's filesystem (C6); the cause
+ *  carries the errno, server-side. */
+function unreadable(err: unknown): ToolError {
+  return isCallerOwnedFsFault(err)
+    ? new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory')
+    : new ToolError('INTERNAL', 'the import file could not be read', undefined, err);
+}
+
 /** Resolved import base dir, or null when `file_path` import is not configured. */
 export function importBaseDir(): string | null {
   const raw = process.env.RECONCIL_IMPORT_DIR;
@@ -117,6 +147,10 @@ export async function readExactly(reader: ByteReader, size: number): Promise<str
 export async function readImportFile(filePath: string): Promise<string> {
   const base = importBaseDir();
   if (base === null) {
+    // INVALID_INPUT although the operator, not the caller, owns the configuration — the one
+    // deliberate exception to the ownership rule, because the caller CAN act on it: the tool
+    // takes `content` as well, and inline CSV needs no import directory. INTERNAL here would
+    // say "nothing you can do" about the one refusal the model can route around.
     throw new ToolError('INVALID_INPUT', 'file_path import is not configured (set RECONCIL_IMPORT_DIR)');
   }
   const confined = resolveConfinedPath(base, filePath);
@@ -144,8 +178,8 @@ export async function readImportFile(filePath: string): Promise<string> {
   let fh;
   try {
     fh = await open(realTarget, 'r');
-  } catch {
-    throw new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory');
+  } catch (err) {
+    throw unreadable(err);
   }
   try {
     const cap = maxFileBytes();
@@ -184,9 +218,10 @@ export async function readImportFile(filePath: string): Promise<string> {
     return await readExactly(fh, stats.size);
   } catch (err) {
     // The cap is a ToolError already shaped for the caller; anything else is an fs fault
-    // whose text must not leak (C6).
+    // whose text must not leak (C6) and whose CODE depends on who owns it — a vanished file
+    // is the caller's, an EIO or a failed Buffer allocation is not.
     if (err instanceof ToolError) throw err;
-    throw new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory');
+    throw unreadable(err);
   } finally {
     // Swallowed deliberately: a rejection from a `finally` REPLACES the outcome of the
     // try/catch, so an EIO on close would turn a fully-read CSV into a raw fs error, and

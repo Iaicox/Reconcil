@@ -90,10 +90,10 @@ describe('exit-code contract — 2 means the gate could not run', () => {
     expect(r.stderr).toContain('repl COULD NOT RUN');
     // 2, not 1: the environment cannot support the run. These gates printed and set 1.
     expect(r.code).toBe(2);
-      expect(reportLines(r.stderr)).toHaveLength(2);
+    expect(reportLines(r.stderr)).toHaveLength(2);
   }, 60_000);
 
-  it('a bad repl flag is reported as repl, through main.ts s shared catch', () => {
+  it('a bad repl flag is reported as repl, through the shared catch in main.ts', () => {
     // The other route to the label: this one goes through failureLabel() rather than
     // through runRepl's own reportAndExit call, and the two used to disagree — a bad flag
     // said "cli" while a missing DATABASE_URL said "repl", for the same command.

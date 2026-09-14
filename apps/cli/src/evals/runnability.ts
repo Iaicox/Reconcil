@@ -105,13 +105,19 @@ function isUserAbort(err: unknown): boolean {
 /**
  * Classify an error as "the run could not start" (exit 2) or not (null ⇒ exit 1).
  *
- * EVERY remedy returned from here names no command, and that took two passes to get right.
+ * No remedy returned from here carries CI or gate vocabulary, and that took three passes.
  * They said "re-run the job", "the suite did not complete", "the branch is not implicated",
- * "the ANTHROPIC_API_KEY secret", "the code under test" — CI and eval vocabulary, and
- * `repl` reaches every one of them through main.ts's shared catch (a rejected key is the
- * likeliest repl failure there is). The caller's LABEL names the command on the first line;
- * a hint naming a different one is the same defect the label was added to fix, one layer
- * down. `runnability.test.ts` holds every classified hint to that rule.
+ * "the ANTHROPIC_API_KEY secret", "the code under test" — and `repl` reaches almost all of
+ * them through main.ts's shared catch (a rejected key is the likeliest repl failure there
+ * is), while having no gate, no job, no cases and no secret store. The caller's LABEL names
+ * the command on the first line; a hint implying a different one is the same defect the
+ * label was added to fix, one layer down. `runnability.test.ts` holds every branch here to
+ * that rule, including the two that classify with no HTTP status — it did not, twice, and
+ * both times the gap was exactly where a reverted phrase would have hidden.
+ *
+ * The DatasetError branch is the one exception to "reaches repl": it is thrown only from
+ * smoke.ts, which repl never imports. Its remedy still avoids the vocabulary, because the
+ * rule is about what the words claim, not about which command can reach them.
  *
  * The rule is about THIS function only. A caller that builds its own `Unrunnable` knows
  * which command it is — run.ts's missing-key hint says "re-run the job", repl.ts's says

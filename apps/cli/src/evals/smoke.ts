@@ -17,11 +17,15 @@ import type { EvalCase } from '@reconcil/evals';
 import { DatasetError, UsageError, describeIdMismatch, findDuplicates } from './usage-error.js';
 
 /**
- * The ids, as an ARRAY. A `new Set([...])` literal absorbs a duplicate silently, and
- * `selectSmokeDataset` compares against `ids.size` — so a typo repeating one id would
- * shrink the smoke to 5 cases and still report a clean match. (It catches duplicates in the
- * DATASET, not in this literal; the two are different mistakes.) Declared as a list and
- * de-duplicated under an assertion, so the mistake is loud at module load.
+ * The ids, as an ARRAY. A `new Set([...])` literal absorbs a duplicate silently, so a typo
+ * repeating one id would shrink the smoke to 5 cases without a word — and the checks
+ * downstream would not notice, because they are about duplicates in the DATASET, which is a
+ * different mistake. Declared as a list and de-duplicated under an assertion instead.
+ *
+ * Two clauses that used to live here are gone rather than reworded: the assertion is no
+ * longer "loud at module load" (`smokeIds()` exists precisely so it is loud at CALL time —
+ * see below), and `selectSmokeDataset` no longer "compares against `ids.size`" — it stopped
+ * comparing counts several rounds ago, for reasons its own docstring gives.
  */
 const SMOKE_ID_LIST = ['cover-001', 'flow-001', 'gas-001', 'guard-001', 'inj-001', 'recon-status-001'] as const;
 

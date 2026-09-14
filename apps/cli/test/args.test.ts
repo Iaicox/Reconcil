@@ -57,6 +57,11 @@ describe('parseArgs', () => {
     for (const flag of ['--out', '--model', '--suite', '--runs', '--cases']) {
       expect(() => parseArgs([flag, '--smoke']), flag).toThrow(/needs a value/);
       expect(() => parseArgs([flag]), flag).toThrow(/needs a value/);
+      // The empty token, on every flag rather than on the two that happened to have a test.
+      // `--out ''` wrote reports into the package root, `--model ''` sent '' to the API as a
+      // model id, `--suite ''` reported "unknown suite: " — three silent misbehaviours, and
+      // reverting the guard failed only the --cases and --runs assertions.
+      expect(() => parseArgs([flag, '']), flag).toThrow(/needs a value/);
     }
   });
 
@@ -88,10 +93,11 @@ describe('--runs beside --smoke', () => {
     // The ordering defect that mattered: the override ran FIRST, so `--smoke --runs abc`
     // replaced NaN with 1 and reported nothing. The guard against a vacuous zero-run gate
     // was disabled by the flag standing next to it.
-    // One alternative, not `/positive integer|needs a value/`. Every one of these five
-    // reaches the integer guard — `value()` returns '' unchanged (it is neither undefined
-    // nor --prefixed) and `Number('')` is 0 — so the second branch was unreachable and the
-    // assertion would have stayed green if the first guard stopped firing.
+    // One alternative, not `/positive integer|needs a value/`. Every value here reaches the
+    // integer guard, so an alternation would have stayed green if that guard stopped firing
+    // — the second branch could never have been the one that matched. ('' used to be in
+    // this list and used to reach the same guard as 0; it is refused earlier now, and is
+    // asserted separately below rather than hidden inside an alternation.)
     for (const bad of ['abc', '0', '-1', '1.5']) {
       expect(() => parseArgs(['--smoke', '--runs', bad]), bad).toThrow(/positive integer/);
     }

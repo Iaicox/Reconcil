@@ -158,15 +158,19 @@ describe('UsageError', () => {
     expect(c?.hint).not.toMatch(/gate|job|suite/);
   });
 
-  it('holds EVERY classified hint to the no-command rule, not just this one', () => {
-    // The previous version checked three words on one hint, so "branch", "secret" and
-    // "under test" all survived the round that was supposed to remove them — in the 401
-    // hint, which the classifier's own docstring calls the likeliest repl failure there is.
-    // Every error below classifies as cannot-run; each is asserted, so a new branch that
-    // reintroduces the vocabulary fails here rather than in a reader's terminal.
-    const classified = [
+  it('holds EVERY classified hint to the no-command rule, not just the ones with a status', async () => {
+    // Two earlier versions of this test were leaky in the same direction. The first checked
+    // three words on ONE hint, so "secret", "branch" and "under test" survived the round
+    // that was meant to remove them. The second built its inputs only from `apiError(...)`,
+    // which cannot express the two branches that classify with NO http status — and one of
+    // those is the connection-fault hint, whose "the code under test" was one of the five
+    // phrases that round claimed to have fixed. Reverting it was undetected.
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const classified: unknown[] = [
       new UsageError('bad flag'),
       new DatasetError('duplicate id'),
+      new Anthropic.APIConnectionError({ message: 'socket hang up' }),
+      new Anthropic.APIUserAbortError(),
       apiError(400, 'invalid_request_error', 'Your credit balance is too low'),
       apiError(401, 'authentication_error', 'invalid x-api-key'),
       apiError(403, 'permission_error', 'not allowed'),
@@ -174,20 +178,34 @@ describe('UsageError', () => {
       apiError(502, 'api_error', 'bad gateway'),
       apiError(529, 'overloaded_error', 'overloaded'),
     ];
+    // Every non-null branch of classifyUnrunnable is represented above. Asserted as a COUNT
+    // so that adding a branch without adding an input here fails, rather than quietly
+    // leaving the new hint unchecked — which is the exact hole this test has had twice.
+    expect(classified).toHaveLength(10);
+
     for (const err of classified) {
       const c = classifyUnrunnable(err);
       expect(c, String(err)).not.toBeNull();
       // `job`/`gate`/`suite`/`branch` name a CI shape repl does not have; `secret` names
       // where CI keeps the key, not where an operator does; `under test` names a test run.
-      // Split into WORDS rather than matched as substrings: the 502 reason legitimately
-      // says "gateway", which contains "gate". A word-boundary regex would say the same
-      // thing, but this file already had one silently turn into a literal backspace on its
-      // way through an editing script — and it passed, matching nothing.
-      const words = new Set(`${c!.reason} ${c!.hint}`.toLowerCase().split(/[^a-z]+/));
-      for (const banned of ['gate', 'job', 'suite', 'branch', 'secret']) {
-        expect(words.has(banned), `${String(err)} :: ${banned}`).toBe(false);
+      //
+      // Matched as WORDS, not substrings: the 502 reason legitimately says "gateway", which
+      // contains "gate". Inflections are enumerated rather than stemmed — "secrets" is the
+      // word GitHub itself uses, and an exact-word check let every plural through.
+      const text = `${c!.reason} ${c!.hint}`.toLowerCase();
+      const words = new Set(text.split(/[^a-z]+/));
+      const banned = [
+        'gate', 'gates', 'gated', 'gating',
+        'job', 'jobs',
+        'suite', 'suites',
+        'branch', 'branches',
+        'secret', 'secrets',
+      ];
+      for (const word of banned) {
+        expect(words.has(word), `${String(err)} :: ${word}`).toBe(false);
       }
-      expect(`${c!.reason} ${c!.hint}`.toLowerCase(), String(err)).not.toContain('under test');
+      // Non-letters collapsed to single spaces first, so "under-test" is caught too.
+      expect(` ${[...text.split(/[^a-z]+/)].join(' ')} `, String(err)).not.toContain(' under test ');
     }
   });
 

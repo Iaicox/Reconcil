@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ToolError } from '../src/errors.js';
-import { readExactly, readImportFile } from '../src/recon/import-fs.js';
+import { isCallerOwnedFsFault, readExactly, readImportFile } from '../src/recon/import-fs.js';
 
 import type { ByteReader } from '../src/recon/import-fs.js';
 
@@ -189,5 +189,42 @@ describe('readImportFile — a large cap is a configuration, not a fault', () =>
     const body = 'external_ref,amount\nINV-2,20\n';
     await writeFile(join(dir, 'big-cap.csv'), body);
     await expect(readImportFile('big-cap.csv')).resolves.toBe(body);
+  });
+});
+
+describe('readImportFile — who owns a failed read', () => {
+  // The ownership rule (ADR-012 d7, 02-mcp-contracts.md §6.4) is stated as a principle, so
+  // it has to hold for the ordinary fs faults too — not only for the mid-read mutation the
+  // round that wrote it changed. Both sites collapsed every errno into INVALID_INPUT.
+  it('a path that is not there belongs to the caller — INVALID_INPUT', async () => {
+    // The MESSAGE too, not only the code: three separate branches answer INVALID_INPUT
+    // here (unset RECONCIL_IMPORT_DIR, unresolvable, unreadable), so a code-only assertion
+    // would go green even if the file-level beforeEach never ran — the opposite of what
+    // this measures. It lands on the realpath branch, NOT on open(): a missing file fails
+    // to resolve before a descriptor is ever asked for. Written the other way round first,
+    // and the expected message was simply wrong.
+    await expect(readImportFile('no-such-file.csv')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      message: 'file_path could not be resolved in the import directory',
+    });
+  });
+
+  it('classifies the errno, not the fact that a read failed', () => {
+    // Exported for the same reason readExactly is: a real EACCES, EIO or EMFILE cannot be
+    // staged portably from a test — and a missing file does not reach open() at all, it
+    // fails at realpath — so the classifier is driven directly. A guard no test can execute
+    // is a guard nobody knows still works.
+    expect(isCallerOwnedFsFault({ code: 'ENOENT' })).toBe(true);
+    expect(isCallerOwnedFsFault({ code: 'ENOTDIR' })).toBe(true);
+    // The operator's storage and the process's own limits. Answering INVALID_INPUT here
+    // tells the model to try a different path when no path would have worked.
+    expect(isCallerOwnedFsFault({ code: 'EACCES' })).toBe(false);
+    expect(isCallerOwnedFsFault({ code: 'EIO' })).toBe(false);
+    expect(isCallerOwnedFsFault({ code: 'EMFILE' })).toBe(false);
+    // An unrecognised or absent code is the case where blaming the argument is a guess.
+    expect(isCallerOwnedFsFault({ code: 'EWHATEVER' })).toBe(false);
+    expect(isCallerOwnedFsFault(new Error('no code at all'))).toBe(false);
+    expect(isCallerOwnedFsFault(undefined)).toBe(false);
+    expect(isCallerOwnedFsFault({ code: 42 })).toBe(false);
   });
 });

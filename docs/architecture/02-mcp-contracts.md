@@ -408,13 +408,24 @@ output: { inserted: number; skipped_duplicates: number;
 `file_path` is MODEL-CONTROLLED and therefore hostile (H2): it is a subpath under
 `RECONCIL_IMPORT_DIR`, never a location of its own, and — unlike the export root — this edge
 is FAIL-CLOSED, so with no `RECONCIL_IMPORT_DIR` configured `file_path` is refused outright.
-A `..` traversal, an absolute path that escapes, a non-regular file, or a file over the byte
-cap is `INVALID_INPUT`. A refusal the caller does NOT own is `INTERNAL`, by the same
-ownership rule §6.5 applies to `out_dir` (ADR-012 d7): a path that passed confinement,
-`realpath` and the cap and then changed size between its `stat` and its last byte was
-mutated by a co-resident writer, and blaming the argument would both be false and suggest
-the one recovery — retry with a different path — that cannot work. Every message is generic;
-the path and the underlying fs error stay server-side (C6).
+
+The error contract follows OWNERSHIP, the rule §6.5 and ADR-012 d7 state for `out_dir`:
+
+- `INVALID_INPUT` — the caller's to fix. A `..` traversal or an absolute path that escapes;
+  a path that does not resolve inside the directory; a non-regular file (FIFO, socket,
+  device); a file over the byte cap; and a read that fails with an errno naming the path
+  itself (`ENOENT`, `ENOTDIR`, `ENAMETOOLONG`, `EISDIR`, `EINVAL`).
+- `INTERNAL` — nobody's argument. A file mutated between its `stat` and its last byte (a
+  co-resident writer); a file larger than V8 can hold as a string; and any other fs fault —
+  `EACCES`, `EIO`, `EMFILE`, an unrecognised code — where the storage or the process, not
+  the path, is what failed. Blaming the argument here would suggest the one recovery that
+  cannot work: retrying with a different path.
+- The single exception: an unset `RECONCIL_IMPORT_DIR` is `INVALID_INPUT` although the
+  operator owns it, because the caller CAN act on it — the tool takes `content` as well, and
+  inline CSV needs no import directory.
+
+Every message is generic; the path, the errno and the underlying fs error stay server-side
+on `Error.cause` (C6).
 
 **`recon_suggest_matches`** — deterministic matching engine run (ADR-010).
 ```ts
