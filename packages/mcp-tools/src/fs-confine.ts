@@ -43,22 +43,49 @@ export function resolveWithinBase(base: string, target: string): string | null {
 }
 
 /**
+ * Codes that mean the path simply is not there. Everything else a `realpath` can raise —
+ * EACCES, EIO, ELOOP, EMFILE, or a non-errno like ERR_INVALID_ARG_VALUE — describes the
+ * state of the filesystem rather than the shape of the path, and the caller cannot tell
+ * from its side which it got. (EACCES is the interesting one: another path might well have
+ * been readable, so "nothing you can do" is not strictly true — but "your path is wrong" is
+ * false, and of the two available answers only one does not misdirect.)
+ *
+ * The distinction exists because callers turn it into an error CODE. Collapsing both into
+ * one 'unresolvable' meant a permission-denied directory under the import root was reported
+ * to the model as a bad `file_path` — advice to try another path, when no path would have
+ * worked — and it made the read edge state one ownership rule (ADR-012 d7) and follow
+ * another. Decided here rather than at the call site because this is the only place that
+ * still has the error object; `reason` alone cannot carry it.
+ */
+const MISSING_CODES = new Set(['ENOENT', 'ENOTDIR', 'ENAMETOOLONG']);
+
+export type ConfinementFailure =
+  | { ok: false; reason: 'missing' | 'escaped' }
+  | { ok: false; reason: 'unreadable'; cause: unknown };
+
+/**
  * Realpath both `base` and `target` and re-check confinement past symlinks. `target` must
- * already exist (the read-path shape: a file that is about to be read). A path that cannot
- * be realpath'd (missing, permission error) is reported as `'unresolvable'` rather than
- * `'escaped'`, so callers can keep those as distinct error messages.
+ * already exist (the read-path shape: a file that is about to be read).
+ *
+ * Three distinct failures, because callers owe the caller three distinct answers:
+ * `'missing'` — the path is not there, which is the supplied argument's own defect;
+ * `'unreadable'` — it may well be there, but the filesystem would not say, which is not;
+ * `'escaped'` — it resolved outside the base. The `unreadable` case carries the error so a
+ * caller can log it server-side without it reaching the wire (C6).
  */
 export async function realpathWithinBase(
   base: string,
   target: string,
-): Promise<{ ok: true; realTarget: string } | { ok: false; reason: 'unresolvable' | 'escaped' }> {
+): Promise<{ ok: true; realTarget: string } | ConfinementFailure> {
   let realBase: string;
   let realTarget: string;
   try {
     realBase = await realpath(base);
     realTarget = await realpath(target);
-  } catch {
-    return { ok: false, reason: 'unresolvable' };
+  } catch (err) {
+    const code: unknown = (err as { code?: unknown })?.code;
+    if (typeof code === 'string' && MISSING_CODES.has(code)) return { ok: false, reason: 'missing' };
+    return { ok: false, reason: 'unreadable', cause: err };
   }
   if (realTarget !== realBase && !realTarget.startsWith(realBase + sep)) {
     return { ok: false, reason: 'escaped' };

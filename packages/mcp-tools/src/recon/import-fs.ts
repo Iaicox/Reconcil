@@ -42,36 +42,6 @@ export function maxFileBytes(): number {
  */
 const MAX_SERVABLE_SIZE = bufferConstants.MAX_STRING_LENGTH;
 
-/**
- * Does this filesystem error mean the CALLER named something that is not there?
- *
- * The ownership split (ADR-012 d7) is the rule, and applying it needs the errno: ENOENT and
- * its neighbours say the path the caller supplied does not resolve to a file, which is the
- * caller's to fix. EACCES, EIO, ELOOP, EMFILE and everything else are the operator's
- * storage or the process's own limits — the argument was fine, and answering INVALID_INPUT
- * tells the model to try a different path when no path would have worked. Both were
- * collapsed into INVALID_INPUT, which made the read edge state one rule and follow another.
- *
- * Unknown/absent codes are treated as NOT caller-owned: an unrecognised fault is exactly the
- * case where blaming the argument is a guess, and INTERNAL keeps the detail in the cause
- * where an operator can read it.
- */
-const CALLER_OWNED_FS_CODES = new Set(['ENOENT', 'ENOTDIR', 'ENAMETOOLONG', 'EISDIR', 'EINVAL']);
-
-export function isCallerOwnedFsFault(err: unknown): boolean {
-  const code: unknown = (err as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && CALLER_OWNED_FS_CODES.has(code);
-}
-
-/** The generic refusal for a read that failed, coded by who owns it. Message identical
- *  either way — the caller learns nothing about the server's filesystem (C6); the cause
- *  carries the errno, server-side. */
-function unreadable(err: unknown): ToolError {
-  return isCallerOwnedFsFault(err)
-    ? new ToolError('INVALID_INPUT', 'file_path could not be read from the import directory')
-    : new ToolError('INTERNAL', 'the import file could not be read', undefined, err);
-}
-
 /** Resolved import base dir, or null when `file_path` import is not configured. */
 export function importBaseDir(): string | null {
   const raw = process.env.RECONCIL_IMPORT_DIR;
@@ -155,11 +125,21 @@ export async function readImportFile(filePath: string): Promise<string> {
   }
   const confined = resolveConfinedPath(base, filePath);
 
+  // Three answers, not two, and the third is the one that had been wrong. A path that is
+  // MISSING or that ESCAPES is a description of the argument the caller supplied.
+  // UNREADABLE is not: the path may be perfectly good and the filesystem simply would not
+  // say — EACCES on a directory under the import root, EIO, ELOOP. Reported as
+  // INVALID_INPUT, that told the model to try a different `file_path` when no path would
+  // have worked, and it is the branch every test here lands on, so the error the round
+  // before this one "walked every throw" for was the one it never looked at.
   const check = await realpathWithinBase(base, confined);
   if (!check.ok) {
+    if (check.reason === 'unreadable') {
+      throw new ToolError('INTERNAL', 'the import file could not be read', undefined, check.cause);
+    }
     throw new ToolError(
       'INVALID_INPUT',
-      check.reason === 'unresolvable'
+      check.reason === 'missing'
         ? 'file_path could not be resolved in the import directory'
         : 'file_path resolves outside the permitted import directory',
     );
@@ -175,11 +155,22 @@ export async function readImportFile(filePath: string): Promise<string> {
   // neither a different inode nor growth of the same one can get past the cap. (The realpath→open window remains and is the residual TOCTOU noted
   // in 09-known-gaps.md; closing it needs an O_NOFOLLOW-per-segment walk, which is a
   // different slice. This removes the window that had an actual consequence.)
+  // INTERNAL unconditionally, with no errno inspection at all. `realpathWithinBase` above
+  // has already established that this path EXISTS and resolves inside the base, so an
+  // ENOENT here does not mean "the caller named something that is not there" — it means the
+  // file went away between the two calls. That is the realpath→open race 09-known-gaps.md
+  // documents, and ADR-012 d7 rules on it explicitly: a refusal the caller does not own is
+  // INTERNAL. An errno split at this site got that exactly backwards for one round.
+  //
+  // NOT covered by a test, and stated rather than glossed: reaching this catch needs the
+  // file to disappear between the realpath and the open, which cannot be staged portably.
+  // What makes that acceptable here — and did not when this was a classifier — is that
+  // there is no longer a decision to get wrong: one code, one message, no input consulted.
   let fh;
   try {
     fh = await open(realTarget, 'r');
   } catch (err) {
-    throw unreadable(err);
+    throw new ToolError('INTERNAL', 'the import file could not be read', undefined, err);
   }
   try {
     const cap = maxFileBytes();
@@ -201,8 +192,10 @@ export async function readImportFile(filePath: string): Promise<string> {
     // of 1e16 meaning "effectively unlimited" is perfectly servable for a 45-byte CSV — an
     // earlier version guarded the CAP here and killed the tool outright for that config.
     // What is unservable is a FILE bigger than Node can allocate a Buffer for, and that is
-    // the operator's storage, not the caller's path: `Buffer.allocUnsafe` would throw
-    // ERR_OUT_OF_RANGE into the catch below and surface as "file_path could not be read".
+    // the operator's storage, not the caller's path. Without this guard `Buffer.allocUnsafe`
+    // throws ERR_OUT_OF_RANGE into the catch below, which now codes it INTERNAL too — so
+    // what this buys is no longer the CODE but the diagnosis: a stated size and limit,
+    // rather than a generic read failure the operator has to reproduce to understand.
     if (stats.size > MAX_SERVABLE_SIZE) {
       throw new ToolError(
         'INTERNAL',
@@ -217,11 +210,13 @@ export async function readImportFile(filePath: string): Promise<string> {
     // descriptor.
     return await readExactly(fh, stats.size);
   } catch (err) {
-    // The cap is a ToolError already shaped for the caller; anything else is an fs fault
-    // whose text must not leak (C6) and whose CODE depends on who owns it — a vanished file
-    // is the caller's, an EIO or a failed Buffer allocation is not.
+    // The cap and the non-regular-file refusal are ToolErrors already shaped for the caller.
+    // Anything else reaching here is a fault on an ALREADY-OPEN descriptor — an EIO, a
+    // failed Buffer allocation — which no `file_path` could have avoided, and whose text
+    // must not leak (C6). Same reasoning as the open() site: past confinement, nothing here
+    // is the argument's fault.
     if (err instanceof ToolError) throw err;
-    throw unreadable(err);
+    throw new ToolError('INTERNAL', 'the import file could not be read', undefined, err);
   } finally {
     // Swallowed deliberately: a rejection from a `finally` REPLACES the outcome of the
     // try/catch, so an EIO on close would turn a fully-read CSV into a raw fs error, and

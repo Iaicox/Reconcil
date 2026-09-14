@@ -158,42 +158,43 @@ describe('UsageError', () => {
     expect(c?.hint).not.toMatch(/gate|job|suite/);
   });
 
-  it('holds EVERY classified hint to the no-command rule, not just the ones with a status', async () => {
-    // Two earlier versions of this test were leaky in the same direction. The first checked
-    // three words on ONE hint, so "secret", "branch" and "under test" survived the round
-    // that was meant to remove them. The second built its inputs only from `apiError(...)`,
-    // which cannot express the two branches that classify with NO http status — and one of
-    // those is the connection-fault hint, whose "the code under test" was one of the five
-    // phrases that round claimed to have fixed. Reverting it was undetected.
+  it('holds EVERY classified hint to the no-command rule — swept, not enumerated', async () => {
+    // Three versions of this test have been leaky, each in a way the previous fix missed.
+    // It checked three words on ONE hint; then it built inputs only from `apiError(...)`,
+    // missing the two branches that classify with no http status — one of which was the
+    // hint the same round claimed to have fixed. The third version added a
+    // `toHaveLength(10)` and a comment saying that made a new branch fail here. It could
+    // not: the assertion compared a local array against a literal, with no link to the
+    // source, so adding `case 408:` with every banned word in it left 89/89 green.
+    //
+    // So: SWEEP the status space rather than list the statuses. Any status this classifier
+    // decides to answer gets its words checked, including one added later by someone who
+    // never opens this file. The type-keyed branches still have to be listed — nothing can
+    // enumerate them — but they are four, and they are named right here.
     const Anthropic = (await import('@anthropic-ai/sdk')).default;
-    const classified: unknown[] = [
+    const byType: unknown[] = [
       new UsageError('bad flag'),
       new DatasetError('duplicate id'),
       new Anthropic.APIConnectionError({ message: 'socket hang up' }),
       new Anthropic.APIUserAbortError(),
-      apiError(400, 'invalid_request_error', 'Your credit balance is too low'),
-      apiError(401, 'authentication_error', 'invalid x-api-key'),
-      apiError(403, 'permission_error', 'not allowed'),
-      apiError(429, 'rate_limit_error', 'slow down'),
-      apiError(502, 'api_error', 'bad gateway'),
-      apiError(529, 'overloaded_error', 'overloaded'),
     ];
-    // Every non-null branch of classifyUnrunnable is represented above. Asserted as a COUNT
-    // so that adding a branch without adding an input here fails, rather than quietly
-    // leaving the new hint unchecked — which is the exact hole this test has had twice.
-    expect(classified).toHaveLength(10);
+    const byStatus: unknown[] = [];
+    for (let status = 400; status < 600; status++) {
+      byStatus.push(apiError(status, 'api_error', 'Your credit balance is too low'));
+    }
 
-    for (const err of classified) {
+    let checked = 0;
+    for (const err of [...byType, ...byStatus]) {
       const c = classifyUnrunnable(err);
-      expect(c, String(err)).not.toBeNull();
+      if (c === null) continue; // not every status is cannot-run; that is a separate rule
+      checked += 1;
       // `job`/`gate`/`suite`/`branch` name a CI shape repl does not have; `secret` names
       // where CI keeps the key, not where an operator does; `under test` names a test run.
       //
       // Matched as WORDS, not substrings: the 502 reason legitimately says "gateway", which
       // contains "gate". Inflections are enumerated rather than stemmed — "secrets" is the
       // word GitHub itself uses, and an exact-word check let every plural through.
-      const text = `${c!.reason} ${c!.hint}`.toLowerCase();
-      const words = new Set(text.split(/[^a-z]+/));
+      const words = new Set(`${c.reason} ${c.hint}`.toLowerCase().split(/[^a-z]+/));
       const banned = [
         'gate', 'gates', 'gated', 'gating',
         'job', 'jobs',
@@ -204,9 +205,14 @@ describe('UsageError', () => {
       for (const word of banned) {
         expect(words.has(word), `${String(err)} :: ${word}`).toBe(false);
       }
-      // Non-letters collapsed to single spaces first, so "under-test" is caught too.
-      expect(` ${[...text.split(/[^a-z]+/)].join(' ')} `, String(err)).not.toContain(' under test ');
+      // Non-letters collapsed to single spaces, so "under-test" is caught as well.
+      const collapsed = ` ${`${c.reason} ${c.hint}`.toLowerCase().split(/[^a-z]+/).join(' ')} `;
+      expect(collapsed, String(err)).not.toContain(' under test ');
     }
+    // A floor, not an exact count: the point is that the sweep actually reached the
+    // classifier's answers rather than skipping every one of them. An exact number here
+    // would be the same mechanical literal the last version mistook for a guard.
+    expect(checked).toBeGreaterThanOrEqual(10);
   });
 
   it('does not swallow an ordinary Error with the same message', () => {

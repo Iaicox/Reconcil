@@ -54,10 +54,25 @@ describe('realpathWithinBase — the post-mkdir look on the write path', () => {
   });
 
   it('rejects a directory that does not exist — removed underneath us is not writable', async () => {
-    // The discriminant the dropped wrapper used to collapse: 'unresolvable' (removed
+    // The discriminant the dropped wrapper used to collapse: 'missing' (removed
     // underneath us) is a different fact from 'escaped' (below), and only one of them means
     // somebody tried something.
-    expect(await realpathWithinBase(base, join(base, 'never-created'))).toEqual({ ok: false, reason: 'unresolvable' });
+    expect(await realpathWithinBase(base, join(base, 'never-created'))).toEqual({ ok: false, reason: 'missing' });
+  });
+
+  it('separates "not there" from "would not say" — they are not the same answer', async () => {
+    // Both used to be 'unresolvable', and the import edge turned that into INVALID_INPUT:
+    // a permission-denied directory under the import root was reported to the model as a
+    // bad path, advice to try another one when no path would have worked. A NUL byte is
+    // the one non-ENOENT realpath failure that can be staged on all three platforms
+    // (`path.resolve` passes it through; `realpath` rejects it with ERR_INVALID_ARG_VALUE),
+    // and it stands in for the EACCES/EIO/ELOOP cases that cannot be.
+    const bad = await realpathWithinBase(base, join(base, 'a\0b'));
+    expect(bad.ok).toBe(false);
+    expect(bad).toMatchObject({ reason: 'unreadable' });
+    // The error is carried, not swallowed: the caller needs it for a server-side log, and
+    // `reason` alone cannot express which fault it was.
+    expect((bad as { cause?: { code?: unknown } }).cause?.code).toBe('ERR_INVALID_ARG_VALUE');
   });
 
   it('rejects a sibling whose path merely shares the base prefix', async () => {

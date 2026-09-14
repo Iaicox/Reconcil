@@ -94,10 +94,10 @@ describe('--runs beside --smoke', () => {
     // replaced NaN with 1 and reported nothing. The guard against a vacuous zero-run gate
     // was disabled by the flag standing next to it.
     // One alternative, not `/positive integer|needs a value/`. Every value here reaches the
-    // integer guard, so an alternation would have stayed green if that guard stopped firing
-    // — the second branch could never have been the one that matched. ('' used to be in
-    // this list and used to reach the same guard as 0; it is refused earlier now, and is
-    // asserted separately below rather than hidden inside an alternation.)
+    // integer guard and only that guard, so the second branch of an alternation could never
+    // be the one that matched — it would sit there reading as coverage for a path these
+    // inputs cannot take. ('' used to be in this list; it is refused earlier now, by
+    // value(), and is asserted separately below rather than hidden inside an alternation.)
     for (const bad of ['abc', '0', '-1', '1.5']) {
       expect(() => parseArgs(['--smoke', '--runs', bad]), bad).toThrow(/positive integer/);
     }

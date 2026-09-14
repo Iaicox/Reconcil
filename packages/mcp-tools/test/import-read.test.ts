@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ToolError } from '../src/errors.js';
-import { isCallerOwnedFsFault, readExactly, readImportFile } from '../src/recon/import-fs.js';
+import { readExactly, readImportFile } from '../src/recon/import-fs.js';
 
 import type { ByteReader } from '../src/recon/import-fs.js';
 
@@ -194,37 +194,53 @@ describe('readImportFile — a large cap is a configuration, not a fault', () =>
 
 describe('readImportFile — who owns a failed read', () => {
   // The ownership rule (ADR-012 d7, 02-mcp-contracts.md §6.4) is stated as a principle, so
-  // it has to hold for the ordinary fs faults too — not only for the mid-read mutation the
-  // round that wrote it changed. Both sites collapsed every errno into INVALID_INPUT.
+  // it has to hold for the ordinary fs faults too, not only for the mid-read mutation.
+  //
+  // Driven END TO END through readImportFile, not against an exported predicate. The
+  // previous version tested a classifier directly and left the WIRING — that the read path
+  // consults it at all — with no executing test: restoring the old collapse-everything
+  // behaviour kept the whole suite green. A predicate nobody calls is not a guard.
   it('a path that is not there belongs to the caller — INVALID_INPUT', async () => {
-    // The MESSAGE too, not only the code: three separate branches answer INVALID_INPUT
-    // here (unset RECONCIL_IMPORT_DIR, unresolvable, unreadable), so a code-only assertion
-    // would go green even if the file-level beforeEach never ran — the opposite of what
-    // this measures. It lands on the realpath branch, NOT on open(): a missing file fails
-    // to resolve before a descriptor is ever asked for. Written the other way round first,
-    // and the expected message was simply wrong.
+    // The MESSAGE too, not only the code: three branches answer INVALID_INPUT here (unset
+    // RECONCIL_IMPORT_DIR, missing, escaped), so a code-only assertion would go green even
+    // if the file-level beforeEach never ran — the opposite of what this measures. It lands
+    // on the realpath branch, NOT on open(): a missing file fails to resolve before a
+    // descriptor is ever asked for.
     await expect(readImportFile('no-such-file.csv')).rejects.toMatchObject({
       code: 'INVALID_INPUT',
       message: 'file_path could not be resolved in the import directory',
     });
   });
 
-  it('classifies the errno, not the fact that a read failed', () => {
-    // Exported for the same reason readExactly is: a real EACCES, EIO or EMFILE cannot be
-    // staged portably from a test — and a missing file does not reach open() at all, it
-    // fails at realpath — so the classifier is driven directly. A guard no test can execute
-    // is a guard nobody knows still works.
-    expect(isCallerOwnedFsFault({ code: 'ENOENT' })).toBe(true);
-    expect(isCallerOwnedFsFault({ code: 'ENOTDIR' })).toBe(true);
-    // The operator's storage and the process's own limits. Answering INVALID_INPUT here
-    // tells the model to try a different path when no path would have worked.
-    expect(isCallerOwnedFsFault({ code: 'EACCES' })).toBe(false);
-    expect(isCallerOwnedFsFault({ code: 'EIO' })).toBe(false);
-    expect(isCallerOwnedFsFault({ code: 'EMFILE' })).toBe(false);
-    // An unrecognised or absent code is the case where blaming the argument is a guess.
-    expect(isCallerOwnedFsFault({ code: 'EWHATEVER' })).toBe(false);
-    expect(isCallerOwnedFsFault(new Error('no code at all'))).toBe(false);
-    expect(isCallerOwnedFsFault(undefined)).toBe(false);
-    expect(isCallerOwnedFsFault({ code: 42 })).toBe(false);
+  it('a path the filesystem will not resolve for any other reason is INTERNAL', async () => {
+    // A NUL byte: `path.resolve` passes it through, so it survives the pure prefix check and
+    // reaches `realpath`, which rejects it with ERR_INVALID_ARG_VALUE — not a missing-file
+    // code. That is the one non-ENOENT resolve failure that can be staged on Linux, macOS
+    // and Windows alike, and it stands in for the EACCES/EIO/ELOOP cases that cannot.
+    //
+    // Before the split, this and every permission-denied directory under the import root
+    // came back as INVALID_INPUT: "your file_path is wrong", for a path that may be
+    // perfectly good on a filesystem that would not say.
+    const err = await readImportFile('a\0b.csv').then(
+      () => { throw new Error('expected a rejection'); },
+      (e: unknown) => e as ToolError,
+    );
+    expect(err.code).toBe('INTERNAL');
+    // Generic on the wire (C6); the real fault rides the cause, server-side only.
+    expect(err.message).toBe('the import file could not be read');
+    expect(err.message).not.toContain('a\0b.csv');
+    expect((err.cause as { code?: unknown } | undefined)?.code).toBe('ERR_INVALID_ARG_VALUE');
+  });
+
+  it('a directory is refused on its stat, not on its open — the ordering still holds', async () => {
+    // `open(dir, 'r')` SUCCEEDS on all three platforms, so the non-regular-file guard is
+    // what refuses it, and it is the caller's argument being described. Asserted because
+    // the open() site is INTERNAL unconditionally now: if that guard ever moved after the
+    // read, a directory would start reporting as a server fault.
+    await mkdir(join(dir, 'a-directory'), { recursive: true });
+    await expect(readImportFile('a-directory')).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      message: 'file_path is not a regular file',
+    });
   });
 });

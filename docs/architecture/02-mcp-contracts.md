@@ -409,17 +409,23 @@ output: { inserted: number; skipped_duplicates: number;
 `RECONCIL_IMPORT_DIR`, never a location of its own, and — unlike the export root — this edge
 is FAIL-CLOSED, so with no `RECONCIL_IMPORT_DIR` configured `file_path` is refused outright.
 
-The error contract follows OWNERSHIP, the rule §6.5 and ADR-012 d7 state for `out_dir`:
+The error contract follows OWNERSHIP, the rule §6.5 and ADR-012 d7 state for `out_dir`, and
+the dividing line is CONFINEMENT: everything before it describes the supplied path,
+everything after it describes the filesystem.
 
-- `INVALID_INPUT` — the caller's to fix. A `..` traversal or an absolute path that escapes;
-  a path that does not resolve inside the directory; a non-regular file (FIFO, socket,
-  device); a file over the byte cap; and a read that fails with an errno naming the path
-  itself (`ENOENT`, `ENOTDIR`, `ENAMETOOLONG`, `EISDIR`, `EINVAL`).
-- `INTERNAL` — nobody's argument. A file mutated between its `stat` and its last byte (a
-  co-resident writer); a file larger than V8 can hold as a string; and any other fs fault —
-  `EACCES`, `EIO`, `EMFILE`, an unrecognised code — where the storage or the process, not
-  the path, is what failed. Blaming the argument here would suggest the one recovery that
-  cannot work: retrying with a different path.
+- `INVALID_INPUT` — the caller's to fix, and all of it decided at or before confinement. A
+  `..` traversal or an absolute path that escapes; a path that is simply not there
+  (`ENOENT`, `ENOTDIR`, `ENAMETOOLONG` from `realpath`); a path that resolves outside the
+  directory; a non-regular file (FIFO, socket, device — refused on its `stat`, because
+  `open` on a directory succeeds on every platform); a file over the byte cap.
+- `INTERNAL` — nobody's argument. `realpath` failing for any OTHER reason (`EACCES`, `EIO`,
+  `ELOOP`, or a non-errno): the path may be perfectly good and the filesystem will not say,
+  so "your `file_path` is wrong" is false and "try another path" is not a recovery. Then
+  everything past confinement: a file that vanishes between `realpath` and `open` (the
+  residual race in 09-known-gaps.md), one mutated between its `stat` and its last byte by a
+  co-resident writer, one larger than V8 can hold as a string, and any fault on the open
+  descriptor. Past confinement the argument has already been validated, so no errno there
+  can mean "the caller named something that is not there".
 - The single exception: an unset `RECONCIL_IMPORT_DIR` is `INVALID_INPUT` although the
   operator owns it, because the caller CAN act on it — the tool takes `content` as well, and
   inline CSV needs no import directory.
