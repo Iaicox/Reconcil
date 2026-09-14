@@ -43,8 +43,10 @@ describe('runMigrations', () => {
 // USDC/USDT/DAI/WETH ships verified = true as a db migration, so a fresh deployment
 // isn't empty everywhere (analytics tools default include_unverified=false, priceGaps
 // defaults verifiedOnly=true, etc.). Spot-check Ethereum's native + USDC rows — the
-// migration ran once already in the describe block above (same container, no truncation
-// in this file), so these assert on the real migration output, not a synthetic fixture.
+// describe below starts its OWN container and runs the migrations into it (the comment
+// here used to say "same container as the describe block above", which was never true —
+// read the beforeAll). Either way the point stands: these assert on the real migration
+// output, not a synthetic fixture, because nothing in this file truncates or seeds.
 describe('curated token seed (migration 0002)', () => {
   let container: StartedPostgreSqlContainer;
   let pool: Pool;

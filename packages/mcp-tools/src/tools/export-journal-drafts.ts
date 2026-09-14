@@ -17,8 +17,6 @@
  * correctly ships empty price/fx refs — only a volatile-token leg contributes them.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 
 import { exportJournalDraftsInput, exportJournalDraftsOutput, type ExportJournalDraftsOutput, type Warning } from '@reconcil/core';
 import { exportsTable } from '@reconcil/db';
@@ -31,7 +29,7 @@ import { hydrateFxRefs, hydratePriceRefs } from '../pricing-refs.js';
 import { selectRefs } from '../refs.js';
 import { ulid } from '../ulid.js';
 import { runWriteTool } from '../write-tx.js';
-import { baseDir } from './export-run.js';
+import { writeExportFiles } from './export-run.js';
 import { computeJournalData } from './journal-drafts-data.js';
 
 export const TOOL_NAME = 'export_journal_drafts';
@@ -91,14 +89,12 @@ export async function exportJournalDrafts(
   });
 
   // Materialize the single CSV under out_dir/<export_id>/ (the subdir isolates runs).
-  const dir = join(await baseDir(input.out_dir), exportId);
-  const filePath = join(dir, rendered.file.name);
-  try {
-    await mkdir(dir, { recursive: true });
-    await writeFile(filePath, rendered.file.content);
-  } catch (err) {
-    throw new ToolError('INTERNAL', `${TOOL_NAME} failed to write the journal file`, undefined, err);
-  }
+  // Through the SHARED writer, not a local mkdir+writeFile pair: this tool used to carry
+  // its own copy, so the confinement hardening (post-mkdir re-resolve, write through the
+  // resolved dir, `wx`) reached every export tool except this one — while the register
+  // claimed the write path was covered.
+  const { dir, files } = await writeExportFiles(TOOL_NAME, input.out_dir, exportId, [rendered.file]);
+  const filePath = files[0]!.path;
 
   // Validate the output BEFORE the DB write, so a contract violation can't leave an
   // orphan `done` exports row (the file already on disk is harmless). `balanced` is

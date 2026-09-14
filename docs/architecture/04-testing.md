@@ -122,6 +122,14 @@ reviewable diff, and `schema_version` discipline is enforced by CI comment).
     writes_allowed: [recon_suggest_matches]   # permitted route to the match id, not required
     must_cite: true
 
+- id: flow-002
+  face: A
+  question: "What was the net USDC flow (received minus sent) over the last quarter?"
+  setup: { fixture: smb-stables }
+  expect:
+    tools_any_of: [analytics_flows, analytics_stablecoin_movements]   # at least one, not all
+    must_cite: true
+
 - id: trace-001
   face: A
   prior_turns: ["What did this wallet spend on gas in June 2026?"]
@@ -169,8 +177,9 @@ session producer, so the hermetic `test` job needs no API key.
 
 **Graders — deterministic, no LLM in the gate:**
 
-- **G1 trajectory**: `tools_expected` ⊆ called tools; **no write tool** was called outside
-  `tools_expected ∪ writes_allowed`; and a `no_tools` case (the refusals) called nothing.
+- **G1 trajectory**: `tools_expected` ⊆ called tools; at least one of `tools_any_of` was
+  called; **no write tool** was called outside `tools_expected ∪ writes_allowed`; and a
+  `no_tools` case (the refusals) called nothing.
   There is deliberately **no allowlist**. It used to be exhaustive — every call had to be
   named in `tools_allowed` — which scored path conformance rather than correctness: on the
   live run of 2026-09-08 every "disallowed tool" failure was one extra *read*
@@ -181,6 +190,40 @@ session producer, so the hermetic `test` job needs no API key.
   registry's own `readOnlyHint` annotation rather than being restated per case — a newly
   registered write tool is covered the day it lands. `writes_allowed` names a write the
   case permits but does not require.
+
+  `tools_any_of` is the **disjunction** `tools_expected` cannot express: a set of tools of
+  which at least one must be called, for a question two tools answer equally well. It exists
+  because of one measured failure — on the 2026-09-08 run `flow-002` ("the net USDC flow
+  (received minus sent) over the last quarter") was answered through
+  `analytics_stablecoin_movements` rather than the `analytics_flows` the case demanded, with
+  a correct figure, a citation and the coverage caveat surfaced. G1 scored a miss for a
+  choice that was not wrong. This is the same class the allowlist removal addressed one level
+  down.
+
+  **The bar for using it is deliberately high**, because a case that accepts either tool no
+  longer tests tool selection at all. Broaden a case only when (a) a **graded run** produced
+  the alternative — never speculatively — and (b) **both tools compute the figure
+  server-side**. The pass over the other 29 cases that introduced the field found no second
+  case that clears it, and `core-30.test.ts` pins that list so growth is a decision rather
+  than drift:
+
+  | Considered | Verdict |
+  |---|---|
+  | `stable-001`, `stable-002` | **No** — the question names stablecoins outright, so the specialised tool *is* the expected answer, and no graded run has failed them. Broadening on suspicion would leave G1 unable to discriminate between the two tools anywhere. |
+  | `cp-002` | **No** — `analytics_list_events` could surface the rows, but the agent would have to sum them. Fails (b): the LLM never computes (P1). |
+  | `flow-003-self-transfer` | **No** — its gap is the missing two-wallet fixture, not the tool choice; broadening would blur what the case measures. |
+
+  **`tools_any_of` may name READ tools only** — the rule that makes the field safe, and the
+  reason it does not appear in the write ban above. G1 sees the SET, not which member the
+  agent chose, so a disjunction over writes would have to sanction every member: a case
+  written as `[recon_confirm_match, recon_reject_match]` would then pass for an agent that
+  confirmed a match and then rejected it. Reads are never banned, so restricting the field
+  removes the question rather than answering it badly. A case that genuinely needs
+  alternative *writes* needs a different notion, not this one.
+
+  Validation also rejects a set of one (that is a plain `tools_expected`), a repeated member,
+  overlap with `tools_expected` (satisfied by construction, so the field would only
+  describe), and combination with `no_tools`.
 - **G2 numeric**: every expected number appears in the final answer (decimal-normalized
   string comparison — exact, no tolerance: the tools are deterministic, so is the truth).
   **Anti-fabrication**: every number in the answer (regex-extracted, format-normalized)
@@ -228,8 +271,14 @@ G4 3/3, G5 2/2.** `flow-003-self-transfer` passes. `flow-002` still does not, bu
 different reason, which is the point of measuring rather than assuming: the agent now sees
 the wallet and answers the "net USDC flow" question with `analytics_stablecoin_movements`
 — *flows restricted to verified stablecoins* — where the case demands `analytics_flows`.
-Two tools legitimately answer that question and `tools_expected` cannot say so; that is now
-its own known-gaps entry, not a model failure. G2 read 2/3 on that run because of a grader
+Two tools legitimately answer that question and `tools_expected` could not say so. **That is
+fixed, not deferred: `tools_any_of` (§5, G1) now carries the disjunction, and the case
+accepts either tool.** Note the fix is a grader fix — nothing was re-measured live, because
+`flow-002` is not in the smoke subset (`SMOKE_ID_LIST`, `apps/cli/src/evals/smoke.ts`) and
+`evals-full` is the only job that spends API budget.
+What is proven is the grading logic (unit tests over both members, the write-sanction path,
+the refines) and that the dataset still validates; the next full 30×3 is what will show the
+case scoring green in a real run. G2 read 2/3 on that run because of a grader
 defect the same run exposed — "the **ERC-20** stream is still queued" scored as a
 fabricated −20 — fixed immediately after and confirmed green by `evals-smoke`, which
 carries `cover-001`.
@@ -248,13 +297,55 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 | `test` | PR + main | unit + property + contract |
 | `schema-parity` | PR + main | `scripts/check-schema-parity.sh`: drizzle migrations vs `schema.sql` applied to two fresh DBs (disposable postgres:16), `pg_dump --schema-only` diff must be empty |
 | `integration` | PR + main | Postgres service container, fixture ingest, ledger assertions |
-| `evals-smoke` | PR (repo secrets only, skipped on forks) | 6-case subset (`SMOKE_IDS`), 1 run — catches contract drift cheaply |
+| `evals-smoke` | PR (repo secrets only, skipped on forks) | 6-case subset (`SMOKE_ID_LIST`), 1 run — catches contract drift cheaply |
 | `evals-full` | manual (`workflow_dispatch`) / pre-demo | 30 cases × 3 runs, publishes scorecard artifact |
 | `e2e-smoke` | weekly cron + manual (`workflow_dispatch`) / pre-release | real compose stack up, stdio MCP client, 3 tool calls, assert envelopes — proves P10 self-host boots (`pnpm smoke:compose`, `apps/mcp-server/src/compose-smoke.ts`). Off the per-PR path (cost), but ON the weekly canary: it needs no API key, and before 2026-09-07 it had never executed once — the first dispatch found the documented `cp .env.example .env && docker compose up` path already broken |
 
 Secrets policy: `ANTHROPIC_API_KEY` only in `evals-*`; provider keys never needed in CI
 (fixtures only). An `evals-preflight` job resolves secret presence into an output the eval
 jobs gate on, so a missing key makes them **skip** (grey), never fail red.
+
+**Exit codes — "the gate failed" and "the gate could not run" are different answers.** The
+runner exits **1** when the suite ran and missed the gate, and **2** when it could not run at
+all. Every route to 2, because the exit code is the contract a CI reader applies: the account
+out of credit, a rejected or unpermitted key, rate limiting, an overloaded API, a gateway
+5xx, no response at all (connection refused, DNS, timeout), a bad invocation (an unknown
+flag, `--runs 0`, an unknown `--cases` id), a missing `ANTHROPIC_API_KEY`, an inconsistent
+dataset or smoke id list, and a deliberate abort. Both are red — mapping an unrunnable gate
+to a pass, or to a silent skip, is how a suite stops running and nobody notices. It prints
+one line and a hint instead of the error object.
+
+A 2 does NOT mean "read no further". It splits three ways, and the hint is what says which:
+
+- **The environment** — credit, key, limits, gateway, network, abort. No amount of reading
+  the diff will help; run it again, or fix the key.
+- **The invocation** — an unknown flag, `--runs 0`, `--cases` with an id the dataset does
+  not have. The command line is wrong; the branch is not implicated. (`UsageError`)
+- **The dataset** — the suite could not be ASSEMBLED: a smoke id that no longer resolves, a
+  duplicate id in `core-30.yaml`, a selection that would run zero cases. This one IS in the
+  diff, so 1 looks like the intuitive code — but 1 asserts the gate RAN and graded
+  something, and here it never started. (`DatasetError`)
+
+The last two are separated in code (`evals/usage-error.ts`) because they exit the same way
+and send the reader to opposite places. In the fourteenth round a dataset defect was
+reported as a `UsageError` — "fix the invocation", for a renamed case id nobody could fix
+from the command line; before that round the same defects were plain `Error`s and exited 1.
+
+`repl` shares all of this. It exits **2** for the same class of cause (no `DATABASE_URL`, no
+`ANTHROPIC_API_KEY`, a bad flag) and prints the same two lines, labelled `repl` rather than
+`eval gate`. That label is the only per-command text in the pair: every remedy
+`classifyUnrunnable` returns is written to name no command, because `repl` has no gate, no
+job and no cases — a call site that builds its own may name one, since it knows which it is.
+
+The classification is deliberately narrow and asymmetric (`evals/runnability.ts`): a misread
+gate failure gets dismissed as "not my problem", while a misread environment fault merely
+gets investigated, so a `400` counts only for the billing shape — every other `400` is a
+request this code built wrong, which is exactly what the gate is for — and a `500` is not
+classified at all.
+
+This exists because of a real run: on 2026-09-13 `evals-smoke` went red with a 40-line
+`BadRequestError` dump whose content was one sentence, "Your credit balance is too low".
+Nothing in the CI summary separated that from a model regression on the branch under review.
 
 Gate cadence — deliberate: the live gate runs **pre-merge on the PR** (`evals-smoke`) and
 **on demand** (`evals-full`), **not** on push to `main` and **not** nightly. So the

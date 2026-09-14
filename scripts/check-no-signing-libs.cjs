@@ -18,21 +18,37 @@
 const { readFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 
-const config = require('../.dependency-cruiser.cjs');
-const rule = config.forbidden.find((r) => r.name === 'no-signing-libraries');
-if (!rule) {
-  console.error('could not find the no-signing-libraries rule in .dependency-cruiser.cjs');
-  process.exit(2);
+/**
+ * Derive the banned-package pattern from the cruiser rule, so the two can never disagree.
+ *
+ * LAZY, and it THROWS rather than exiting. It used to run at module scope and call
+ * `process.exit(2)` on a malformed config — which meant `require()`ing this file from its
+ * own test suite would abort the whole node:test run at import, with exit 2 and no test
+ * output at all. It was also the same fire-before-flush hazard main() documents below:
+ * `console.error` then `process.exit` on a CI pipe can lose the message. Throwing lets the
+ * caller decide, and main() maps it to the "cannot run" code with the text intact.
+ */
+function bannedPattern() {
+  const config = require('../.dependency-cruiser.cjs');
+  const rule = config.forbidden.find((r) => r.name === 'no-signing-libraries');
+  if (!rule) {
+    throw new Error('could not find the no-signing-libraries rule in .dependency-cruiser.cjs');
+  }
+  // Reuse the rule's own regex: `node_modules/(<alternation>)(/|$)` -> the inner alternation.
+  const pathPattern = Array.isArray(rule.to.path) ? rule.to.path[0] : rule.to.path;
+  const inner = /^node_modules\/\((.+)\)\(\/\|\$\)$/.exec(pathPattern);
+  if (!inner) {
+    throw new Error(`unexpected no-signing-libraries path shape: ${String(pathPattern)}`);
+  }
+  return new RegExp(`^(?:${inner[1]})$`);
 }
 
-// Reuse the rule's own regex: `node_modules/(<alternation>)(/|$)` → the inner alternation.
-const pathPattern = Array.isArray(rule.to.path) ? rule.to.path[0] : rule.to.path;
-const inner = /^node_modules\/\((.+)\)\(\/\|\$\)$/.exec(pathPattern);
-if (!inner) {
-  console.error('unexpected no-signing-libraries path shape:', pathPattern);
-  process.exit(2);
+/** Memoised, so the parsers keep one compiled pattern instead of re-reading the config. */
+let bannedCache;
+function banned() {
+  bannedCache ??= bannedPattern();
+  return bannedCache;
 }
-const banned = new RegExp(`^(?:${inner[1]})$`);
 
 /**
  * Splits a `name@spec` string (a pnpm packages:/snapshots: key with the quotes already
@@ -72,11 +88,11 @@ function findOffendersInPnpmLock(text) {
     const split = splitNameAtSpec(keyMatch[1]);
     if (!split) continue; // bare name, no spec — an importers/catalogs declaration, not a resolution
     const { name, spec } = split;
-    if (banned.test(name)) offenders.add(name);
+    if (banned().test(name)) offenders.add(name);
     if (spec.startsWith('npm:')) {
       const targetSplit = splitNameAtSpec(spec.slice('npm:'.length));
       const targetName = targetSplit ? targetSplit.name : spec.slice('npm:'.length);
-      if (banned.test(targetName)) offenders.add(targetName);
+      if (banned().test(targetName)) offenders.add(targetName);
     }
   }
   return offenders;
@@ -110,8 +126,8 @@ function findOffendersInNpmLock(text) {
     const idx = key.lastIndexOf(marker);
     if (idx === -1) continue; // the root project's own manifest entry (key === '')
     const keyName = key.slice(idx + marker.length);
-    if (banned.test(keyName)) offenders.add(keyName);
-    if (entry && typeof entry.name === 'string' && banned.test(entry.name)) {
+    if (banned().test(keyName)) offenders.add(keyName);
+    if (entry && typeof entry.name === 'string' && banned().test(entry.name)) {
       offenders.add(entry.name);
     }
   }
@@ -135,19 +151,46 @@ const lockfiles = [
   },
 ];
 
+/**
+ * Decide the exit code from what actually happened, rather than from whichever condition
+ * came first:
+ *
+ *   1 — the guard RAN and found a banned package. Actionable: remove the dependency.
+ *   2 — the guard COULD NOT RUN over every lockfile. Actionable: fix the environment.
+ *   0 — clean.
+ *
+ * A violation outranks an incomplete scan, and the two used to be conflated: a violation in
+ * pnpm-lock.yaml followed by an unreadable site/package-lock.json exited 2, reporting "I
+ * could not check" over a banned package the guard had already printed. CI failed either
+ * way — both are non-zero, so there was never a false green — but the reason it gives is
+ * the whole value of a guard that runs on every PR.
+ *
+ * It also no longer stops at the first unreadable lockfile: scanning the rest costs nothing
+ * and one run should report everything it can see.
+ */
 function main() {
+  // Resolved HERE, before the loop. Making it lazy moved the throw inside
+  // findOffendersIn*Lock, which run inside the per-lockfile `catch` below — so a malformed
+  // .dependency-cruiser.cjs was reported as "pnpm-lock.yaml: could not find the
+  // no-signing-libraries rule", blaming the lockfile for a config defect and repeating it
+  // once per lockfile, while the entrypoint's own catch for exactly this case never ran.
+  banned();
+
   let violated = false;
+  let cannotRun = false;
   for (const { path, label, parse } of lockfiles) {
     if (!existsSync(path)) {
       console.error(`ADR-011 guard cannot run — missing lockfile: ${label}`);
-      process.exit(2);
+      cannotRun = true;
+      continue;
     }
     let offenders;
     try {
       offenders = parse(readFileSync(path, 'utf8'));
     } catch (err) {
       console.error(`ADR-011 guard cannot run — ${label}: ${err.message}`);
-      process.exit(2);
+      cannotRun = true;
+      continue;
     }
     if (offenders.size > 0) {
       violated = true;
@@ -156,10 +199,33 @@ function main() {
     }
   }
 
-  if (violated) process.exit(1);
+  if (violated) {
+    if (cannotRun) console.error('(note: at least one lockfile could not be scanned — the list above may be incomplete)');
+    // `process.exitCode`, not `process.exit()`. In CI stderr is a pipe, so on POSIX writes
+    // are asynchronous and `process.exit()` calls reallyExit without draining libuv's queue
+    // — the tail of the violation list, including the partial-scan note above, can be lost.
+    // That would leave exactly the ambiguity this exit-code split exists to remove. Nothing
+    // runs after main(), so setting the code and returning terminates just as promptly.
+    process.exitCode = 1;
+    return;
+  }
+  if (cannotRun) {
+    process.exitCode = 2;
+    return;
+  }
   console.log('supply-chain ok: no signing/key-material packages in the dependency tree.');
 }
 
-if (require.main === module) main();
+if (require.main === module) {
+  try {
+    main();
+  } catch (err) {
+    // bannedPattern() throws when the cruiser config cannot be read. That is "the guard
+    // could not run", not "the guard found a violation" — same split main() makes, applied
+    // to the one failure that happens before main() can make it.
+    console.error(`ADR-011 guard cannot run — ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 2;
+  }
+}
 
 module.exports = { banned, findOffendersInPnpmLock, findOffendersInNpmLock, splitNameAtSpec };

@@ -33,7 +33,7 @@ import type { ToolContext } from '../context.js';
 /** Records still carrying an outstanding balance (mutable array for drizzle inference). */
 const OPEN_STATES: ('open' | 'partially_matched')[] = ['open', 'partially_matched'];
 
-/** The contract's strict 5-key `records` shape (§6.4) — see `mapStatusCounts` (C7). */
+/** The contract's strict 5-key `records` shape (§6.4) — see `mapStatusCounts`. */
 const ZERO_RECORD_COUNTS: ReconStatusResult['records'] = {
   open: 0, partially_matched: 0, matched: 0, overpaid: 0, void: 0,
 };
@@ -202,7 +202,7 @@ function confirmedFiat(tenantId: string) {
 }
 
 /**
- * Map raw per-status counts into the contract's strict 5-key `records` shape (C7): a
+ * Map raw per-status counts into the contract's strict 5-key `records` shape (§6.4): a
  * status outside the current 5-value contract enum is skipped rather than injected as an
  * extra key, which would fail `reconStatusOutput`'s `.strict()` parse and turn this read
  * tool INTERNAL. The DB `CHECK` on `external_records.status` makes this unreachable
@@ -213,7 +213,12 @@ function confirmedFiat(tenantId: string) {
 export function mapStatusCounts(rows: { status: string; count: number }[]): ReconStatusResult['records'] {
   const records: ReconStatusResult['records'] = { ...ZERO_RECORD_COUNTS };
   for (const r of rows) {
-    if (r.status in records) {
+    // Object.hasOwn, not `in`: `in` walks the prototype chain, so a status column reading
+    // "toString" or "constructor" would pass the guard and then write a number over the
+    // key. The status values are a DB enum today, which is why this was never reachable —
+    // but the guard exists to make the 5-key contract shape (§6.4) true by construction, and
+    // a guard that can be satisfied by Object.prototype does not do that.
+    if (Object.hasOwn(records, r.status)) {
       (records as Record<string, number>)[r.status] = r.count;
     }
   }

@@ -54,8 +54,12 @@ describe('buildHttpApp — health + bearer gate (hermetic, via inject)', () => {
   });
 });
 
-/** Minimal fake ServerResponse: only the members handleHijackedTransport touches. */
-function fakeRes(headersSent: boolean): {
+/** Minimal fake ServerResponse: only the members handleHijackedTransport touches.
+ *  `writableEnded`/`destroyed` default false — a response still in flight. */
+function fakeRes(
+  headersSent: boolean,
+  state: { writableEnded?: boolean; destroyed?: boolean } = {},
+): {
   res: ServerResponse;
   writeHead: ReturnType<typeof vi.fn>;
   end: ReturnType<typeof vi.fn>;
@@ -64,7 +68,15 @@ function fakeRes(headersSent: boolean): {
   const writeHead = vi.fn();
   const end = vi.fn();
   const destroy = vi.fn();
-  return { res: { headersSent, writeHead, end, destroy } as unknown as ServerResponse, writeHead, end, destroy };
+  const res = {
+    headersSent,
+    writableEnded: state.writableEnded ?? false,
+    destroyed: state.destroyed ?? false,
+    writeHead,
+    end,
+    destroy,
+  } as unknown as ServerResponse;
+  return { res, writeHead, end, destroy };
 }
 
 const fakeReq = {} as unknown as IncomingMessage;
@@ -97,6 +109,30 @@ describe('handleHijackedTransport — H14 error path after hijack', () => {
     expect(end).not.toHaveBeenCalled();
   });
 
+  it('does not RST a response that already completed — the reply was delivered', async () => {
+    // The race: handleRequest rejects, but the response finished between the headersSent
+    // check and the destroy() call. Destroying then sends an RST for a reply the client
+    // already has in full, turning a delivered answer into a transport error on their side.
+    // Nothing left to write and nothing to retract — the only correct move is to do nothing.
+    const { res, writeHead, end, destroy } = fakeRes(true, { writableEnded: true });
+    const transport = { handleRequest: () => Promise.reject(new Error('boom after the reply landed')) };
+
+    await handleHijackedTransport(transport, fakeReq, res, undefined, silentLogger);
+
+    expect(destroy).not.toHaveBeenCalled();
+    expect(writeHead).not.toHaveBeenCalled();
+    expect(end).not.toHaveBeenCalled();
+  });
+
+  it('does not destroy an already-destroyed socket', async () => {
+    const { res, destroy } = fakeRes(true, { destroyed: true });
+    const transport = { handleRequest: () => Promise.reject(new Error('boom')) };
+
+    await handleHijackedTransport(transport, fakeReq, res, undefined, silentLogger);
+
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it('a resolving handleRequest is a no-op (nothing extra written)', async () => {
     const { res, writeHead, end, destroy } = fakeRes(false);
     const transport = { handleRequest: () => Promise.resolve() };
@@ -110,7 +146,7 @@ describe('handleHijackedTransport — H14 error path after hijack', () => {
 });
 
 describe('buildHttpApp — DNS-rebinding Host validation (minor, defense-in-depth)', () => {
-  function appWithHosts(allowedHosts: string[]) {
+  function appWithHosts(allowedHosts: [string, ...string[]]) {
     return buildHttpApp({
       db: {} as unknown as Db,
       logger: silentLogger,
@@ -118,6 +154,34 @@ describe('buildHttpApp — DNS-rebinding Host validation (minor, defense-in-dept
       allowedHosts,
     });
   }
+
+  it('an EXPLICIT empty allowedHosts is refused, not silently replaced', async () => {
+    // The SDK guards its Host check with `allowedHosts.length > 0`, so an empty list turns
+    // DNS-rebinding protection OFF rather than making it strict — fail-open and invisible:
+    // every request simply succeeds. It is now a COMPILE error on HttpDeps.allowedHosts
+    // (a non-empty tuple), and the ts-expect-error below is the assertion that it is; the
+    // runtime throw is the backstop for a JS caller the compiler never saw.
+    // @ts-expect-error — an empty allowedHosts must not typecheck
+    await expect(appWithHosts([])).rejects.toThrow(/at least one non-empty host/i);
+  });
+
+  it('a blank entry AMONG real hosts is dropped, not fatal — one policy with the env path', async () => {
+    // config.ts filters blanks out of RECONCIL_ALLOWED_HOSTS, so the seam must too:
+    // 'a.example, ,b.example' used to be valid as configuration and fatal as an argument.
+    const app = await appWithHosts(['good.example:8484', ' ']);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer good', host: 'evil.example:8484' },
+      payload: rpc,
+    });
+    expect(res.json<{ error?: { message?: string } }>().error?.message).toContain('Invalid Host header');
+    await app.close();
+  });
+
+  it('a blank allowedHosts entry is refused too — it can never match a Host header', async () => {
+    await expect(appWithHosts([' '])).rejects.toThrow(/non-empty host/i);
+  });
 
   it('mismatched Host header is rejected before reaching protocol logic', async () => {
     const app = await appWithHosts(['good.example:8484']);

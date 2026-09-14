@@ -10,7 +10,11 @@ silent drift. Each entry states what it is, why it was deferred, what would trig
 it, and exactly where it lives.
 
 Source of truth for provenance: `.superpowers/sdd/logical-stargazing-clover/progress.md`
-(the execution ledger for the arc). Entries tagged *(sweep)* were not on that ledger —
+(the execution ledger for the arc) — **a local working-copy artifact, not in version
+control**: `.superpowers/sdd/.gitignore` is a single `*`, so `git ls-files .superpowers`
+returns nothing and a fresh clone gets this register without the ledger it cites. The
+derivation in "Reconciling the count" below was verified against that ledger when written
+and is the part a reader can actually check. Entries tagged *(sweep)* were not on that ledger —
 they surfaced while cross-checking ADRs and contract docs against shipped behavior for
 this same doc-sync slice, and are recorded here because they are exactly the kind of
 decision this register exists to hold. This document does not restate ADR rationale —
@@ -53,22 +57,6 @@ internal-transfers stream goes to production traffic. Where:
 `packages/ingestion/src/providers/etherscan-v2.ts` (`internalRow`, on
 `feat/internal-transfers`). *(Task 7, `feat/internal-transfers`)*
 
-**`compareTraceIds` has an inconsistent comparator for mixed numeric/non-numeric trace
-labels.** Why deferred: unreachable today — Etherscan and Blockscout both send one
-consistent label shape per response; the mixed case has no known trigger. Trigger: a
-provider that returns mixed numeric/string trace labels within one page, or a new provider
-integration. Where: `packages/ingestion/src/normalize.ts` (`compareTraceIds`, on
-`feat/internal-transfers`). *(Task 7, `feat/internal-transfers`)*
-
-**`sentinelRank.get(...) ?? 0` silently defaults instead of throwing.** A lookup miss
-should be impossible by construction (every arrival is ranked before lookup) but silently
-returns `0` — a real slot collision — rather than failing loudly. Why deferred: judged
-correct-by-inspection, not proven by a test; not worth blocking the internal-transfers
-slice for a defensive assertion. Trigger: fold into the same hardening pass as the zod
-union item above; add the throw once the invariant has an owning test. Where:
-`packages/ingestion/src/normalize.ts` (`sentinelRank`, on `feat/internal-transfers`).
-*(Task 7, `feat/internal-transfers`)*
-
 **Availability-asymmetry sentence in `03-ingestion.md` §4 goes stale once internal
 transfers wire up.** Why deferred: `feat/internal-transfers` already rewrites large parts
 of that file; this one sentence was left as a known follow-up rather than block the
@@ -107,6 +95,89 @@ alongside the `status='live'` gap above but exercising a different code path. Tr
 same as above — pin alongside the next unrelated edit to that logic. Where:
 `apps/worker/src/main.ts` (`getCheckpointBlock`). *(Task 12, `fix/worker-queues`)*
 
+**`compareTraceIds` changed, and the sentinel it derives is half an idempotency key.** The
+comparator was fixed on 2026-09-13 (it cycled: `"9" < "10" < "1a" < "9"`, and two distinct
+labels could tie and hand the ordering to arrival order). Its output becomes the
+`log_index` sentinel `-(1000 + n)` on every internal transfer, which is part of
+`UNIQUE (chain_id, tx_hash, log_index, token_id)` — so for any tx whose trace labels order
+differently under the new rule, a re-ingest derives a *different* sentinel, `ON CONFLICT DO
+NOTHING` stops matching, and the same value move is inserted twice into an append-only
+table with no rollback path. Ingestion does re-serve rows: it re-fetches the overlap-by-one
+boundary block, and a provider failover can re-serve a window.
+
+Why this was accepted rather than migrated, and what now guards it: the label shapes whose
+ordering actually moved are **leading zeros** (`007` vs `7`), **non-decimal notations**
+(`0x10`, `1e3`), an empty segment, and a label REPEATED within one tx — and none of them
+occurs. Every trace label recorded anywhere in this repo is plain digits and underscores
+(`0`, `1`, `10`, `0_1`, `0_2`, `0_10`, `0_1_2`), for which old and new agree exactly. That
+was an argument about fixtures, so it is now also an invariant in code: `normalize()`
+takes the label-ordering path only when every label in the group is a plain decimal path
+(`isDecimalTracePath`) AND the labels are distinct. Any other shape — including one a
+future provider adapter might invent — falls to `compareTraceTuple`, which orders by
+from/to/value and so does not depend on how a provider chose to name its traces.
+
+The distinctness half is a behaviour change of its own, and in the same direction: a group
+with two traces labelled alike previously took the label path, tied, and fell to ARRIVAL
+order — the one thing the sentinel must never be a function of. It now takes the tuple, so
+for that shape the derived sentinel differs from what a pre-change run would have stored.
+Same migration question as the rest of this entry, same answer: the shape appears in no
+recorded fixture, and there is no deployment holding rows to disagree with. ADR-005 d2
+carries the condition. `''` could never reach the comparator even before that, for the
+same reason. There are also no production deployments — the validation gate is a business
+milestone, not a shipped product — so there is no pre-existing table to disagree with.
+
+Trigger: before the first real deployment ingests mainnet history — at which point
+re-deriving sentinels for already-stored internal transfers becomes a migration, not a
+comment. Where: `packages/ingestion/src/normalize.ts` (`compareTraceIds`,
+`isDecimalTracePath`, `sentinelRank`), ADR-005 d2.
+*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13)*
+
+**ADR-005 d2 derives the sentinel from provider METADATA while requiring it to be a function
+of the ROW SET — and the thing that buys never arrives.** Raised 2026-09-13 after the same
+decision needed two amendments in two consecutive review rounds; recorded here rather than
+acted on, because it is an ADR change plus an ingestion simplification and does not belong
+in the branch that surfaced it.
+
+The decision says `n` "must be a function of the row set alone, or a re-fetch that returns
+the same traces in a different order would renumber them into each other's slots". It then
+derives `n` from the provider's trace LABEL, which is not row content — it is how a provider
+chose to name the row. Everything this branch added to that path (a total order over
+arbitrary strings, the decimal-path shape test, the distinctness test) is an attempt to make
+label-derived ranking behave like row-derived ranking. Each amendment narrows the label path
+further toward "use labels only where they would agree with the tuple anyway".
+
+Note that **the tuple satisfies the requirement by construction, and the label cannot**.
+If the rank is
+derived from row content, two rows with identical content are interchangeable *by
+definition*: a re-fetch that reorders them yields the same set of (key, payload) pairs, so
+nothing is dropped and nothing is duplicated. Two rows with the same LABEL but different
+content are not interchangeable — which is the defect the distinctness amendment had to
+patch.
+
+And **the label path's stated benefit does not reach any consumer**. It exists to preserve
+execution order ("both enumerate the call tree in execution order"). But the sentinel is
+`-(1000 + n)` and all five consuming queries order ascending by `log_index`
+(`balances.ts:117`, `counterparties.ts:101`, `flows.ts:122`, `gas.ts:101`,
+`list-events.ts:90`), so `n = 2` sorts *before* `n = 0`. Execution order is inverted
+everywhere it could be observed. Nothing depends on it, and nothing can.
+
+Proposal: amend d2 so the `(from, to, value)` tuple is the ONLY rank source. That deletes
+`compareTraceIds`, `compareDecimalDigits`, `isDecimalTracePath`, their property test, and
+collapses both 2026-09-13 amendments into a simpler decision. The raw label is not lost —
+`normalize()` already stores the full provider row in `chain_events.raw`, so it stops being
+part of the idempotency key without leaving the database.
+
+Cost, stated honestly: this changes the derived sentinel for ALL internal transfers, not
+only the edge shapes the amendments covered, so the blast radius is larger than either
+amendment. Same migration question as the entry above, same answer today — no deployment
+holds rows to disagree with — but that answer expires at the first real ingest.
+
+Trigger: before the first real deployment ingests mainnet history, and ideally alongside a
+plan-mode sweep for the same pattern elsewhere (a decision whose stated invariant is not
+what its implementation derives from). Where: `docs/adr/ADR-005-event-store.md` (decision 2),
+`packages/ingestion/src/normalize.ts`, `packages/ingestion/test/trace-order.property.test.ts`.
+*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13 — raised, not acted on)*
+
 ## Ledger
 
 **`isRealCalendarDate` re-splits a string `parseIsoDateComponentsUtc` already parsed.**
@@ -138,8 +209,6 @@ arc, just observed while working in the area. Trigger: close it as part of any f
 freshness/fold-correctness hardening pass. Where: `packages/ledger/test/ledger.itest.ts`.
 *(Task 8, `fix/ledger-status-scope`)*
 
-## Pricing
-
 ## Face B (reconciliation & matching)
 
 **The subset-search heuristic's known miss-mode: the candidate pool is the ≤ 6
@@ -165,22 +234,6 @@ Trigger: retuning `WEIGHTS` (a real possibility — scoring weights are exactly 
 thing that gets tuned against real data). Where: `packages/recon/src/match/score.ts`.
 *(Task 9, `fix/match-engine-edges`)*
 
-**`hydratePriceRefs`/`hydrateFxRefs` don't `ORDER BY`, so the returned refs array isn't
-run-stable when ≥ 2 ids are requested.** Not a correctness issue (the refs are looked up
-by id into a `Map`, so order doesn't affect which ref attaches to which leg) but it does
-mean two runs of the same tool call can emit citations in a different array order.
-Trigger: if citation array order is ever asserted on in a test or relied on by a
-downstream consumer. Where: `packages/mcp-tools/src/pricing-refs.ts`
-(`hydratePriceRefs`/`hydrateFxRefs`, on `fix/face-b-envelope`). *(Task 10,
-`fix/face-b-envelope`)*
-
-**`mapStatusCounts` uses the `in` operator (which also sees prototype-chain members)
-instead of `Object.hasOwn`.** Why deferred: not exploitable — the object being tested is
-an internal literal with a known, closed shape, not user input. Trigger: fold into a
-general "no bare `in` on untrusted or dynamic objects" lint pass if one is ever added.
-Where: `packages/mcp-tools/src/recon/status-repo.ts` (`mapStatusCounts`, on
-`fix/face-b-envelope`). *(Task 10, `fix/face-b-envelope`)*
-
 **No integration test for mixed volatile+stablecoin journal ref-coverage or
 shared-snapshot dedup.** Coverage gap, not a known bug. Trigger: add before journal
 drafts are extended to a currency mix beyond what's tested today. Where:
@@ -201,37 +254,93 @@ Where: `packages/mcp-tools/src/tools/export-journal-drafts.ts`, on
 
 ## Transport & auth
 
-**`destroy()` on an already-completed response could, in principle, RST a reply that was
-actually delivered.** Low-probability race in the hijacked-transport error path: if the
-response finished between the `headersSent` check and the `destroy()` call, the client
-could see a reset instead of a clean close. Trigger: revisit if this ever shows up as a
-flaky client-side error. Where: `apps/mcp-server/src/http.ts`
-(`handleHijackedTransport`). *(Task 11, `fix/server-transport`)*
-
 **`hashKey` is computed twice per authenticated request.** Pure performance nit (sha256
 over a short string, twice, per request) — not a correctness issue. Trigger: revisit if
 auth-path latency ever becomes a measured concern. Where: `apps/mcp-server/src/auth.ts`
 (`hashKey`). *(Task 11, `fix/server-transport`)*
 
-**`HttpDeps.allowedHosts = []` bypasses `resolveAllowedHosts`'s empty-guard.** An explicit
-empty array (as opposed to `undefined`) skips the fallback-to-defaults logic. Why
-deferred: not attacker-reachable — `allowedHosts` is an injectable test seam, not a
-request-controlled value; production always calls `resolveAllowedHosts(cfg)`. Trigger:
-tighten if `HttpDeps` construction is ever exposed to less-trusted callers. Where:
-`apps/mcp-server/src/{http.ts,config.ts}`. *(Task 11, `fix/server-transport`)*
-
 ## Exporters
 
-**Export I/O reads the path before its `realpath` re-check (TOCTOU).** The confinement
-check re-validates via `realpath` after resolving the path, but the actual write still
-happens against the pre-`realpath` path string, leaving a narrow window for a co-resident
-writer to swap a path component via symlink between check and use. Why deferred: the
-threat model here is a co-resident writer with filesystem access to the export directory —
-already inside the trust boundary the export root assumes; not the model-controlled-input
-threat (H2) the confinement logic was built to close. Trigger: revisit if the export
-directory is ever shared with a less-trusted co-tenant process. Where:
-`packages/mcp-tools/src/fs-confine.ts` and `packages/mcp-tools/src/tools/export-run.ts`.
-*(Task 2, `fix/export-out-dir`)*
+**Whether `realpath`-based confinement is the right shape at all.** The ACCURACY half of this
+entry was declared closed on 2026-09-13, when ADR-012 d7 and `02-mcp-contracts.md` were first
+amended. It reopened twice and was amended again on 2026-09-14: the rule stated there was
+wrong about WHERE the boundary lies (it said "after confinement nothing is the caller's",
+while two `INVALID_INPUT` checks legitimately follow it), and then silent about the one
+exception the code relies on. "Amended" is not the same as "accurate", and three review
+rounds in a row found a drifted copy rather than a wrong behaviour — which is why the
+classification now lives in one compiler-checked table (`recon/import-fs.ts`) with the
+documents describing it rather than restating it.
+
+Filing it as "belongs with the ADR sweep, not
+the branch that surfaced it" was wrong — the deviation was introduced by that same branch,
+and CLAUDE.md's rule ("deviating from an ADR requires editing that ADR") has no later-is-fine
+clause. The branch amended ADR-005 d2 for its behaviour change while deferring this one; that
+inconsistency is what review caught.
+
+What remains is the design question. Five review rounds went into this path, each adding a
+mechanism: prefix check → realpath of the deepest existing ancestor → single-segment checks
+on every caller-supplied component → `mkdir -p` → realpath of the finished directory,
+anchored at the ROOT and required to be CONTAINED in it (equality was tried and refused a
+legitimate differently-cased path) → `{ flag: 'wx' }` →
+cleanup of partial writes → `rmdir` of the orphan on refusal. Each was found by review, not
+chosen by design, and each narrows a window the previous one left.
+
+The residue is structural rather than a missing tenth step. `realpath` answers "where does
+this path point RIGHT NOW", and every use of that answer happens afterwards — so a
+check-then-use built on it narrows the window and never closes it: `mkdir -p` still creates a
+directory behind a link planted mid-call, and the write that follows the check is a second
+lookup of a path the check has already released. Closing it properly wants
+`openat`/`O_NOFOLLOW` per segment, where the file descriptor IS the check — which Node's
+promises API does not expose (`fs.open` takes no `dirfd`). The real options are a native
+addon, a child process, or accepting the residue.
+
+Accepting it is the right call today and the ADR now says so plainly. But the reasoning
+deserves to be a decision made once rather than an accumulation of nine findings. Trigger:
+the ADR sweep (see the ADR-005 entry), or sooner if the export root is ever shared with a
+less-trusted co-tenant — which is the threat model under which the residue stops being
+acceptable. Where: `packages/mcp-tools/src/tools/export-run.ts`,
+`packages/mcp-tools/src/fs-confine.ts`, ADR-012 d7.
+*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13 — accuracy half closed the same
+day, design half open)*
+
+**Residual TOCTOU between `realpath` and `open` (narrowed, not closed).** The original entry
+said "Export I/O reads the path before its `realpath` re-check", and re-reading it while
+fixing found the description understated one half and overstated the other.
+
+*Closed (2026-09-13):* the import read path resolved the path **three** separate times —
+`realpath`, then `stat`, then `readFile` — so the 8 MB size cap measured one inode and the
+read consumed whatever the path pointed at by then. That is not a theoretical window: it is
+a straightforward bypass of the only thing standing between a hostile `file_path` and an
+unbounded read. Now a single `open`, with `fh.stat()` and a BOUNDED read on that same
+descriptor — deliberately not `fh.readFile()`, which follows to EOF: the stat is a snapshot,
+so a writer appending to the same inode between the two would still have walked past the
+cap. The read fills a buffer sized from the stat'd size (one byte over, so growth is
+detectable) and never exceeds the cap. `fh.stat().isFile()` also
+refuses a FIFO/socket/device node, which reports size 0 and would otherwise sail past the
+cap and stream without bound. The export write path gained its own second look:
+`realpathAncestorWithinBase` can only vouch for segments that existed at validation time, so
+after `mkdir -p` the finished directory is re-resolved (`realpathWithinBase`, anchored at
+the export ROOT rather than the out_dir-narrowed base — anchoring at the base resolves both
+sides through a planted symlink and passes the escape), writes go
+through the RESOLVED path, and files are written `{ flag: 'wx' }` — create, never follow or
+truncate — since the per-export `<uuid>/` is fresh and anything already at that path was
+planted. All of that lives in ONE helper (`writeExportFiles`) that every export tool routes
+through: `export_journal_drafts` carried its own copy of the `mkdir`+`writeFile` pair, so
+the first version of this fix reached every export tool except that one — while this entry
+claimed the write path was covered.
+
+*Still open:* the window between `realpath` and `open` itself. Closing it needs an
+`O_NOFOLLOW`-per-segment walk (or `openat`, which Node does not expose), which is a
+different slice. Separately, `open()` on a writer-less FIFO blocks forever and holds one of
+libuv's four threadpool threads; four such calls wedge every filesystem operation in the
+process. Refusing non-regular files closes the read, not the open — that needs `O_NONBLOCK`,
+also unavailable through the promises API. Why deferred: the threat model is a co-resident writer with filesystem
+access to the export/import root — already inside the trust boundary those roots assume —
+not the model-controlled-input threat (H2) the confinement logic was built to close.
+Trigger: if either root is ever shared with a less-trusted co-tenant process. Where:
+`packages/mcp-tools/src/fs-confine.ts`, `src/tools/export-run.ts`
+(`writeExportFiles`), `src/tools/export-journal-drafts.ts`, `src/recon/import-fs.ts`.
+*(Task 2, `fix/export-out-dir`; narrowed on `fix/evals-any-of-and-known-gaps`)*
 
 **`fs-confine.ts`'s prefix comparison is case-sensitive on Windows.** Inherited behavior,
 not introduced by this arc. Why deferred: fails safe — a case-mismatched path is rejected
@@ -241,51 +350,7 @@ deployments become common enough that the over-rejection is a real usability com
 Where: `packages/mcp-tools/src/fs-confine.ts` (`resolveWithinBase`). *(Task 2,
 `fix/export-out-dir`)*
 
-**`out_dir` of `""` or `"."` isn't explicitly tested**, though it's provably equivalent to
-the already-tested case (both resolve to the export root itself). Trigger: add the
-explicit case the next time the export confinement tests are touched — cheap, just not
-done yet. Where: `packages/mcp-tools/test/export*.itest.ts`. *(Task 2,
-`fix/export-out-dir`)*
-
 ## Build & CI
-
-**`migrate.itest.ts`'s comment claims the migration runs in "the same container" as
-another step, but the block actually spins its own.** Doc-comment inaccuracy inside a
-test file — needs a reword, not a behavior change. Trigger: next edit to that test file.
-Where: `packages/db/test/migrate.itest.ts:39-41`. *(Task 1, `fix/token-seed`)*
-
-**`Dockerfile`'s `EXPOSE 8484` is stale relative to the `PORT` env override** — `EXPOSE` is
-documentation-only in Docker (it doesn't bind the port), so this is non-binding drift, not
-a functional bug. Trigger: bundle a fix in whenever the Dockerfile is next edited for an
-unrelated reason. Where: `Dockerfile`. *(Task 12, `fix/worker-queues`)*
-
-**The `SMOKE_IDS` set is a literal Set; a duplicate entry would silently shrink the
-required eval-case count instead of erroring.** A size-based invariant limitation that's
-inherent to the current design (checking `SMOKE_IDS.size` against an expected count can't
-distinguish "shrunk because of a duplicate" from "shrunk on purpose"). Trigger: switch to
-an array + explicit dedup-check if `SMOKE_IDS` ever grows large enough that a silent
-duplicate becomes a real risk. Where: `apps/cli/src/run.ts` (`SMOKE_IDS`). *(Task 13,
-`fix/evals-cli`)*
-
-**The workspace-consistency commit rationale overstated its own scope: `db` and `recon`
-still use `vitest run --passWithNoTests`, unlike `ledger`/`mcp-tools`.** Confirmed still
-true on `main` today. Trigger: align the two remaining packages the next time test-config
-consistency work resumes (this was flagged as a candidate for the typecheck-tests slice,
-which did not end up touching these two files). Where: `packages/db/package.json:18`,
-`packages/recon/package.json:18`. *(Task 13, `fix/evals-cli`)*
-
-**`export-dir.test.ts` asserts `rejects.toThrow()` without pinning the original error.**
-A looser-than-ideal test assertion — it would pass even if the thrown error's type or
-message changed to something equally wrong. Trigger: tighten the next time that test file
-is touched. Where: `apps/cli/test/export-dir.test.ts`. *(Task 13, `fix/evals-cli`)*
-
-**The supply-chain guard exits `2` ("cannot run") even when a real violation was already
-found in the first lockfile scanned** — an exit-code conflation between "the guard itself
-failed to run" and "the guard ran and found a violation." Why deferred: CI still fails
-either way (both exit codes are non-zero), so there is no false-green risk; the only cost
-is a slightly less precise CI failure reason. Trigger: split the exit codes the next time
-the guard script is touched for an unrelated reason. Where:
-`scripts/check-no-signing-libs.cjs`. *(Task 15, `chore/supply-chain-config`)*
 
 **Historical note: commit `eaabbfd` doesn't build in isolation** (`types: ["node"]` was
 added to a tsconfig before the corresponding `@types/node` dependency landed; fixed two
@@ -310,23 +375,6 @@ becomes an actual deployment concern. Where: `Dockerfile`. *(Task 15,
 > (LTS lines only — accept a major once it has entered LTS, which is why 24.21 was taken over
 > the offered 26.8). The corepack-signing-key trap that forced the old divergence is kept
 > there as history, because it recurs.
-
-**`site`'s `next lint` script emits a deprecation warning on every run.** A second,
-unrelated fact bundled into the same ledger line as the Dockerfile item above (both were
-loose ends noticed during the supply-chain slice, not two aspects of one problem):
-`site/package.json`'s `lint` script (`next lint`, wrapping `eslint@^8.57.0` +
-`eslint-config-next@^15.1.0` via the legacy `site/.eslintrc.json` config) is deprecated by
-Next.js 15 in favor of running ESLint directly, and this slice's own change
-(`"test": "npm run lint && npm run build && playwright test"`) made that warning fire on
-every `site` test run instead of only on an explicit `lint` invocation. Why deferred:
-migrating off `next lint` means either bumping to ESLint 9's flat-config format (a
-`site`-wide dependency bump: `eslint`, `eslint-config-next`, and rewriting
-`.eslintrc.json` as `eslint.config.js`) or pulling in `@next/eslint-plugin-next` directly
-— both larger changes than this slice's supply-chain-guard scope. Trigger: the `site`
-dependency bump that this slice's own note anticipates, or when Next.js actually removes
-`next lint` (not just deprecates it) and the script starts failing outright. Where:
-`site/package.json` (`"lint": "next lint"`, `"test"`), `site/.eslintrc.json`. *(Task 15,
-`chore/supply-chain-config`)*
 
 **The root workspace keeps a `@reconcil/ingestion` devDependency, weakening
 dependency-cruiser's `not-to-unresolvable` rule.** `scripts/capture-internal-txs.ts` — a
@@ -382,25 +430,6 @@ lockfile regeneration — diff the result against the branch intended lock, neve
 that the install succeeds. Where: `pnpm-lock.yaml`.
 *(landing sweep — a real regression, caught by review and fixed in #62)*
 
-**`flow-002`'s `tools_expected` over-specifies: two tools legitimately answer its question.**
-It asks for "the net USDC flow (received minus sent) over the last quarter" and demands
-`analytics_flows`. On the 2026-09-08 run the agent called `analytics_stablecoin_movements`
-instead — "token flows restricted to verified stablecoins, with per-peg subtotals", which
-for a *stablecoin* flow question is at least as good a choice — answered correctly, cited
-it, and surfaced the coverage caveat. G1 scored it a miss. This is the same class the
-allowlist removal already addressed one level down: `tools_expected` is a hard "must call
-every one of these", and there is no way to say "either of these two is right". Not fixed
-here because an `any-of` notion is a real schema decision, not a tail-end edit: it needs a
-name, validation (an any-of set of one is a plain expectation; overlapping with
-`writes_allowed` is a contradiction), and a pass through the other 29 cases to see where
-else it applies. Note the case cannot produce a real figure either way — erc20 events
-still cannot reach `chain_events` (04-testing.md §2, unblocker a) — so its value today is
-purely the trajectory. Trigger: the next eval slice with budget for a re-measure. Where:
-`packages/evals/fixtures/evals/core-30.yaml` (`flow-002`),
-`packages/evals/src/dataset.ts` (`expectSchema`), `packages/evals/src/graders/trajectory.ts`.
-*(landing sweep — surfaced 2026-09-08 when seeding the checkpoints changed this case's
-failure from "no wallets tracked" to a genuine tool choice)*
-
 **No eval fixture has a labelled wallet, or a second one.** `seedGoldenWallet` seeds one
 address per fixture role and the seeder tracks it unlabelled, so a case cannot refer to a
 wallet by name. Two cases were written as if it could: bal-001 asked for "the ops wallet"
@@ -417,11 +446,14 @@ label-resolution cases can be restored. Where: `apps/cli/src/evals/seed-case.ts`
 
 ## Reconciling the count
 
-This register holds **42 entries**. The source ledger
+This register holds **30 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
-15–17) — 32 raw ledger lines in total. The reconciliation from 32 lines to 49 entries:
+15–17) — 32 raw ledger lines in total. (This line used to say the reconciliation ran "from
+32 lines to 49 entries" while the header said 42 and the arithmetic below produced 42 — a
+leftover from before PR #66's removals. The derivation below is the authority; the stray
+number is gone.) The reconciliation from 32 ledger lines:
 
 - **−1**: Task 17's variant-phrased line (`minor (deferred → fold into PR-18)`, the
   `SANITIZED_HEAVY` contract-doc drift) is not a register entry — it was a direct doc fix
@@ -476,7 +508,46 @@ literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`min
   from failing on "no wallets tracked" to failing on a genuine tool choice, which is a
   different gap wearing the same red mark.
 
-32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 = **42**, matching this document.
+- **−15**: fifteen entries were CLOSED and removed on 2026-09-13 (PRs #74/#75). Two by the
+  Node-24 toolchain bump, under their own "next time this file is edited" trigger: the
+  Dockerfile's `EXPOSE`/`PORT` drift, and the `site` `next lint` deprecation (already dead
+  since PR #61 replaced it with a flat config — the entry had simply gone unmaintained).
+  Thirteen by the known-gaps sweep: `compareTraceIds`' inconsistent comparator,
+  `sentinelRank`'s silent `?? 0`, the unordered price/FX ref hydration, `mapStatusCounts`'
+  bare `in`, the `destroy()` RST race, `HttpDeps.allowedHosts = []`, the untested
+  `out_dir` `""`/`"."`, `migrate.itest.ts`'s wrong container comment, the smoke id list's
+  duplicate hazard, `export-dir.test.ts`'s unpinned `rejects.toThrow()`, the supply-chain
+  guard's conflated exit codes, `flow-002`'s over-specified `tools_expected`, and the
+  `--passWithNoTests` inconsistency.
+
+  Three of those turned out to be **wrong as written**, which is the reason this register
+  is worth auditing rather than merely appending to. (a) The `--passWithNoTests` entry named
+  `db` and `recon`; `recon` had since gained three hermetic tests, and `db`'s `test/` holds
+  only `*.itest.ts`, so there the flag is load-bearing and removing it would have broken the
+  hermetic job — the "fix" the entry asked for was a bug. (b) The smoke-id-list entry (the
+  symbol was `SMOKE_IDS` then; it is `SMOKE_ID_LIST` behind `smokeIds()` now) was nearly
+  closed as already-handled, because `selectSmokeDataset` throws on duplicates — but it
+  throws on duplicates in the DATASET, not in the literal, which is a different mistake and
+  was still silent. (c) The TOCTOU entry (kept, rewritten) understated the half that had
+  a real consequence and overstated the half that did not.
+
+- **±0**: the `## Pricing` heading, empty since PR #66 removed both of its entries, is gone.
+
+- **+1**: one entry ADDED by the review of that same sweep — `compareTraceIds` changing the
+  sentinel it derives, with no migration for already-ingested rows. Recorded rather than
+  migrated because the label shapes whose ordering moved do not occur in either provider's
+  output (see the entry for the evidence), and there is no deployment to disagree with yet.
+
+- **+1**: one entry RAISED by the review of this same branch and deliberately not acted on —
+  ADR-005 d2 deriving the sentinel from provider metadata while requiring it to be a function
+  of the row set. It is an ADR change plus an ingestion simplification, so it gets its own
+  branch rather than riding the one that surfaced it.
+
+- **+1**: a second entry raised by the same review and also not acted on — ADR-012 d7
+  describing a confinement the implementation has outgrown. Same signal as the ADR-005 one,
+  found the same way, and it goes to the same sweep.
+
+32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 + 1 + 1 + 1 = **30**, matching this document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation

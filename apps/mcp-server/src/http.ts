@@ -10,7 +10,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest, 
 import { Pool } from 'pg';
 
 import { parseBearerToken, resolveTenantByBearer } from './auth.js';
-import { DEFAULT_PORT, loadConfig, resolveAllowedHosts, resolveTrustProxy } from './config.js';
+import { DEFAULT_PORT, loadConfig, normalizeAllowedHosts, resolveAllowedHosts, resolveTrustProxy } from './config.js';
 import { createServer } from './server.js';
 import { installShutdown } from './shutdown.js';
 
@@ -125,6 +125,12 @@ const INTERNAL_ERROR_BODY = JSON.stringify({ error: 'internal_error' });
  * `destroy()` the socket if headers already went out (a started response can't
  * be retracted). Either branch resolves — no hang. Takes only `handleRequest` so
  * tests can inject a failing stub transport without opening a real socket.
+ *
+ * The third case is doing NOTHING. If the response completed between the `headersSent`
+ * check and the `destroy()` call — a real race, since the rejection and the final write
+ * are concurrent — then destroying sends an RST for a reply the client already holds in
+ * full, converting a delivered answer into a transport error on their side. There is
+ * nothing left to write and nothing to retract, so the correct action is none.
  */
 export async function handleHijackedTransport(
   transport: Pick<StreamableHTTPServerTransport, 'handleRequest'>,
@@ -137,6 +143,9 @@ export async function handleHijackedTransport(
     await transport.handleRequest(req, res, parsedBody);
   } catch (err) {
     logger.error('mcp transport handleRequest failed after hijack', { err: serializeError(err) });
+    // Re-read liveness HERE, after the await: these are the values as of the rejection,
+    // not as of the call. A finished or already-destroyed response needs neither branch.
+    if (res.writableEnded || res.destroyed) return;
     if (res.headersSent) {
       res.destroy();
     } else {
@@ -155,7 +164,10 @@ export interface HttpDeps {
    * defense-in-depth on top of bearer auth). Defaults to the localhost/127.0.0.1/
    * compose-service-name forms at DEFAULT_PORT — production always passes the
    * real one via config.ts `resolveAllowedHosts(cfg)`. */
-  allowedHosts?: string[];
+  // A NON-EMPTY tuple, not `string[]`: `[]` is what the SDK reads as "no Host check at all"
+  // (it guards on `length > 0`), so the seam must not be able to spell it. Typed this way
+  // the mistake is a compile error at the call site rather than a runtime branch nobody hits.
+  allowedHosts?: [string, ...string[]];
   /** Layer 1: IP-keyed hard ceiling on every /mcp request (valid credential, invalid,
    * or absent — see the block comment above `ipRateLimitKey`). Defaults to the
    * production 600/min. Overridable so tests can trip it deterministically. */
@@ -180,7 +192,26 @@ export interface HttpDeps {
 export async function buildHttpApp(deps: HttpDeps): Promise<FastifyInstance> {
   const { db, logger } = deps;
   const authenticate = deps.authenticate ?? ((h) => bearerTenant(db, h));
-  const allowedHosts = deps.allowedHosts ?? resolveAllowedHosts({ PORT: DEFAULT_PORT });
+  // The empty case is ruled out by the TYPE (`HttpDeps.allowedHosts`, below); this is the
+  // backstop for a JS caller the compiler never saw. An empty list does not make the check
+  // strict — the SDK guards it with `length > 0`, so it turns DNS-rebinding protection OFF.
+  //
+  // Through the SAME normalizer the env path uses (config.ts), not a second check written
+  // at the seam: the two had different rules — the env path dropped blank entries, the seam
+  // threw on one — so `'a.example, ,b.example'` was valid configuration and a fatal
+  // argument. And the NORMALIZED value is what gets forwarded: the SDK compares the raw Host
+  // header against these strings exactly, so a padded ' good.example:8484 ' that merely
+  // passed validation would match nothing at all, rejecting every request.
+  let allowedHosts: [string, ...string[]];
+  if (deps.allowedHosts === undefined) {
+    allowedHosts = resolveAllowedHosts({ PORT: DEFAULT_PORT });
+  } else {
+    const normalized = normalizeAllowedHosts(deps.allowedHosts);
+    if (normalized === null) {
+      throw new Error('allowedHosts must name at least one non-empty host — omit it to use the defaults');
+    }
+    allowedHosts = normalized;
+  }
   const ipRateLimitPolicy = deps.ipRateLimit ?? { max: 600, timeWindow: '1 minute' };
   const tenantRateLimitPolicy = deps.tenantRateLimit ?? { max: 120, timeWindow: '1 minute' };
   // Built as a typed value rather than spread inline: a union-typed `trustProxy` in an

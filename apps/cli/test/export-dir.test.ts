@@ -59,6 +59,11 @@ describe('withTempExportDir', () => {
     // ever runs. The finally must recognise "never created" and no-op rather than throwing
     // on rmSync(undefined-ish path).
     const missingRoot = join(root, 'does-not-exist');
-    await expect(withTempExportDir(missingRoot, () => Promise.resolve('unreachable'))).rejects.toThrow();
+    // Pinned to the ORIGINAL mkdtemp failure. A bare .toThrow() would also pass if the
+    // finally block threw while trying to remove a directory that was never created —
+    // which is the exact bug this test exists to catch.
+    await expect(withTempExportDir(missingRoot, () => Promise.resolve('unreachable'))).rejects.toThrow(
+      /ENOENT/,
+    );
   });
 });

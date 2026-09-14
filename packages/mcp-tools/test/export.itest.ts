@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { createDb, runMigrations, type Db } from '@reconcil/db';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -213,5 +213,19 @@ describe('export_close_pack — out_dir confinement (security, H2)', () => {
 
     const after = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM exports`);
     expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+  });
+
+  // `""` and `"."` are provably equivalent to omitting out_dir — both resolve to the export
+  // root — but "provably" was an argument, not a test, and the empty string in particular is
+  // the kind of value a path join silently turns into something else.
+  it.each([['empty string', ''], ['dot', '.']])('accepts an out_dir of %s as the export root itself', async (_label, dir) => {
+    await seedWorld();
+    const env = await exportClosePack(ctx(), { month: MONTH, valuation: { currency: 'USD' }, out_dir: dir });
+
+    const manifestFile = env.data.files.find((f) => f.name === 'manifest.json')!;
+    // Files land in a per-export `<uuid>/` folder under the resolved out_dir, so the root
+    // is the GRANDparent — same shape as the 'june/close' case above, one level shallower.
+    expect(dirname(dirname(manifestFile.path))).toBe(outDir);
+    await expect(readFile(manifestFile.path, 'utf8')).resolves.toBeTruthy();
   });
 });

@@ -12,6 +12,15 @@
 # LTS since 2025-10, EOL 2028-04) over the offered 26.8, which is Current until 2026-10-28.
 # Node 26 is the next major to accept, on or after that date.
 #
+# WHOEVER TAKES 26: it is not a tag change. corepack has been UNBUNDLED from the Node
+# distribution — `node:26.8-slim` has npm but no corepack at all, so the `corepack enable
+# pnpm` below dies with "corepack: not found" on the second build step. (Measured 2026-09-13:
+# node:24.21-slim ships corepack 0.36.0; node:26.8-slim ships none.) Replacing it means
+# choosing how pnpm gets in — `npm i -g corepack` first, or installing pnpm directly — and
+# only the first keeps `packageManager: pnpm@11.26.0` in package.json enforced, which is the
+# whole reason corepack is here. Note CI would NOT catch this: it installs pnpm via
+# pnpm/action-setup, so only the shipped image breaks, and `e2e-smoke` is cron/dispatch-only.
+#
 # The tag now MATCHES .nvmrc, which it deliberately did not before: node:22.22-slim was
 # chosen over .nvmrc's 22.13 because that image bundles a corepack whose embedded signing
 # keys predate npm's key rotation, so `pnpm fetch` died on "Cannot find matching keyid"

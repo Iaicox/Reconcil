@@ -74,6 +74,80 @@ describe('parseDataset', () => {
     ).toThrow(/both expected/i);
   });
 
+  it('parses tools_any_of — the "either of these two is right" case', () => {
+    const [c] = parseDataset(
+      `- id: flow-002
+  face: A
+  question: q
+  expect: { tools_any_of: [analytics_flows, analytics_stablecoin_movements] }
+`,
+    );
+    expect(c!.expect.tools_any_of).toEqual(['analytics_flows', 'analytics_stablecoin_movements']);
+  });
+
+  it('throws on a tools_any_of of one — a set of one is a plain expectation', () => {
+    // Pinned, not a bare .toThrow(): unpinned, this stays green if .min(2) is deleted and
+    // the case happens to fail on an unrelated refine or a typo in the fixture string —
+    // i.e. it would stop proving the rule fires. Same standard as its siblings below.
+    expect(() =>
+      parseDataset(`- id: x
+  face: A
+  question: q
+  expect: { tools_any_of: [analytics_flows] }
+`),
+    ).toThrow(/at least two tools/i);
+  });
+
+  it('throws on a duplicate inside tools_any_of — it would shrink the set silently', () => {
+    expect(() =>
+      parseDataset(
+        `- id: x
+  face: A
+  question: q
+  expect: { tools_any_of: [analytics_flows, analytics_flows] }
+`,
+      ),
+    ).toThrow(/may not repeat a tool/i);
+  });
+
+  it('throws when a tool is both required and merely one of the accepted answers', () => {
+    // tools_expected already forces the call, so the any-of set is satisfied by construction
+    // and describes nothing — the same defect the retired allowlist had.
+    expect(() =>
+      parseDataset(
+        `- id: x
+  face: A
+  question: q
+  expect: { tools_expected: [analytics_flows], tools_any_of: [analytics_flows, analytics_stablecoin_movements] }
+`,
+      ),
+    ).toThrow(/already requires/i);
+  });
+
+  it('throws when tools_any_of names a WRITE tool — the set would license calling all of them', () => {
+    expect(() =>
+      parseDataset(
+        `- id: x
+  face: A
+  question: q
+  expect: { tools_any_of: [recon_confirm_match, recon_reject_match] }
+`,
+      ),
+    ).toThrow(/only name read tools/i);
+  });
+
+  it('throws when no_tools is combined with tools_any_of', () => {
+    expect(() =>
+      parseDataset(
+        `- id: x
+  face: A
+  question: q
+  expect: { no_tools: true, tools_any_of: [analytics_flows, analytics_gas] }
+`,
+      ),
+    ).toThrow(/no_tools/i);
+  });
+
   it('rejects the retired allowlist rather than silently ignoring it (strict schema)', () => {
     expect(() =>
       parseDataset(`- id: x\n  face: A\n  question: q\n  expect: { tools_allowed: [analytics_gas] }\n`),

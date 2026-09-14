@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ToolContext } from '../src/context.js';
 import { ToolError } from '../src/errors.js';
+import { hydrateFxRefs, hydratePriceRefs } from '../src/pricing-refs.js';
 import { exportJournalDrafts } from '../src/tools/export-journal-drafts.js';
 
 let container: StartedPostgreSqlContainer;
@@ -59,7 +60,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await pool.query(
-    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls, exports, ingestion_checkpoints RESTART IDENTITY CASCADE',
+    'TRUNCATE tenants, clients, wallets, tokens, chain_events, external_records, matches, tool_calls, exports, ingestion_checkpoints, fx_rates RESTART IDENTITY CASCADE',
   );
   await pool.query(`INSERT INTO tenants (id, slug, name) VALUES ($1, 'acme', 'acme')`, [TENANT]);
   await pool.query(`INSERT INTO clients (id, tenant_id, name) VALUES ($1, $2, 'Client One')`, [CLIENT, TENANT]);
@@ -306,10 +307,13 @@ describe('export_journal_drafts — journal provenance (H11)', () => {
   });
 });
 
-// export-journal-drafts.ts calls `baseDir` directly (not through `runExport`, unlike
-// export_close_pack / export_pdf_summary) — this is a separate call site, so it gets its
-// own confinement smoke test (H2). Full coverage of `baseDir` itself lives in
-// export-run.test.ts (hermetic) and export.itest.ts's confinement describe block.
+// This tool used to call `baseDir` directly — a second, unhardened call site, which is why
+// it had its own confinement smoke test. It now routes through the shared
+// `writeExportFiles` like every other export tool, so the smoke test no longer guards a
+// separate implementation. It is kept as a regression guard against the tool being wired
+// back to its own write path: confinement must hold end-to-end for THIS tool, not only for
+// the helper. Full coverage of `baseDir` itself lives in export-run.test.ts (hermetic) and
+// export.itest.ts's confinement describe block.
 describe('export_journal_drafts — out_dir confinement (security, H2)', () => {
   it('rejects a traversal out_dir without leaking the export root path, and registers nothing', async () => {
     let thrown: ToolError | undefined;
@@ -335,5 +339,49 @@ describe('export_journal_drafts — out_dir confinement (security, H2)', () => {
     const env = await exportJournalDrafts(ctx(), { period: PERIOD, target: 'qbo', out_dir: 'june/close' });
     expect(env.data.file.path).toContain(join(outDir, 'june', 'close'));
     await expect(readFile(env.data.file.path)).resolves.toBeTruthy();
+  });
+});
+
+/**
+ * Ref hydration order (P1/P2). Lives HERE, in the caller's own itest, rather than in a file
+ * of its own: this tool is the consumer whose `[...priceRefMap.values()]` becomes the
+ * envelope's citation ARRAY, so the ordering is tested where it actually reaches the wire —
+ * and it reuses this container instead of adding a twentieth to the suite.
+ *
+ * The assertions pin ascending id. They do not try to PROVOKE the old instability: a seq
+ * scan on a handful of rows often comes back sorted anyway, so a test that waited for the
+ * planner to misbehave would pass vacuously. Pinning the contract is what makes a future
+ * `ORDER BY` removal fail — and it does: without it this suite measured Postgres returning
+ * the rows in DESCENDING id.
+ */
+describe('pricing ref hydration is run-stable (P1/P2)', () => {
+  it('returns price refs in ascending snapshot id, whatever order the ids were asked for', async () => {
+    const weth = await seedVolatileToken();
+    const ids: number[] = [];
+    for (const [date, price] of [['2026-06-01', '1000'], ['2026-06-02', '1100'], ['2026-06-03', '1200'], ['2026-06-04', '1300']] as const) {
+      ids.push(await seedSnapshot(weth, price, date));
+    }
+    const sorted = [...ids].sort((a, b) => a - b);
+
+    const map = await hydratePriceRefs(db, [ids[2]!, ids[0]!, ids[3]!, ids[1]!]);
+    expect([...map.keys()]).toEqual(sorted);
+    expect([...map.values()].map((r) => r.snapshot_id)).toEqual(sorted);
+  });
+
+  it('returns fx refs in ascending fx_rate id', async () => {
+    const ids: number[] = [];
+    for (const date of ['2026-06-01', '2026-06-02', '2026-06-03']) {
+      const { rows } = await pool.query<{ id: string }>(
+        `INSERT INTO fx_rates (rate_date, base_currency, quote_currency, rate, source)
+         VALUES ($1,'USD','EUR','0.92','ecb') RETURNING id`,
+        [date],
+      );
+      ids.push(Number(rows[0]!.id));
+    }
+    const sorted = [...ids].sort((a, b) => a - b);
+
+    const map = await hydrateFxRefs(db, [ids[1]!, ids[2]!, ids[0]!]);
+    expect([...map.keys()]).toEqual(sorted);
+    expect([...map.values()].map((r) => r.fx_rate_id)).toEqual(sorted);
   });
 });

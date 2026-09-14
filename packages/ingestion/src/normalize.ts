@@ -11,27 +11,107 @@ import type { Erc20WithMeta } from './logindex.js';
 const INTERNAL_SENTINEL_BASE = -1000;
 
 /**
- * Order two traces of the same parent tx by the provider's trace label. Etherscan
- * sends a dotted DFS path ("0", "0_1", "0_10"), Blockscout a plain ordinal ("67");
- * both compare component-wise and numerically, so "0_2" precedes "0_10" (a lexical
- * sort would invert them) and a shorter path precedes its own extensions. A
- * non-numeric component falls back to text order — an unknown labelling scheme
- * still yields a total, deterministic order, which is all the caller needs.
+ * Decimal-digits only. `Number()` was the old test and it is far too generous for a trace
+ * label: it reads '' as 0, '0x10' as 16 and '1e3' as 1000, putting three non-numeric
+ * segments into the numeric class. Real Etherscan/Blockscout trace ids are digits and
+ * underscores, so nothing that actually occurs changes class under the stricter test.
  */
-function compareTraceIds(a: string, b: string): number {
+const DECIMAL_SEGMENT = /^[0-9]+$/;
+
+/**
+ * A trace label of the shape both providers send: digits, optionally underscore-separated
+ * ("0", "67", "0_1_2"). Empty is not one — an unlabelled trace has no label at all.
+ *
+ * Every segment must carry at least one digit. A per-character "digit or underscore" scan
+ * looks equivalent and is not: it accepts "0_", "_" and "0__1", i.e. labels with EMPTY
+ * segments — which is precisely the shape this guard exists to keep away from
+ * `compareTraceIds`. An empty segment is the one case where the old and new comparators
+ * disagree on real input (the old one read '' as the number 0 via `Number('')`, tied, and
+ * fell to arrival order; the new one classifies it as non-numeric and separates it), so a
+ * provider emitting a trailing underscore would re-rank its traces and change the
+ * `log_index` sentinel — the ADR-005 double-insert this guard is the barrier against.
+ */
+const DECIMAL_TRACE_PATH = /^[0-9]+(?:_[0-9]+)*$/;
+
+function isDecimalTracePath(label: string): boolean {
+  return DECIMAL_TRACE_PATH.test(label);
+}
+
+/**
+ * Numeric order of two all-digit strings, without parsing either. `BigInt(x)` was correct
+ * (a `Number` would collapse distinct labels past 2^53 onto one float) but it heap-allocates
+ * twice per comparison inside a sort's inner loop, run per parent-tx group on every ingested
+ * page — for labels that are one to three digits in practice. Skip leading zeros, then more
+ * digits means larger, and on equal length the digit strings compare lexicographically in
+ * exactly numeric order. Same total order, no allocation, and "007" === "7" is now the
+ * stated rule rather than a side effect of BigInt equality.
+ */
+function compareDecimalDigits(a: string, b: string): number {
+  let ia = 0;
+  let ib = 0;
+  while (ia < a.length - 1 && a.charCodeAt(ia) === 0x30) ia += 1;
+  while (ib < b.length - 1 && b.charCodeAt(ib) === 0x30) ib += 1;
+  const la = a.length - ia;
+  const lb = b.length - ib;
+  if (la !== lb) return la < lb ? -1 : 1;
+  for (let i = 0; i < la; i += 1) {
+    const ca = a.charCodeAt(ia + i);
+    const cb = b.charCodeAt(ib + i);
+    if (ca !== cb) return ca < cb ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Order two trace labels segment by segment. Exported for its own property test.
+ *
+ * This must be a CONSISTENT comparator (a strict weak ordering), because `sort` is only
+ * defined for one and its result becomes the `log_index` sentinel on every internal
+ * transfer — half of the `UNIQUE (chain_id, tx_hash, log_index, token_id)` idempotency key
+ * (ADR-005). It previously was not: a numeric-vs-non-numeric pair fell through to a raw
+ * string comparison, which cycles against the numeric comparison used by numeric pairs —
+ * "9" < "10" < "1a" < "9". Sorting on a comparator that contradicts itself is
+ * implementation-defined, so the sentinel could depend on the engine and on arrival order.
+ *
+ * The rule that removes the cycle: the two classes are totally ordered against each other
+ * (every numeric segment sorts before every non-numeric one) instead of being compared by a
+ * measure that only makes sense inside one class. And two DISTINCT labels never compare
+ * equal — so the caller's arrival-order tiebreak is reached only when the two labels are
+ * IDENTICAL, which is not the same as the two rows being identical. The caller is what has
+ * to notice that: `normalize()` takes the label path only for a group whose labels are all
+ * distinct, precisely so a repeated label cannot hand the ordering to arrival order.
+ */
+export function compareTraceIds(a: string, b: string): number {
   const pa = a.split('_');
   const pb = b.split('_');
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const xa = pa[i];
     const xb = pb[i];
+    // A prefix sorts before what extends it — "0_1" before "0_1_0".
     if (xa === undefined) return -1;
     if (xb === undefined) return 1;
     if (xa === xb) continue;
-    const na = Number(xa);
-    const nb = Number(xb);
-    if (Number.isInteger(na) && Number.isInteger(nb) && na !== nb) return na < nb ? -1 : 1;
-    if (!Number.isInteger(na) || !Number.isInteger(nb)) return xa < xb ? -1 : 1;
+    const numA = DECIMAL_SEGMENT.test(xa);
+    const numB = DECIMAL_SEGMENT.test(xb);
+    if (numA && numB) {
+      const cmp = compareDecimalDigits(xa, xb);
+      if (cmp !== 0) return cmp;
+      // Equal as numbers ("007" vs "7"): fall through to the next segment. The whole-label
+      // tiebreak at the bottom is what separates them if every segment ties.
+      continue;
+    }
+    if (numA !== numB) return numA ? -1 : 1;
+    return xa < xb ? -1 : 1;
   }
+  // Every segment compared equal. If the LABELS still differ — "007" vs "7", equal as
+  // numbers — returning 0 would hand the ordering to the caller's `a.arrival - b.arrival`
+  // tiebreak, i.e. to the provider's response order. That is precisely the arrival-order
+  // dependence ADR-005 d2 forbids: re-fetching the tx at an overlap boundary, or after a
+  // failover, can return the rows the other way round, and the two would then get each
+  // other's sentinel — ON CONFLICT DO NOTHING no longer dedupes, one value move is stored
+  // twice and another is lost. The raw string is a total order, so distinct labels get a
+  // stable relative position that depends on nothing but the labels themselves.
+  if (a !== b) return a < b ? -1 : 1;
   return 0;
 }
 
@@ -169,9 +249,31 @@ export function normalize(
   }
   const sentinelRank = new Map<number, number>(); // arrival index → n
   for (const group of byParentTx.values()) {
-    // Per group: label order iff every trace in it carries a label (one page comes
-    // from one provider, so a mixed group is not a real shape — but be explicit).
-    const labelled = group.every(({ it }) => (it.traceId ?? '') !== '');
+    // Per group: label order iff every trace in it carries a label AND every label is a
+    // plain decimal path (one page comes from one provider, so a mixed group is not a real
+    // shape — but be explicit).
+    //
+    // The decimal-path half is what keeps the sentinel derivation honest. `compareTraceIds`
+    // orders unfamiliar label shapes too — it has to be a total order — but the RESULT of
+    // that ordering becomes the `log_index` sentinel, half of
+    // `UNIQUE (chain_id, tx_hash, log_index, token_id)` (ADR-005). A future provider adapter
+    // emitting some other labelling scheme would silently get its ordering from a rule
+    // nobody chose for it. Restricting the label path to the shape both current providers
+    // actually send — digits and underscores, the only shape in any recorded fixture — means
+    // an unfamiliar scheme falls to `compareTraceTuple` (from/to/value: provider-independent,
+    // and derived from the transfer itself rather than from how a provider chose to name it)
+    // instead. Loud in neither case, but deterministic in both.
+    const labels = group.map(({ it }) => it.traceId ?? '');
+    // DISTINCT decimal paths, not merely decimal ones. Shape alone is not enough: two traces
+    // in one tx both labelled '0' tie under `compareTraceIds`, and the tie falls to
+    // `a.arrival - b.arrival` — the provider's response order, which is what the sentinel
+    // must never depend on. A repeat of the LABEL is not a repeat of the ROW: those two
+    // traces have different (from, to, value) and are two real value moves, so a re-fetch
+    // that returns them the other way round swaps their sentinels and ON CONFLICT DO NOTHING
+    // stops matching (ADR-005 d2). A duplicated label carries no ordering information, so
+    // the honest fallback is the tuple, which separates different payloads on their own
+    // content.
+    const labelled = labels.every((l) => isDecimalTracePath(l)) && new Set(labels).size === labels.length;
     [...group]
       .sort((a, b) => {
         const primary = labelled
@@ -184,7 +286,16 @@ export function normalize(
 
   for (const { it, arrival } of internalRows) {
     const txHash = it.hash.toLowerCase();
-    const n = sentinelRank.get(arrival) ?? 0;
+    // No `?? 0` fallback. Every arrival index is ranked above — the grouping loop walks
+    // exactly `internalRows` — so a miss means that invariant broke, and defaulting to 0
+    // would hand a SECOND row in the same tx the sentinel the first already has. That is
+    // the `UNIQUE (chain_id, tx_hash, log_index, token_id)` key (ADR-005): the page would
+    // either fail on the constraint or, under ON CONFLICT DO NOTHING, silently drop a real
+    // value move. Fail loudly where the invariant broke instead of one layer down.
+    const n = sentinelRank.get(arrival);
+    if (n === undefined) {
+      throw new Error(`internal-transfer sentinel rank missing for arrival index ${String(arrival)} (tx ${txHash})`);
+    }
     events.push({
       chainId: ctx.chainId,
       txHash,

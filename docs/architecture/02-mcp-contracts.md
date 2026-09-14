@@ -405,6 +405,39 @@ output: { inserted: number; skipped_duplicates: number;
                            untrusted?: { counterparty_name: string } }> }
 ```
 
+`file_path` is MODEL-CONTROLLED and therefore hostile (H2): it is a subpath under
+`RECONCIL_IMPORT_DIR`, never a location of its own, and — unlike the export root — this edge
+is FAIL-CLOSED, so with no `RECONCIL_IMPORT_DIR` configured `file_path` is refused outright.
+
+The error contract follows OWNERSHIP, the rule §6.5 and ADR-012 d7 state for `out_dir`. The
+question is not WHERE in the sequence a refusal happens — an earlier wording drew the line at
+confinement and was contradicted by the two `INVALID_INPUT` checks that follow it — but what
+the refusal is a statement ABOUT: the thing the caller asked for, or the condition of the
+filesystem it was asked about.
+
+- `INVALID_INPUT` — a statement about the request. A `..` traversal or an absolute path that
+  escapes; a path that is absent, malformed (a NUL byte) or too long to be a name; a path
+  that resolves outside the directory; a target that is not a regular file (FIFO, socket,
+  device — refused on its `stat`, because `open` on a directory succeeds on every platform);
+  a file over the byte cap. Some of these are only knowable after confinement; that does not
+  make them the filesystem's fault. A different `file_path` fixes every one.
+- `INTERNAL` — a statement about the filesystem. `realpath` failing with anything that is
+  not about the path's shape (`EACCES`, `EIO`, `ELOOP`): the path may be perfectly good and
+  the filesystem will not say, so "your `file_path` is wrong" is false and "try another
+  path" is not a recovery. A file that vanishes between `realpath` and `open`, or is denied
+  there (on POSIX `realpath` consults only search permission on the prefix, so a mode-000
+  file resolves and then fails to open — no race needed). One mutated between its `stat` and
+  its last byte by a co-resident writer. One larger than V8 can hold as a string. Any fault
+  on the open descriptor.
+- The exception, and its only member: the import root itself. Unset, or configured but
+  unusable (missing, or not a directory), is `INVALID_INPUT` although the operator owns it —
+  because the caller CAN act, and the hint says how: pass the CSV inline as `content`. It
+  gets its own message rather than borrowing "file_path could not be resolved", which blamed
+  the argument for the configuration.
+
+Every message is generic; the path, the errno and the underlying fs error stay server-side
+on `Error.cause` (C6).
+
 **`recon_suggest_matches`** — deterministic matching engine run (ADR-010).
 ```ts
 input:  { period?: Period; client_id?: string; record_ids?: string[];          // UUIDs (external_records.id)
@@ -528,8 +561,21 @@ tool_call ids, rounding residues) and registers in the `exports` table.
 `out_dir` is a MODEL-CONTROLLED argument and therefore hostile (H2): every export tool
 resolves it relative to the export root (`RECONCIL_EXPORT_DIR`, default `<cwd>/exports`),
 never as a location of its own — a `..` traversal or an absolute path that escapes the root
-is rejected as `INVALID_INPUT` before anything is written, the same confinement discipline
+is rejected as `INVALID_INPUT` before anything is created, the same confinement discipline
 `recon_import_invoices`' `file_path` applies to reads (§6.4) against `RECONCIL_IMPORT_DIR`.
+
+A refusal the caller does NOT own — a symlink planted between validation and use that sends
+the path outside the root — is `INTERNAL`, not `INVALID_INPUT`: the caller's `out_dir` was
+already valid at that point, so blaming it would be false, and the server-side cause records
+which. The read side applies the same split — see §6.4. The guarantee is that no export
+CONTENT is written outside the root; a directory can be created there by `mkdir -p` in the
+race window before the post-creation check fires (best-effort removed).
+
+A link that stays INSIDE the export root is followed, not refused — it is the operator's own
+layout (`<root>/current -> <root>/2026-09`). The `file_path` on the `exports` row and the
+`path` in the response are therefore the RESOLVED location, never the spelled one: a
+redirect is permitted but must never be invisible in the audit trail. See ADR-012 d7 for the
+three rules this replaced and why each was wrong.
 The one difference: the export root is not fail-closed (it defaults to `<cwd>/exports`
 rather than refusing every call), since export write locations already had a safe default
 before `out_dir` existed.

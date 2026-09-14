@@ -2,7 +2,9 @@ import type { ToolEnvelope } from '@reconcil/mcp-tools';
 import { describe, expect, it } from 'vitest';
 
 import type { Invocation } from '../src/agent/core.js';
-import { parseCommand, renderInvocation } from '../src/repl.js';
+import { UsageError } from '../src/evals/usage-error.js';
+import { DEFAULT_MODEL } from '../src/model.js';
+import { parseCommand, parseReplArgs, renderInvocation } from '../src/repl.js';
 
 describe('parseCommand', () => {
   it('treats a blank line as a no-op', () => {
@@ -44,5 +46,30 @@ describe('renderInvocation', () => {
     const line = renderInvocation(inv);
     expect(line).toContain('analytics_balances');
     expect(line).toContain('tc-9');
+  });
+});
+
+describe('parseReplArgs', () => {
+  it('defaults to the pinned model', () => {
+    expect(parseReplArgs([]).model).toBe(DEFAULT_MODEL);
+    expect(parseReplArgs(['--']).model).toBe(DEFAULT_MODEL);
+  });
+
+  it('takes an explicit --model', () => {
+    expect(parseReplArgs(['--model', 'claude-x']).model).toBe('claude-x');
+  });
+
+  it('refuses --model with the value forgotten instead of silently defaulting', () => {
+    // `argv.indexOf('--model')` + `argv[i + 1]` fell back to the default without a word, and
+    // `--model --verbose` sent "--verbose" to the API as a model id. Same defect args.ts's
+    // `value()` helper exists for, left standing in the second parser.
+    for (const argv of [['--model'], ['--model', ''], ['--model', '--verbose']]) {
+      expect(() => parseReplArgs(argv), argv.join(' ')).toThrow(UsageError);
+      expect(() => parseReplArgs(argv), argv.join(' ')).toThrow(/--model needs a value/);
+    }
+  });
+
+  it('refuses an unknown flag rather than running the default model in silence', () => {
+    expect(() => parseReplArgs(['--modle', 'opus'])).toThrow(/unknown argument: --modle/);
   });
 });

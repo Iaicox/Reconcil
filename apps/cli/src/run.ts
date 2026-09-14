@@ -25,7 +25,9 @@ import { runSuite } from './evals/harness.js';
 import { dbResolver } from './evals/resolver.js';
 import { buildReport, gateForReport, toJson, toMarkdown, type ReportMeta } from './evals/scorecard.js';
 import { makeSeedCase } from './evals/seed-case.js';
-import { SMOKE_IDS, selectSmokeDataset } from './evals/smoke.js';
+import { EXIT_CANNOT_RUN, reportAndExit, reportFailure, unrunnableLines } from './evals/runnability.js';
+import { UsageError } from './evals/usage-error.js';
+import { selectNamedCases, selectSmokeDataset, smokeIds } from './evals/smoke.js';
 import type { CaseResult, GateResult } from './evals/types.js';
 
 /** DATABASE_URL if provided, else a throwaway container. Returns db + a disposer. */
@@ -109,25 +111,38 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
   const args = parseArgs(argv);
 
   if (!process.env['ANTHROPIC_API_KEY']) {
-    console.error('ANTHROPIC_API_KEY is required to run the eval agent (the only place it is needed).');
-    process.exitCode = 1;
-    return;
+    // Through reportAndExit, not console.error + exitCode by hand. That is the third
+    // reporting site this module grew, and the one it does not share is the one that drifts
+    // — the exit-code contract was already false for `cli evals` for two rounds because a
+    // format lived in two places. It also picks up the stderr-flush discipline for free.
+    return reportAndExit(
+      EXIT_CANNOT_RUN,
+      unrunnableLines(
+        {
+          reason: 'ANTHROPIC_API_KEY is unset, and the eval agent is the only thing that needs it',
+          hint: 'set the secret (or run the deterministic suites instead), then re-run the job',
+        },
+        'eval gate',
+      ),
+    );
   }
 
   // parseArgs validated args.suite is a known DATASETS key.
   const all = loadDataset(DATASETS[args.suite]!());
-  // H16: assert the smoke filter matched every SMOKE_ID before any container/provisioning
-  // work (fail fast, cheap) — a renamed/removed id must fail loudly, not silently shrink the
-  // live PR gate (or, if all six drift, run ZERO cases and report PASS).
-  // --cases narrows to specific ids, for investigating a handful of failures without
-  // paying for the whole suite. It filters the dataset only; the prompt, the tools and
-  // every schema the model sees are identical either way.
-  const selected = args.cases.length > 0 ? all.filter((c) => args.cases.includes(c.id)) : all;
-  if (args.cases.length > 0 && selected.length !== args.cases.length) {
-    const missing = args.cases.filter((id) => !all.some((c) => c.id === id));
-    throw new Error(`unknown case id(s): ${missing.join(', ')}`);
+  // H16: assert the selection matched what was named BEFORE any container/provisioning work
+  // (fail fast, cheap). --cases narrows to specific ids, for investigating a handful of
+  // failures without paying for the whole suite; it filters the dataset only, and the
+  // prompt, the tools and every schema the model sees are identical either way. The guards
+  // live in smoke.ts because run.ts cannot be exercised without a container and a key.
+  const selected = selectNamedCases(all, args.cases);
+  // `--smoke --cases gas-001` validated the ids, could hard-fail on them, and then ran the
+  // six smoke cases instead — a narrowing option quietly running something else, on the
+  // command that spends money. Refused rather than guessed at: intersecting them would make
+  // `--smoke` mean something different depending on what else was passed.
+  if (args.smoke && args.cases.length > 0) {
+    throw new UsageError('--smoke and --cases both select cases — pass one or the other');
   }
-  const dataset = args.smoke ? selectSmokeDataset(all, SMOKE_IDS) : selected;
+  const dataset = args.smoke ? selectSmokeDataset(all, smokeIds()) : selected;
 
   // Route recon-backed exports (a Face B journal-draft case's export_journal_drafts) to a
   // throwaway dir instead of cwd/exports (baseDir default). withTempExportDir owns creation
@@ -220,7 +235,10 @@ export async function runEvals(argv: string[] = process.argv.slice(2)): Promise<
 // command delegates to runEvals() directly) — mirrors keygen.ts/seed.ts/http.ts.
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runEvals().catch((err: unknown) => {
-    console.error('eval run failed:', err);
-    process.exit(1);
+    // An environmental fault gets two lines and exit 2; anything else keeps the full object
+    // and exit 1. Both are red — a gate that could not run must stay visible — but the CI
+    // summary should say which job the reader has, rather than making them parse a 40-line
+    // SDK dump to find the sentence "your credit balance is too low".
+    void reportFailure('eval gate', err);
   });
 }
