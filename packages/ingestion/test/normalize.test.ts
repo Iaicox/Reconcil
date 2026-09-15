@@ -309,16 +309,18 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
     // Pinned here rather than in the property test: that generator dedupes on the LOWERCASED
     // tuple, so it can never place two case-variant rows in one group.
     //
-    // Coverage, measured rather than assumed — all three mutants of the lowercasing die, but
-    // not all to the same test, and that is worth knowing:
-    //   drop it on BOTH sides  → this case goes red (the property test stays green: the
-    //                            comparator is still a consistent order, just over raw bytes)
-    //   drop it on ONE side    → sentinel-permutation.property.test.ts goes red, because a
-    //                            one-sided drop destroys antisymmetry and the sort result
-    //                            then depends on input order — which is the whole property.
-    // An earlier version of this comment claimed the one-sided `a.from` mutant survived. It
+    // Coverage, measured rather than assumed. Four single-line mutants drop a `.toLowerCase()`
+    // (`a.from`, `b.from`, `a.to`, `b.to`); every one dies, but not all to the same test:
+    //   both sides of a pair → THIS case goes red; the property test stays green, because the
+    //                          comparator is still a consistent order, just over raw bytes.
+    //   one side only        → the property test goes red, because a one-sided drop destroys
+    //                          antisymmetry and the sort result then depends on input order,
+    //                          which is the whole property. (`b.from` reddens both tests;
+    //                          `a.from` only the property test — the asymmetry is an artefact
+    //                          of which argument position a two-element sort fills first.)
+    // An earlier version of this comment claimed the one-sided `a.from` mutant SURVIVED. It
     // does not; that came from mirroring the assertions in a harness instead of running the
-    // suite. Verified 3/3 runs on each mutant.
+    // suite. Verified 3/3 runs on each of the four.
     const byTo = run([
       trace({ from: '0xaa', to: '0xBBBB', value: '1' }),
       trace({ from: '0xaa', to: '0xaaaa', value: '2' }),

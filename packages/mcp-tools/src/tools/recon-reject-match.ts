@@ -1,9 +1,10 @@
 /**
- * `recon_reject_match` (contract §6.4, write, HITL, ADR-010) — a human rejects one
- * suggested leg. A rejected leg is removed from every sum (invariant + record status) and
+ * `recon_reject_match` (contract §6.4, write, HITL, ADR-010) — rejects one suggested
+ * leg. A rejected leg is removed from every sum (invariant + record status) and
  * never reaches an export. Same edges as confirm: input/output contract validation, with the
- * mutation and its tool_call committed atomically by `runWriteTool` (C2). The agent relays a
- * human decision (P1/P8).
+ * mutation and its tool_call committed atomically by `runWriteTool` (C2). Who makes the
+ * decision rests on the transport client's approval gate — see the note in
+ * recon-confirm-match.ts and ADR-010 d4 as amended 2026-09-15.
  */
 import { reconRejectMatchInput, reconRejectMatchOutput, type ReconMatchDecisionOutput } from '@reconcil/core';
 

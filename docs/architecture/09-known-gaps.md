@@ -273,8 +273,9 @@ saying why. Trigger: adding a third chain. Where:
 only client-accepting tool that does.** `directory/repo.ts` writes `input.client_id` straight
 into the row, and the schema is `z.string().optional()`, not even a UUID. Every other
 client-accepting tool validates through `resolveClientId`, which predicates on
-`clients.tenant_id = ctx.tenantId`: `ledger_track_wallet`, `recon_import_invoices`,
-`recon_suggest_matches`, `recon_status`, the close pack and the journal drafts. The FK accepts
+`clients.tenant_id = ctx.tenantId` — `ledger_track_wallet`, `recon_import_invoices`,
+`recon_suggest_matches`, `recon_status`, the journal drafts, and both close-pack exports
+(`export_pdf_summary` reaches it indirectly through `computeCloseData`). The FK accepts
 any existing `clients.id`, so a tenant can persist an entity referencing another tenant's
 client, and the failure modes distinguish themselves (valid other-tenant UUID accepted,
 missing → PG `23503`, malformed → `22P02`), which makes it an existence oracle. It also breaks
@@ -289,7 +290,9 @@ not in this branch. Trigger: immediately — same branch as the pricing determin
 **`@reconcil/ledger`'s public API cannot express tenancy, so the isolation invariant lives
 entirely in its callers.** `packages/ledger/src` contains zero occurrences of `tenantId`: every
 method takes an already-resolved `string[]` of addresses. The tenant property is derived one
-layer up in `resolveScope`, and every current caller routes through it — verified tool by tool.
+layer up: eight call sites use `resolveScope`, and three (`recon/match-repo.ts`,
+`recon/status-repo.ts`, `tools/journal-drafts-data.ts`) re-derive the same tenant-scoped
+select inline — the same guarantee reached twice, verified caller by caller.
 Nothing enforces that: no type, no lint rule, no dependency-cruiser rule, and `@reconcil/ledger`
 is an exported workspace package, so a future caller assembling addresses another way
 type-checks fine. Why deferred: the cheap fix (a branded `TenantScopedAddresses` that only
@@ -748,8 +751,8 @@ ADR-001. *(ADR sweep, 2026-09-15)*
 configuration names it, and it is an *exclusion*: `eslint.config.mjs` ignores `ee/**`.
 `pnpm-workspace.yaml` mentions it only in a comment — the `packages:` globs simply never match
 `ee/`, so it is outside the workspace by omission rather than by directive. The convention
-itself lives in prose (`README.md`, `CLAUDE.md`, `ee/README.md`, `docs/guide/07-contributing.md`
-twice, and a gitignored kanbn card), which is why it
+itself lives in prose — `README.md`, `CLAUDE.md`, `ee/README.md`, `docs/README.md`, ADR-001,
+`docs/guide/07-contributing.md` twice, and a gitignored kanbn card — which is why it
 reads as enforced. Code dropped there would be invisible to `pnpm lint` (ignored),
 `pnpm typecheck` (not a project reference), `pnpm depcruise` (which cruises `apps packages`)
 and `pnpm check:supply-chain` — so the directory reserved for
@@ -767,8 +770,9 @@ file under `ee/`; better, add an emptiness assertion to CI now. Where: `pnpm-wor
 the whole repo), but a later `git mv` of the connectors into `ee/` leaves their credential
 table, encryption envelope and rotation column behind in the Apache-2.0 half. Probably the
 right split — schema is infrastructure, the OAuth flow is the product — but it should be a
-decision rather than a discovery at move time. Separately: every workspace package declares
-`"license": "Apache-2.0"` (13 of 13) and `site/` declares none, while being named in neither
+decision rather than a discovery at move time. Separately: every workspace member declares
+`"license": "Apache-2.0"` (12 of 12 — 3 apps and 9 packages; the root manifest declares it
+too but is not a member) and `site/` declares none, while being named in neither
 d2's open list nor d3's closed one. Trigger: the gate — this is a pre-split cleanup, not a
 defect. Where: `packages/db/src/schema.ts` (`integration_credentials`), `site/package.json`,
 ADR-013 d1/d3. *(ADR sweep, 2026-09-15)*

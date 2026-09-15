@@ -53,7 +53,7 @@ flowchart TB
         mcps["<b>mcp-server</b><br/>Node/TS. MCP tools over stdio and<br/>streamable HTTP (Fastify host: /mcp, /healthz)"]
         worker["<b>worker</b><br/>Node/TS. BullMQ processors:<br/>backfill, live tail, prices, token resolve,<br/>integrity checks, exports"]
         pg[("Postgres 16<br/>event store + everything durable")]
-        redis[("Redis<br/>BullMQ queues, rate-limit budgets")]
+        redis[("Redis<br/>BullMQ queues (rate-limit budgets are designed, not built — ADR-008 d2)")]
         files[/"export artifacts<br/>(bind-mounted volume)"/]
     end
 
@@ -109,11 +109,12 @@ pnpm workspaces + Turborepo (ADR-001).
 reconcil/
 ├── apps/
 │   ├── mcp-server/        # stdio entry + Fastify host for streamable HTTP (/mcp, /healthz)
-│   ├── worker/            # BullMQ processors (ingestion, prices, exports, integrity)
+│   ├── worker/            # BullMQ processors (tail, backfill, prices, onboard, anchor, probe;
+│                          #  exports/integrity/token-resolve are ADR-008 scope, not built)
 │   └── cli/               # thin agent (Agent SDK): demo REPL + `evals run`
 ├── packages/
 │   ├── core/              # domain types, zod schemas, Money, sanitizer, chains config
-│   ├── db/                # drizzle schema, SQL migrations, tenant-scoped repositories
+│   ├── db/                # drizzle schema, SQL migrations, tenant bootstrap
 │   ├── ingestion/         # ChainDataProvider adapters, normalizer, checkpoint state machine
 │   ├── pricing/           # DefiLlama/CoinGecko/ECB adapters, snapshot service
 │   ├── ledger/            # deterministic aggregations (pure functions + SQL builders)

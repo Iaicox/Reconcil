@@ -1,7 +1,7 @@
 /**
  * DefiLlama — primary price source (ADR-007). Keyed by `{chain}:{address}` for
  * erc20 (no ID-mapping table needed) and `coingecko:{id}` for a chain's native
- * token. Historical endpoint returns the close nearest a timestamp within
+ * token. Historical endpoint returns, per its own docs, the close nearest a timestamp within
  * `searchWidth`; a missing coin key ⇒ null (caller falls back / PRICE_MISSING).
  */
 import { numberToDecimalString } from '../decimal.js';

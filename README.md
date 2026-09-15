@@ -68,7 +68,7 @@ apps/
   cli/          thin agent (demos, eval runs)
 packages/
   core/         domain types, zod schemas, Money, sanitizer, chains config
-  db/           drizzle schema, SQL migrations, tenant-scoped repositories
+  db/           drizzle schema, SQL migrations and tenant bootstrap
   ingestion/    provider adapters, normalizer, checkpoint state machine
   pricing/      DefiLlama/CoinGecko/ECB adapters, snapshot service
   ledger/       deterministic aggregations (pure functions + SQL builders)

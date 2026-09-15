@@ -170,11 +170,19 @@ in adapters; correctness logic exists once.
 
 **Rate limiting & failover:**
 
-- Token bucket per `(provider, api_key)` (worker-side, Redis-backed budget counters);
-  Etherscan daily budget guard: when the day's budget nears exhaustion, backfills pause,
-  tail keeps running (tail is cheap; backfills are the spender).
-- Circuit breaker per provider: open after 5 consecutive failures, half-open probe after
-  60 s. Open primary ⇒ route to secondary. Both open ⇒ checkpoint `error` + backoff retry.
+*Corrected 2026-09-15 (ADR sweep): the first two bullets described machinery that does not
+exist. They are kept as the intended design, marked as such; ADR-008 d2 and ADR-009 d4 carry
+the same correction, and `09-known-gaps.md` tracks both.*
+
+- **Not built.** Token bucket per `(provider, api_key)` (worker-side, Redis-backed budget
+  counters) and an Etherscan daily budget guard pausing backfills while tails keep running.
+  There is no rate limiter of any kind on the chain path today — only the price fetcher is
+  throttled — and backfill runs at concurrency 5 against a tail at 2, which inverts the
+  intended priority under contention.
+- **Not built.** Circuit breaker per provider: open after 5 consecutive failures, half-open
+  probe after 60 s, open primary ⇒ route to secondary. Failover today is a try/catch walk
+  over the candidate list with no state, and the worker rebuilds the provider bundle every
+  tick, so per-provider state would not survive anyway.
 - Every stored event records `provider` — mixed-provider histories are auditable. The
   `native` stream makes two calls per page (txlist, txlistinternal) and stamps both with
   the provider that answered last: a failover *between* the two calls mislabels the
@@ -236,7 +244,7 @@ chain+contract, generous free history) is asked for a literal **00:00 UTC** time
 provider RESOLVES that to is not established in this repo — ADR-007 d1 flags it as inference,
 and `09-known-gaps.md` records that nothing stores the instant a price came from. CoinGecko
 also needs a `coingecko_id` mapping that no production path currently writes (same register).
-ECB daily reference rates into `fx_rates`. Gap healing: valuation code never fetches inline — a
+ECB daily reference rates are fetched into `fx_rates` by the same job. Gap healing: valuation code never fetches inline — a
 missing snapshot yields `PRICE_MISSING` (C4) and enqueues the gap for the next `prices`
 run; deterministic reads, eventually complete data.
 
@@ -245,10 +253,10 @@ run; deterministic reads, eventually complete data.
 | Failure | Behavior |
 |---|---|
 | Worker crash mid-page | Page re-runs; idempotent inserts dedupe; cursor is transactional |
-| Provider 5xx / timeout burst | Circuit breaker → secondary provider; `provider` column records the switch |
-| Daily budget exhausted | Backfills pause (`RATE_LIMITED` on demand-driven tools), tail continues |
+| Provider 5xx / timeout burst | Failover to the secondary on the failing call; `provider` column records the switch. (Intended: a circuit breaker, so a dead primary is not retried every call — not built, see §5.) |
+| Daily budget exhausted | *Intended:* backfills pause (`RATE_LIMITED` on demand-driven tools), tail continues. Not built — no budget counter exists. |
 | Provider returns inconsistent page | Zod validation fails → job retry, page quarantined into DLQ payload for inspection |
-| Same event, different provider values | First write wins; integrity job flags balance drift; conflict logged for manual review (never silently overwritten) |
+| Same event, different provider values | First write wins; the integrity job (designed, not built — ADR-008 d1) would flag balance drift; conflict logged for manual review (never silently overwritten) |
 | Redis lost | Queues rebuild from checkpoints: repeatables re-register on worker boot; state lives in Postgres |
 | Unmatchable erc20 transfer | `assignErc20Metadata` throws → page aborts → job DLQs; the stream wedges until an operator intervenes (deferred quarantine, below) |
 

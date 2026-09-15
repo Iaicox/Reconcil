@@ -71,9 +71,10 @@ Both raw and scaled exist, each exactly once:
   The rule has to be about what a division **produces**, not that one happens. Division
   producing MONEY happens in three classes, and only the third wants a clone:
 
-  1. **Exact power-of-ten scaling** — `formatUnits`/`parseUnits` in `core/money.ts`, raw base
-     units ÷ 10^decimals. Terminating by construction, so it is done in `bigint`/string with
-     no library at all. That carve-out is the previous paragraph's own point.
+  1. **Exact power-of-ten scaling** — `formatUnits` in `core/money.ts`, raw base units ÷
+     10^decimals. Terminating by construction, so it is done in `bigint`/string with no
+     library at all; `parseUnits` is its inverse and multiplies, needing one just as little.
+     That carve-out is the previous paragraph's own point.
   2. **Bounded integer arithmetic over minor units** — `computeBand`
      (`recon/src/match/score.ts`) derives a tolerance as `(openMinor × pctE4) / 1_000_000n`
      in `bigint`, truncating. It divides money and has no clone, deliberately: the operands

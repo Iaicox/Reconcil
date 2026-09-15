@@ -225,7 +225,7 @@ could not attach to any invoice is money you received without a matching bill �
 
 The record's status is re-derived from its confirmed legs: `open` → `partially_matched` →
 `matched` → `overpaid`, by comparing the confirmed total against the invoice amount within
-the canonical tolerance band. (`void` exists too, but only a human sets it; it is never
+the canonical tolerance band. (`void` exists too, and no shipped tool sets it — the state is in the schema and in the guard that refuses decisions on a void record, but nothing writes it (see 09-known-gaps.md); it is never
 derived.)
 
 Rejecting releases the leg:

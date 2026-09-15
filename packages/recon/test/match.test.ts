@@ -158,7 +158,7 @@ describe('suggestForRecord — bounded subset (split) search', () => {
     expect(suggestForRecord(rec, events)).toEqual([]);
   });
 
-  it('also leaves a record open when the exact split needs a member outside the top-6-by-size pool (known limitation, req 5)', () => {
+  it('also leaves a record open when the exact split needs a member outside the top-6 pool (known limitation, req 5)', () => {
     // The pool is a top-6 SELECTION, not "any 6" — every candidate above `open + band` is
     // dropped first, the survivors are sorted descending, and only then are 6 taken
     // (engine.ts header; the "≤ 6 largest in the window" wording this comment used to carry

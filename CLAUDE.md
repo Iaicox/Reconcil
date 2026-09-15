@@ -60,11 +60,14 @@ with full rationale.
 
 - **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)`
   (uint256 does not fit BIGINT); JSON carries money as decimal strings; TS uses `bigint` or a
-  decimal clone. Aggregate raw in SQL, scale once at the edge. Rounding only where a quotient
-  is non-terminating, and then only at an export boundary. Two sanctioned carve-outs, both in
-  the matcher: `computeBand` truncates in bigint (integer operands at a fixed scale), and
-  `amountScore` converts two money bigints to `number` to produce a ranking score — the one
-  place money legitimately becomes a `number`, because nothing monetary comes back out.
+  decimal clone. Aggregate raw in SQL, scale once at the edge. **Rounding only at export
+  boundaries** — that is the rule, and it covers rounding a fiat sum to 2dp, not only a
+  non-terminating quotient. Two sanctioned exceptions, both inside the matcher and neither
+  producing money that reaches a report: `computeBand` truncates in bigint (integer operands
+  at a fixed scale), and `amountScore` converts two money bigints to `number` for a ranking
+  score — the one place money legitimately becomes a `number`, because nothing monetary comes
+  back out. *(An earlier version of this line narrowed the rule to "only where a quotient is
+  non-terminating", which the exporters violate on every journal line.)*
   *(Branded types exist (`RawAmount`, `DecimalString`) but `RawAmount` is applied nowhere, and
   there is no lint rule against `number` arithmetic — what actually holds the line is Zod
   rejecting JSON numbers at the wire, `mode: 'bigint'` at the DB edge, and SQL-side
@@ -89,8 +92,10 @@ with full rationale.
 - **Tenant identity comes from the transport session, never from tool arguments.**
   Chain data tables are global by design. Tenant-owned repositories (recon, directory, audit)
   take a tenant context and predicate on it; `packages/ledger` does NOT — it takes an address
-  set already resolved from the tenant's `wallets` by `resolveScope`, so a new caller of the
-  ledger must resolve its own scope the same way. Nothing enforces that. (ADR-006, ADR-012)
+  set already resolved from the tenant's `wallets` — eight call sites via `resolveScope`,
+  three re-deriving the same tenant-scoped select inline — so a new caller of the ledger must
+  resolve its own scope the same way. Nothing enforces that, and one write tool
+  (`directory_upsert_entity`) does not validate its `client_id` at all. (ADR-006, ADR-012)
 - **MCP tool wire names use underscores** (`analytics_balances`) — dots break the Claude
   API tool-name constraint; `analytics.*` namespaces are logical only. Swept over the whole
   registry, with uniqueness, in `apps/mcp-server/test/server.test.ts`. (ADR-012)

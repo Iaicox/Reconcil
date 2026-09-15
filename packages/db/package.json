@@ -2,7 +2,7 @@
   "name": "@reconcil/db",
   "version": "0.0.0",
   "private": true,
-  "description": "Drizzle schema, SQL migrations, tenant-scoped repositories.",
+  "description": "Drizzle schema, SQL migrations, pool wiring and tenant bootstrap.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {

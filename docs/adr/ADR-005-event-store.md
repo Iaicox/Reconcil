@@ -50,8 +50,8 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    use the tuple.
 
    The label path's stated benefit, preserving execution order, **reached no consumer.** No
-   PRODUCTION read orders by `log_index` descending. Six order by it
-   ascending: the five ledger reads (`balances.ts`, `counterparties.ts`, `flows.ts`, `gas.ts`,
+   PRODUCTION read orders by `log_index` descending. Six order by it ascending: the five
+   ledger reads (`balances.ts`, `counterparties.ts`, `flows.ts`, `gas.ts`,
    `list-events.ts`) and the close pack's transactions CSV, which is an in-memory sort rather
    than a query but renders the same inversion into an exported file. Because the
    sentinel is `-(1000+n)`, `n = 2` sorts *before* `n = 0` in every one of them: execution

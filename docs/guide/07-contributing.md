@@ -56,7 +56,7 @@ apps/
   cli/          thin agent: demo REPL + eval runner (Anthropic SDK Tool Runner)
 packages/
   core/         domain types, Zod schemas, Money, sanitizer, chain config — imports nothing internal
-  db/           Drizzle schema, migrations, tenant-scoped repositories — depends only on core
+  db/           Drizzle schema, migrations, tenant bootstrap — depends only on core
   ingestion/    provider adapters, normalizer, checkpoint state machine
   pricing/      DefiLlama / CoinGecko / ECB adapters, snapshot service
   ledger/       deterministic aggregations: pure functions + SQL builders
@@ -127,21 +127,26 @@ without noticing.
 
 - **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)` — uint256
   does not fit in `BIGINT`. JSON carries money as decimal strings; TypeScript uses `bigint` or
-  a decimal library with branded types. Aggregate raw in SQL, scale once at the edge, round
-  only at export boundaries. (ADR-004)
+  a decimal clone. Aggregate raw in SQL, scale once at the edge, round only at export
+  boundaries — two sanctioned exceptions inside the matcher (`computeBand` truncates in
+  bigint, `amountScore` makes a ranking score out of two money bigints). Branded types exist
+  but `RawAmount` is applied nowhere and there is no money lint rule; see ADR-004. (ADR-004)
 - **The LLM never computes.** Every figure comes from a deterministic function and must be
   traceable through the citation envelope. A number without provenance is a bug. (P1/P2, ADR-012)
 - **`chain_events` is append-only.** No UPDATE, no DELETE, ever. Idempotency via
   `UNIQUE (chain_id, tx_hash, log_index, token_id)`; ingestion never advances past
   `head − finality_depth`; there is deliberately no reorg rollback path. (ADR-005)
 - **No signing or key material anywhere in the dependency tree.** Read-only by construction
-  (MiCA). Enforced by depcruise plus a lockfile scan. (ADR-011)
+  (MiCA). Enforced by `pnpm check:supply-chain` (lockfile scan); the depcruise rule sees only
+  direct first-party imports and cannot speak for the tree. (ADR-011)
 - **On-chain and imported strings are hostile.** Only sanitized `*_display` values may reach
   tool responses, and only under `untrusted` keys. `*_raw` string fields and provider `raw`
   JSONB never leave the server. (The trusted numeric `amount_raw` — uint256 base units as a
   decimal string — is not hostile input and does cross the wire.) (ADR-011)
-- **Tenant identity comes from the transport session, never from tool arguments.** All
-  repository methods are tenant-scoped; chain data tables are global by design. (ADR-006, ADR-012)
+- **Tenant identity comes from the transport session, never from tool arguments.** Chain data
+  tables are global by design. The tenant-owned repositories take a tenant context;
+  `packages/ledger` does not — it receives an address set resolved from the tenant's wallets
+  one layer up, and nothing enforces that a new caller does the same. (ADR-006, ADR-012)
 - **MCP wire names use underscores.** `analytics_balances`, not `analytics.balances` — dots
   break the Claude API tool-name constraint. (ADR-012)
 - **No Python.** TypeScript and Node only.

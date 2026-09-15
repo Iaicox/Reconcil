@@ -8,8 +8,9 @@ import type { FetchJson } from './transport.js';
 export type { FetchJson };
 
 /** A token's figure for one UTC date as returned by a source, in `currency`. Not a close:
- *  both adapters ask for the start of the date (ADR-007 d1, amended 2026-09-15), and this
- *  type deliberately carries no timestamp — see 09-known-gaps.md on the missing provenance. */
+ *  DefiLlama is asked for a literal 00:00 UTC timestamp and CoinGecko for a bare date, which
+ *  requests no instant at all (ADR-007 d1, amended 2026-09-15). This type deliberately carries
+ *  no timestamp — see 09-known-gaps.md on the missing provenance. */
 export interface DailyPrice {
   price: string; // canonical decimal string
   currency: string; // 'USD'

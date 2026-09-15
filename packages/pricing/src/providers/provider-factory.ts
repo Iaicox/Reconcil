@@ -18,7 +18,7 @@ export function buildPriceProviderBundle(opts: {
   };
 }
 
-/** Try sources in order; the first non-null close wins, tagged with its source. */
+/** Try sources in order; the first non-null price wins, tagged with its source. */
 export async function firstPrice(
   providers: PriceProvider[],
   q: PriceQuery,

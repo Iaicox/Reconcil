@@ -42,7 +42,8 @@ of the data: chain events and prices are public facts, identical for everyone.
    enforces it. `@reconcil/ledger` is an exported workspace package whose public API cannot
    express tenancy, so a future caller that assembles addresses another way type-checks
    fine. Every current caller does resolve its addresses from the tenant's `wallets` —
-   eleven through `resolveScope`, and three (`recon/match-repo.ts`, `recon/status-repo.ts`,
+   most through `resolveScope` (eight call sites, serving the six analytics tools plus the
+   close pack and `ledger_status`), and three (`recon/match-repo.ts`, `recon/status-repo.ts`,
    `tools/journal-drafts-data.ts`) by re-deriving the same tenant-scoped select inline, which
    is the same guarantee reached a second way rather than an exception to it. The
    missing enforcement is tracked in `09-known-gaps.md`.

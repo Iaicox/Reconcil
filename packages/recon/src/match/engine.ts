@@ -25,7 +25,8 @@
  * gives a different pool whenever the window holds an event above `open + band` (the OPEN
  * amount plus tolerance, not the record total). The candidates entering all this are already
  * restricted to the record's date window, which the wording above does not repeat but the
- * code applies first (`windowed`). The search then tries every subset within the pool (the
+ * code applies first (`windowed`) — when there IS one: `referenceDay` returns null for a
+ * record with neither `dueOn` nor `issuedOn`, and then no date restriction runs at all. The search then tries every subset within the pool (the
  * documented complexity cap, ADR-010 alt "unbounded subset-sum"), and ranks subsets by
  * FEWEST EVENTS first, with confidence only as a tiebreak — so the chosen split is the
  * smallest that fits, not the most confident one.

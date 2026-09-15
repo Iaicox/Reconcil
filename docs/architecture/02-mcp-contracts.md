@@ -135,14 +135,17 @@ interface Scope {              // default: all wallets of the tenant
 interface Period { from: string; to: string; }   // ISO dates, inclusive, UTC
 interface Valuation {
   currency: 'USD' | 'EUR';
-  policy?: 'market' | 'peg_for_stables';         // default: tenant setting
+  policy?: 'market' | 'peg_for_stables';         // default: 'market' (ADR-007 d4)
 }
 // Pagination: opaque cursor = base64(chain_id, block_number, log_index, id).
 ```
 
-Tenant identity is **not** an input: it comes from the transport session (ADR-012) and is
-injected into every repository call. A tool can never be asked to read another tenant's
-data.
+Tenant identity is **not** an input: it comes from the transport session (ADR-012). Every
+tool resolves its scope from that tenant's `wallets` before any event query runs, and the
+tenant-owned repositories take the tenant context directly. It is **not** injected into every
+repository call — `packages/ledger` has no tenant parameter at all and receives an
+already-resolved address list (ADR-006 d2 as amended 2026-09-15). A tool can never be asked
+to read another tenant's data.
 
 ## 6. Tool catalog
 
@@ -323,10 +326,12 @@ output: { wallets: Array<{ address: string; chain_id: number;
             integrity?: { checked_at: string; block: number; clean: boolean;
                           drifts: Array<{ token: string; computed: DecimalString;
                                           provider: DecimalString }> };
-            estimate?: { tx_count_hint: number; suggests_anchored: boolean } }> }  // >50k probe (async)
+            estimate?: { tx_count_hint: number; suggests_anchored: boolean } }> }  // nonce>50k probe
 ```
 
-The `estimate` carries the **>50k probe** result (ADR-008 Q5). The probe runs
+The `estimate` carries the **nonce > 50k probe** result (ADR-008 Q5) — `tx_count_hint` is the
+account nonce, so it counts only outbound transactions (ADR-008 d4, amended 2026-09-15). The
+probe runs
 asynchronously worker-side after `ledger_track_wallet` seeds the wallet, so it surfaces
 here — not in the write tool's response (the MCP server may not import the provider
 layer; ADR-011 boundary). `suggests_anchored` is `true` when the estimated transaction
@@ -349,7 +354,7 @@ address is never downgraded). `mode: 'full'` seeds `queued` checkpoints (full-hi
 backfill); `mode: 'anchored'` seeds `anchoring` with `anchor_from`, and the worker writes
 an `opening_balance` baseline at the resolved anchor block (ADR-008). `enqueued.job_id` is
 the deterministic id the scanner will use — a `backfill:*` id under `full`, an `anchor:*`
-id under `anchored`. The tool never silently chooses anchored: the >50k probe's
+id under `anchored`. The tool never silently chooses anchored: the nonce probe's
 `suggests_anchored` surfaces on `ledger_status` and the **human decides** (HITL), then
 re-tracks with `mode: 'anchored'`.
 
@@ -639,8 +644,10 @@ sanitizes to nothing is a row error, not a silently-substituted placeholder.
   recommendations; eval cases assert refusal + redirect. Tools themselves never return
   judgment fields (no "performance", no "recommendation") — only facts.
 - **Read-only by construction.** No signing libraries, no key material, no transaction
-  construction anywhere in the dependency tree — enforced by a dependency-cruiser rule
-  banning `ethers`' Wallet/signer modules and equivalents, checked in CI.
+  construction anywhere in the dependency tree — enforced by `pnpm check:supply-chain`, which
+  scans both lockfiles. The dependency-cruiser rule banning `ethers`' Wallet/signer modules
+  and equivalents runs in CI too but sees only direct first-party imports, so it cannot speak
+  for the tree (ADR-011 as amended 2026-09-15).
 - **Drafts, not filings.** Every journal artifact is labeled draft-for-professional-review
   in file content and tool output.
 

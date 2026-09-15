@@ -1,5 +1,5 @@
 /**
- * The fill worklist: which (token, date) closes and which FX dates are still
+ * The fill worklist: which (token, date) prices and which FX dates are still
  * missing, derived from `chain_events` (only what the ledger could actually
  * value). A price gap = a verified token on a UTC activity date with no market
  * snapshot yet ('peg' rows don't count — they aren't a market price).

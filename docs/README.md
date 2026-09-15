@@ -75,7 +75,7 @@ Reading order:
 | Prisma vs Drizzle | Drizzle | ADR-002 |
 | Fastify vs NestJS; HTTP needed at all? | Minimal Fastify host only (`/mcp`, `/healthz`); no REST in MVP | ADR-003 |
 | Amount storage & conversion rules | `NUMERIC(78,0)` raw; aggregate raw, scale at edge; strings on wire | ADR-004, 01 §2 |
-| Backfill: full vs window; prioritization | Full by default; anchored window > 50k txs; live > backfill | ADR-008, 03 §3 |
+| Backfill: full vs window; prioritization | Full by default; anchored window at nonce > 50k (outbound txs only — ADR-008 d4); live > backfill | ADR-008, 03 §3 |
 | MCP transport & tool auth | stdio (self-host) + streamable HTTP (bearer) ; OAuth post-gate | ADR-012, 02 §9 |
 | Eval dataset format & demo gate | YAML cases, deterministic graders; citations/guardrails/injections 100%, numeric ≥ 90% (27/30, 2-of-3) | 04 §5–6 |
 
