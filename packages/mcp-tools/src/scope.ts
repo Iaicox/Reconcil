@@ -1,6 +1,8 @@
 /**
  * Resolve a `Scope` (contract §5) to concrete tracked addresses, always within
- * `ctx.tenantId` (ADR-006: a tool can never reach another tenant's data). Scope
+ * `ctx.tenantId` — every address this returns came from a row predicated on the
+ * tenant's `wallets` (ADR-006). It speaks for the tools that route through it, not
+ * for every tool: see `directory/repo.ts` and `09-known-gaps.md`. Scope
  * fields intersect; default (no scope) = all of the tenant's wallets. Unknown
  * wallet ids / untracked addresses are loud domain errors, not silent empties.
  */

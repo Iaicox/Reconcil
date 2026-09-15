@@ -13,11 +13,11 @@ in disguise: a balance is only correct if computed from the address's complete h
 
 ## Decision
 
-1. **BullMQ on Redis**, queues: `tail` (high priority, one repeatable tick per chain),
-   `backfill` (low priority, one page-window job per chain/address/stream), `prices`
-   (daily), and — **as scope, not as shipped** — `token-resolve`, `integrity`, `exports`
-   (see the note below). Exponential backoff (1 min→1 h),
-   8 attempts, DLQ; failures surface in `ledger_status`, never swallowed.
+1. **BullMQ on Redis**, queues: `tail` (one repeatable tick per chain), `backfill` (one
+   page-window job per chain/address/stream), `prices` (daily), `onboard`, `anchor` and
+   `probe` — plus `token-resolve`, `integrity` and `exports` as scope, not as shipped (see
+   the note). Exponential backoff (1 min→1 h), 8 attempts, DLQ; failures surface in
+   `ledger_status`, never swallowed.
 
    *Note 2026-09-15 (ADR sweep — the decision stands, the implementation does not reach it).*
    The surfacing half is not wired. `ingestion_checkpoints` has the `status='error'` state and
@@ -27,8 +27,9 @@ in disguise: a balance is only correct if computed from the address's complete h
    its 8 attempts sits at `queued` forever (the 15-second onboard re-add dedupes against the
    retained failed job) while `ledger_status` reports it as normally queued. "Never swallowed"
    is the requirement and it is not met. Tracked in `09-known-gaps.md`. The `token-resolve`,
-   `integrity` and `exports` queues listed above are likewise unimplemented scope, noted in
-   the worker.
+   `integrity` and `exports` queues listed above are likewise unimplemented: only
+   `token-resolve` is noted in the worker, where the token writer inlines the unresolved
+   insert it would have done; nothing anywhere mentions an `integrity` or `exports` queue.
 2. **Live beats backfill**: separate queues and separate workers, so a whale backfill
    cannot starve freshness by occupying the tail worker.
 

@@ -170,10 +170,11 @@ single-company rows (`client_id IS NULL`) deduplicating as one scope.
 
 **`matches` are pair-level legs**, m:n by construction:
 
-- one invoice ← several transfers (partial payments): several rows share
-  `external_record_id`;
-- one transfer → several invoices (batch settlement): several rows share
-  `chain_event_id`;
+- one invoice ← several transfers (partial payments): several rows share `external_record_id`;
+- one transfer → several invoices (batch settlement): several rows share `chain_event_id`.
+  Suggested legs in this shape ARE proposed; what the engine never does is apportion — each
+  leg claims the whole event, so only one of them can be confirmed (ADR-010 d2, noted
+  2026-09-15);
 - `amount_applied_raw` says *how much of the event* this leg consumes.
 
 Cross-row invariants are enforced in the repository layer (single writer, SERIALIZABLE

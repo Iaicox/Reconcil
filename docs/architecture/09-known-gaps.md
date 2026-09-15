@@ -261,14 +261,26 @@ entry above. Where: `packages/pricing/src/providers/defillama.ts`,
 `packages/pricing/src/providers/types.ts` (`DailyPrice`), `packages/pricing/src/fill.ts`.
 *(ADR sweep, 2026-09-15)*
 
-**A chain is two config entries, not one, and the second miss is silent.** ADR-009 d3 says
+**A chain is four sites, not one entry, and every miss after the first is silent.** ADR-009 d3 says
 "adding an EVM chain = one entry (+ API key)". `ChainConfig` carries no price-source key, so
 pricing keeps its own map — `CHAIN_SLUG` — and `fill.ts` skips an unmapped chain with a bare
 `continue`: no log, no counter, nothing in `FillResult`. A chain added per the ADR ingests
 correctly and is then never priced, with every figure returning `PRICE_MISSING` and nothing
-saying why. Trigger: adding a third chain. Where:
-`packages/pricing/src/providers/types.ts` (`CHAIN_SLUG`), `packages/pricing/src/fill.ts`,
-`packages/core/src/chains.config.ts`. *(ADR sweep, 2026-09-15)*
+saying why. There is a THIRD site behind that one, found while correcting the copies of this
+entry: the curated-token seed migration is written per chain, the runtime token writer marks
+every token `verified: false`, and `priceGaps` (`verifiedOnly` defaults true and nothing
+overrides it — `FillDeps` has no such field) and `materializePegSnapshots`
+(`WHERE verified = true`) both read nothing without it — so a `CHAIN_SLUG` entry alone still
+does not price the chain, and the default analytics filter shows it as empty too. A FOURTH
+site is conditional on the chain naming a new env var: `providerEnvFrom` hardcodes three
+keys and the worker's config schema declares the same three, so a chain with its own
+`rpcUrlEnv` (every OP-stack chain) makes `buildProviderBundle` throw on each call.
+Trigger: adding a third chain. Where: `packages/pricing/src/providers/types.ts`
+(`CHAIN_SLUG`), `packages/pricing/src/fill.ts`, `packages/pricing/src/gaps.ts`,
+`packages/pricing/src/snapshot-service.ts`, `packages/ingestion/src/write/token-repo.ts`,
+`packages/db/migrations/0002_seed_curated_tokens.sql`, `apps/worker/src/config.ts`,
+`apps/worker/src/providers.ts`, `packages/core/src/chains.config.ts`.
+*(ADR sweep, 2026-09-15)*
 
 ## Tenancy & directory
 
@@ -384,27 +396,24 @@ against a volatile token; write the repro before changing anything. Where:
 **The subset-search heuristic's known miss-mode: the candidate pool is a top-6 SELECTION,
 not "any ≤ 6 events."** An exact split whose smallest member falls outside that pool is
 unreachable by the search, even though ≤ 6 events would in principle suffice — a second,
-independent miss-mode from the already-documented "needs a larger combination" case. *(The
-pool is built in three steps and the order matters: every event above `open + band` is dropped
-FIRST, the survivors are sorted descending with an event-id tiebreak, and only then are 6
-taken. This entry used to say "the ≤ 6 largest-valued events in the date window", copying the
-ADR-010 amendment's wording, and that is a different pool — with `open = 3000`, `band = 30`
-and a window of `[5000, 900, 800, 700, 600, 500, 400]` the real pool is `{900…400}`, not
-`{5000…500}`. Corrected 2026-09-15; the miss-mode recorded here is unaffected. Worth noting
-how it survived: it agreed with the other copy.)* Why deferred: a conscious complexity
-cap (ADR-010), now characterization-tested so widening the pool later is a deliberate
-choice, not an accidental behavior change; records the search misses simply stay
-`open`/`partial` for manual matching — a visible, honest failure mode, not silent
-incorrectness. Trigger: real invoice data shows the small-member-outside-top-6 case often
-enough to justify a larger or smarter pool (e.g. also including the ≤ 6 smallest, or a
-proper bounded subset-sum). Where: `packages/recon/src/match/engine.ts`
-(`MAX_SUBSET_EVENTS`, `findBestSubset`), and described in order in ADR-010 d3's 2026-09-15
-amendment, `02-mcp-contracts.md` §6.4 and `packages/recon/test/match.test.ts`. (This line
-used to cite the 2026-08-06 "Honest subset-search wording" amendment as the documentation.
-That amendment carried the wrong pool description too; its wording was corrected in place on
-2026-09-15, and the authoritative description now lives in d3.)
-*(sweep — ADR-010 amendment on `fix/match-engine-edges`;
-pool description corrected 2026-09-15)*
+independent miss-mode from the already-documented "needs a larger combination" case. The
+pool is built in three steps and the order matters: every event above `open + band` is
+dropped FIRST, the survivors are sorted descending with an event-id tiebreak, and only then
+are 6 taken. Why deferred: a conscious complexity cap (ADR-010), now characterization-tested
+so widening the pool later is a deliberate choice, not an accidental behavior change; a
+record the search misses stays `open` or, if a single event still qualifies on address,
+`partial` — a visible, honest failure mode, not silent incorrectness. Trigger: real invoice
+data shows the small-member-outside-top-6 case often enough to justify a larger or smarter
+pool (e.g. also including the ≤ 6 smallest, or a proper bounded subset-sum). Where:
+`packages/recon/src/match/engine.ts` (`MAX_SUBSET_EVENTS`, `findBestSubset`); the
+authoritative description is ADR-010 d3,
+mirrored in `02-mcp-contracts.md` §6.4 and `packages/recon/test/match.test.ts`. *(ADR sweep,
+2026-09-15: this entry, ADR-010's 2026-08-06 amendment and §6.4 all described the pool as
+"the ≤ 6 largest-valued events in the date window" — a different pool, and all three agreed
+with each other, which is how it survived. With `open = 3000`, `band = 30` and a window of
+`[5000, 900, 800, 700, 600, 500, 400]` the real pool is `{900…400}`, not `{5000…500}`.
+Corrected in place; the miss-mode recorded here is unaffected. Originally raised by the
+ADR-010 amendment on `fix/match-engine-edges`.)*
 
 **`score.ts`'s weight-rescale branch is unreachable by the current `WEIGHTS` and untested;
 there is no final bound if `WEIGHTS` is ever retuned above 1.** The rescale exists to keep
@@ -627,9 +636,10 @@ claimed the write path was covered.
 different slice. Separately, `open()` on a writer-less FIFO blocks forever and holds one of
 libuv's four threadpool threads; four such calls wedge every filesystem operation in the
 process. Refusing non-regular files closes the read, not the open — that needs `O_NONBLOCK`,
-also unavailable through the promises API. Why deferred: the threat model is a co-resident writer with filesystem
-access to the export/import root — already inside the trust boundary those roots assume —
-not the model-controlled-input threat (H2) the confinement logic was built to close.
+also unavailable through the promises API. Why deferred: the threat model is a co-resident
+writer with filesystem access to the export/import root — already inside the trust boundary
+those roots assume — not the model-controlled-input threat (H2) the confinement logic was
+built to close.
 Trigger: if either root is ever shared with a less-trusted co-tenant process. Where:
 `packages/mcp-tools/src/fs-confine.ts`, `src/tools/export-run.ts`
 (`writeExportFiles`), `src/tools/export-journal-drafts.ts`, `src/recon/import-fs.ts`.

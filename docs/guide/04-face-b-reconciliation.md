@@ -194,9 +194,13 @@ transient query parameter (ADR-010).
 
 The engine searches subsets drawn from a bounded pool: candidates worth more than the open
 amount plus tolerance are dropped, what remains is sorted largest-first, and the top **6**
-are kept. One invoice settled by three ordinary transfers is found; an exact split whose
-smallest member falls outside that pool is not, and the record simply stays open (ADR-010 d3). Complexity is capped deliberately and documented rather
-than hidden in a prompt.
+are kept; among the subsets that fit, the one with the **fewest events** wins, confidence
+only breaking ties. One invoice settled by three ordinary transfers is found; an exact split
+whose smallest member falls outside that pool is not. The record can still reach `partial` or
+`paid` through a single-event leg, but only when the event matches its expected address or a
+known counterparty — the amount gate cannot fire here, since the subset search runs only when
+nothing single is within band. A record with neither stays `open` (ADR-010 d3). Complexity is
+capped deliberately and documented rather than hidden in a prompt.
 
 ### Valuation
 

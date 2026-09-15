@@ -27,13 +27,13 @@ alternatives.
 ## Commands
 
 ```bash
-pnpm install      # Node >= 24, pnpm 11 (packageManager is pinned)
-pnpm build        # turbo run build — tsc -b with project references
-pnpm typecheck    # turbo run typecheck (build-ordered tsc -b)
-pnpm lint         # eslint per package (flat config at repo root)
-pnpm test         # vitest per package (--passWithNoTests for test-less packages)
-pnpm depcruise    # boundary rules + DIRECT signing-lib imports — needs `pnpm build` first
-pnpm check:supply-chain  # the transitive signing ban: scans both lockfiles (ADR-011)
+pnpm install             # Node >= 24, pnpm 11 (packageManager is pinned)
+pnpm build               # turbo run build — tsc -b with project references
+pnpm typecheck           # turbo run typecheck (build-ordered tsc -b)
+pnpm lint                # eslint per package (flat config at repo root)
+pnpm test                # vitest per package (--passWithNoTests for test-less packages)
+pnpm depcruise           # boundary rules + DIRECT signing-lib imports — needs a build first
+pnpm check:supply-chain  # the transitive signing ban (ADR-011)
 ```
 
 Dev entrypoints (tsx): `pnpm --filter @reconcil/mcp-server dev` (stdio) /
@@ -59,20 +59,18 @@ docker rm -f schema_check
 These are the constraints a coding session can violate without noticing; each has an ADR
 with full rationale.
 
-- **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)`
-  (uint256 does not fit BIGINT); JSON carries money as decimal strings; TS uses `bigint` or a
-  decimal clone. Aggregate raw in SQL, scale once at the edge. **Rounding only at export
-  boundaries** — that is the rule, and it covers rounding a fiat sum to 2dp, not only a
-  non-terminating quotient. Two sanctioned exceptions, both inside the matcher and neither
-  producing money that reaches a report: `computeBand` truncates in bigint (integer operands
-  at a fixed scale), and `amountScore` converts two money bigints to `number` for a ranking
-  score — the one place money legitimately becomes a `number`, because nothing monetary comes
-  back out. *(An earlier version of this line narrowed the rule to "only where a quotient is
-  non-terminating", which the exporters violate on every journal line.)*
-  *(Branded types exist (`RawAmount`, `DecimalString`) but `RawAmount` is applied nowhere, and
-  there is no lint rule against `number` arithmetic — what actually holds the line is Zod
-  rejecting JSON numbers at the wire, `mode: 'bigint'` at the DB edge, and SQL-side
-  aggregation. Do not rely on the type system here.)* (ADR-004)
+- **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)` (uint256
+  does not fit BIGINT); JSON carries money as decimal strings; TS uses `bigint` or a decimal
+  clone. Aggregate raw in SQL, scale once at the edge. **Rounding only at export boundaries**
+  — that is the rule, and it covers rounding a fiat sum to 2dp, not only a non-terminating
+  quotient. Two sanctioned exceptions, both inside the matcher and neither producing money
+  that reaches a report — one to each rule above: `computeBand` truncates in bigint (rounding
+  away from an export boundary, on integer operands at a fixed scale), and `amountScore`
+  converts two money bigints to `number` for a ranking score — the one place money
+  legitimately becomes a `number`, because nothing monetary comes back out. **Do not rely on
+  the type system here**: `RawAmount` is declared and applied nowhere and there is no lint
+  rule against `number` arithmetic — what holds the line is Zod rejecting JSON numbers at the
+  wire, `mode: 'bigint'` at the DB edge, and SQL-side aggregation. (ADR-004)
 - **The LLM never computes.** All figures come from deterministic functions and must be
   traceable through the citation envelope (`tool_call_id`, event refs, pinned
   price/fx snapshot IDs). A number without provenance is a bug. (P1/P2, ADR-012)

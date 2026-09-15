@@ -39,11 +39,12 @@ processor.
 2026-09-15) would diff-check computed balances against provider balances and tell the user
 when they drift; today nothing does, so R3 rests on the golden-wallet reconciliation test
 alone. Coverage warnings ARE contractual and shipped (C5). EOA-only is stated in this
-document and in the guides, not in a separate "supported wallet types" doc — there is none;
-the `log_index` sentinel space held room for internal transfers, and Etherscan's
-`txlistinternal` made them a stream rather than a redesign — as shipped. The
-provider-vs-computed reconciliation test itself is specced in `04-testing.md` §2, and is
-green for native+gas+internal on chain 1 (erc20 still gated on the receipts capture).
+document and nowhere else — there is no "supported wallet types" doc and the guides do not
+mention wallet types at all; the `log_index` sentinel space held room for internal
+transfers, and Etherscan's `txlistinternal` made them a stream rather than a redesign — as
+shipped. The provider-vs-computed reconciliation test itself is specced in `04-testing.md`
+§2, and is green for native+gas+internal on chain 1 (erc20 still gated on the receipts
+capture).
 **Positioning:** honesty-as-feature — the tool says when it cannot be trusted, unlike a
 spreadsheet.
 
@@ -66,14 +67,14 @@ artifacts, not the technology; self-host + data-sovereignty pitch differentiates
 SaaS incumbents; the Nuxt dashboard is a planned post-gate answer, and Face B's CSV
 in/out flow works without any UI by design.
 
-*Honorable mentions:* GDPR — address-book names and invoice counterparties are PII
-(partly mitigated: tenant-owned tables cascade-delete and self-host keeps data on-prem, but
-export FILES on disk survive the cascade — ADR-006 Consequences as amended 2026-09-15;
-document a DPA template post-gate). Spam-token UX — a wrong default would either hide real funds or
-drown the user in scams (partly mitigated: `verified` filtering is real, but the `UNVERIFIED_EXCLUDED` warning is
-derived from the request flag rather than from what was excluded, and
-`analytics_stablecoin_movements` emits none and offers no opt-in — ADR-011 layer 3 as
-amended 2026-09-15; plus an eval case).
+*Honorable mentions:* GDPR — address-book names and invoice counterparties are PII (partly
+mitigated: tenant-owned tables cascade-delete and self-host keeps data on-prem, but export
+FILES on disk survive the cascade — ADR-006 Consequences as amended 2026-09-15; document a
+DPA template post-gate). Spam-token UX — a wrong default would either hide real funds or
+drown the user in scams (partly mitigated: `verified` filtering is real, but the
+`UNVERIFIED_EXCLUDED` warning is derived from the request flag rather than from what was
+excluded, and `analytics_stablecoin_movements` emits none and offers no opt-in — ADR-011
+layer 3 as amended 2026-09-15; plus an eval case).
 
 ## Open questions (with recommendations)
 

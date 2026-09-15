@@ -1,8 +1,11 @@
 /**
  * Address-book storage (directory_*, §6.3). `listEntities`/`upsertEntity` over
- * `entities` + `entity_addresses`, always tenant-scoped (ADR-006): a tenant sees
- * its own rows plus curated (`tenant_id NULL`) ones, and curated rows are
- * read-only. `entity_addresses.tenant_id` is denormalized from the parent so the
+ * `entities` + `entity_addresses`: a tenant sees its own rows plus curated
+ * (`tenant_id NULL`) ones, and curated rows are read-only. The ROWS are tenant-scoped
+ * (ADR-006); the `client_id` written onto them is NOT — `upsertEntity` takes it from
+ * tool arguments and never resolves it against the tenant, the only client-accepting
+ * tool that skips `resolveClientId`. Tracked in `09-known-gaps.md`.
+ * `entity_addresses.tenant_id` is denormalized from the parent so the
  * one-owner-per-`(tenant, chain, address)` rule is a DB unique constraint — this
  * layer keeps it in sync. Names/notes pass the hostile-string sanitizer (§7).
  */

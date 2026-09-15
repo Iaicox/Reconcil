@@ -64,12 +64,10 @@ Both raw and scaled exist, each exactly once:
   `domain-depends-only-on-db-core` rule forbids `exporters → pricing`, so "confined to
   pricing" and the enforced boundary graph could never both be true.
 
-  *Corrected again, same day.* The rule first written here — "every site that divides money
-  configures its own decimal clone at `precision: 40, ROUND_HALF_UP`" — was stronger than the
-  code and would have made a correct third site non-conformant the moment it was written.
-
-  The rule has to be about what a division **produces**, not that one happens. Division
-  producing MONEY happens in three classes, and only the third wants a clone:
+  *Amended again, 2026-09-15.* The rule this amendment first stated — "every site that
+  divides money configures its own decimal clone" — was stronger than the code and condemned
+  a correct site. The rule turns on what a division **produces**, not that one happens.
+  Division producing MONEY happens in three classes, and only the third wants a clone:
 
   1. **Exact power-of-ten scaling** — `formatUnits` in `core/money.ts`, raw base units ÷
      10^decimals. Terminating by construction, so it is done in `bigint`/string with no
@@ -97,10 +95,8 @@ Both raw and scaled exist, each exactly once:
   future use of that quotient for anything but ranking would need a different construction.
 
   Stated this way because the failure this ADR sweep exists to catch is a decision whose rule
-  does not match what the code derives. Writing one that condemns correct code is the same
-  defect pointing the other way — and the first two attempts at this paragraph did exactly
-  that, first by demanding a clone everywhere, then by a taxonomy that had no room for a
-  division whose result is not money.
+  does not match what the code derives — and a rule that condemns correct code is the same
+  defect pointing the other way.
 
 ## Alternatives considered
 

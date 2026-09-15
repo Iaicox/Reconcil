@@ -17,11 +17,10 @@ matching; P8 requires human confirmation.
    *external record ↔ settlement event* — nothing invoice-specific in the join model.
 2. **Pair-level legs in `matches`**: each row applies `amount_applied_raw` of one event to
    one record ⇒ m:n falls out naturally (several legs per record = partials; several legs
-   per event = batch settlement). Invariants: Σ **confirmed** legs per event, **per tenant**,
-   ≤ event amount; record
-   status (`open→partially_matched→matched→overpaid`) is a pure function of confirmed
-   legs — enforced in the repository under SERIALIZABLE transactions, pinned by property
-   tests. Triggers rejected: they split business logic across two runtimes and make the
+   per event = batch settlement). Invariants: Σ **confirmed** legs per event, **per tenant**, ≤
+   event amount; record status (`open→partially_matched→matched→overpaid`) is a pure function
+   of confirmed legs — enforced in the repository under SERIALIZABLE transactions, pinned by
+   property tests. Triggers rejected: they split business logic across two runtimes and make the
    invariant untestable as a unit. Record-status derivation uses the **canonical default
    tolerance band**, independent of the suggest-time `tolerances` param (which only widens
    candidate *discovery*); status is thus reproducible from the confirmed legs plus this
@@ -160,12 +159,15 @@ matching; P8 requires human confirmation.
   `scoreCandidate` only records a rule when it actually contributed, a positive
   confidence is a non-empty rationale by construction. The band-edge case with no other
   signal now correctly produces no suggestion, not a provenance-free one.
-- **Exact `Σ weights === confidence` under the clamp (A3).** `Math.min(1, Σ)` broke the
-  invariant exactly when it fired (float summation landing a hair above 1, near-
-  unreachable given weights sum to 1.0 and scores ≤ 1, but not impossible). `scoreCandidate`
-  now rescales every shipped weight by `1 / rawSum` when `rawSum > 1` and recomputes
-  confidence **from** the rescaled rationale (not derived independently), so the two stay
-  reproducible from each other by construction, not merely approximately equal.
+- **Exact `Σ weights === confidence` under the clamp (A3).** **Corrected in place on
+  2026-09-15:** the rescale described below never executes — `rawSum > 1` is unreachable with
+  the current `WEIGHTS`, and what delivers the equality is the identity return beside it. See
+  decision 3's 2026-09-15 amendment; the rest of this bullet is the reasoning as written.
+  `Math.min(1, Σ)` broke the invariant exactly when it fired (float summation landing a hair
+  above 1, near- unreachable given weights sum to 1.0 and scores ≤ 1, but not impossible).
+  `scoreCandidate` now rescales every shipped weight by `1 / rawSum` when `rawSum > 1` and
+  recomputes confidence **from** the rescaled rationale (not derived independently), so the two
+  stay reproducible from each other by construction, not merely approximately equal.
 - **Zero-amount records (A4/A5).** `deriveRecordStatus` special-cased `applied === 0n` to
   `'open'` before ever consulting the band, so a genuinely zero-amount record
   (`amount="0"`, nothing applied) could never reach `'matched'` — the band `{0,0}`

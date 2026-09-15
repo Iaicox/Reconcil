@@ -128,21 +128,20 @@ Accounting tolerates minutes of lag; trading would not, and this system is not f
 trading. The knob is per-chain config; lowering it trades immutability guarantees for
 freshness and is documented as unsupported for accounting use.
 
-Safety net (**designed, not built** — ADR-005 d4 and ADR-008 d1 as amended 2026-09-15; no
+Safety net (**designed, not built** — ADR-005 d4 and ADR-008 d1, both noted 2026-09-15; no
 job exists and `last_integrity` is written by nothing): the **integrity job** would recompute
-native + top
-token balances from events at the checkpoint block and compares with the provider's
-balance-at-block. Drift ⇒ `last_integrity.clean = false`, surfaced in `ledger_status` and
-as a tool warning.
+native and top-token balances from events at the checkpoint block and compare them with the
+provider's balance-at-block. Where drift would then surface is itself unbuilt —
+`last_integrity` has no stored `clean` field (`ledger_status` derives one from what is
+stored) and `WarningCode` has no drift member.
 
 Internal (trace-level) ETH transfers — once the headline systematic drift source and an
 explicit MVP gap — are **ingested** as of the internal-transfer slice: the `native`
 stream pulls `txlistinternal` alongside `txlist` (§3, ADR-005 d2), and the golden-wallet
 reconciliation now matches `eth_get_balance` to the wei through the production processor
 (`packages/evals/test/reconcile.itest.ts`). Two caveats remain, both loud rather than
-silent: a chain whose providers serve no trace data degrades to `txlist`-only (the
-integrity job would catch the drift, once it exists), and a single block holding ≥
-`PAGE_LIMIT` (1000)
+silent: a chain whose providers serve no trace data degrades to `txlist`-only (the integrity
+job would catch the drift, once it exists), and a single block holding ≥ `PAGE_LIMIT` (1000)
 internal transfers for one wallet stalls that stream with an explicit error instead of
 skipping rows — the same block-granular pagination limit `txlist` has.
 
@@ -186,8 +185,7 @@ the same correction, and `09-known-gaps.md` tracks both.*
   counters) and an Etherscan daily budget guard pausing backfills while tails keep running.
   There is no rate limiter of any kind on the chain path today — only the price fetcher is
   throttled — and backfill runs at concurrency 5 against a tail at `chains.length` (2 today),
-  which inverts the
-  intended priority under contention.
+  which inverts the intended priority under contention.
 - **Not built.** Circuit breaker per provider: open after 5 consecutive failures, half-open
   probe after 60 s, open primary ⇒ route to secondary. Failover today is a try/catch walk
   over the candidate list with no state, and the worker rebuilds the provider bundle every
@@ -214,15 +212,14 @@ Accounting-grade gas on OP-stack chains cannot be derived from `gasUsed × gasPr
 | `receipts-opstack` | Base | batch `eth_getTransactionReceipt` via public RPC **for outgoing txs only** (sender pays; typically few per wallet); total fee = L2 exec fee + `l1Fee` |
 
 The integrity job would cross-check whichever strategy is active (not built, see §4);
-systematic fee drift on an
-OP-stack chain is the canary for a wrong strategy.
+systematic fee drift on an OP-stack chain is the canary for a wrong strategy.
 
 ## 7. Chain & token configuration (Option C seam #2)
 
 ```ts
-// packages/core/chains.config.ts — adding an EVM chain is TWO entries: this one, plus
-// CHAIN_SLUG in packages/pricing (ADR-009 d3, amended 2026-09-15). A chain missing from the
-// second ingests fine and is then never priced, silently.
+// packages/core/chains.config.ts — one entry here adds the chain to INGESTION and no
+// further. Pricing, verified-token seeding and the worker's env record each need a source
+// change too; ADR-009 d3's 2026-09-15 amendment lists all four sites. Every miss is silent.
 export const chains: ChainConfig[] = [
   { chainId: 1, name: 'ethereum',
     native: { symbol: 'ETH', decimals: 18 },
@@ -243,10 +240,14 @@ export const chains: ChainConfig[] = [
 ```
 
 Token discovery (as intended): first sight of an unknown ERC-20 contract enqueues
-`token-resolve`
-(meta via provider, fallback `eth_call` on public RPC), inserting `verified = false` with
-sanitized display strings. A curated seed (natives, USDC/USDT/DAI, WETH, per chain) ships
-`verified = true` as a `db` seed migration.
+`token-resolve` (meta via provider, fallback `eth_call` on public RPC), inserting
+`verified = false` with sanitized display strings. That queue is ADR-008 scope and is not
+built, so today the writer inserts the row inline, unresolved and `verified = false`.
+
+A curated seed (natives, USDC/USDT/DAI, WETH, per chain) ships `verified = true` as a `db`
+seed migration — the third of the three sites a new chain needs, and the reason a chain
+present in both config maps can still read as empty: with nothing verified, `priceGaps`,
+`materializePegSnapshots` and the default analytics filter all see no tokens.
 
 ## 8. Price & FX ingestion (P5, ADR-007)
 
@@ -256,10 +257,11 @@ chain+contract, generous free history) is asked for a literal **00:00 UTC** time
 **CoinGecko** (secondary) for a bare date, which requests no instant at all. What either
 provider RESOLVES that to is not established in this repo — ADR-007 d1 flags it as inference,
 and `09-known-gaps.md` records that nothing stores the instant a price came from. CoinGecko
-also needs a `coingecko_id` mapping that no production path currently writes (same register).
-ECB daily reference rates are fetched into `fx_rates` by the same job. Gap healing: valuation code never fetches inline — a
-missing snapshot yields `PRICE_MISSING` (C4) and enqueues the gap for the next `prices`
-run; deterministic reads, eventually complete data.
+also needs a `coingecko_id` mapping that no production path currently writes (same
+register). ECB daily reference rates are fetched into `fx_rates` by the same job. Gap
+healing: valuation code never fetches inline — a missing snapshot yields `PRICE_MISSING`
+(C4) and enqueues the gap for the next `prices` run; deterministic reads, eventually
+complete data.
 
 ## 9. Failure modes
 

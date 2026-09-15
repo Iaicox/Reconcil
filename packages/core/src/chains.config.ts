@@ -1,9 +1,10 @@
 /**
- * Chains as configuration (ADR-009, 03-ingestion §7): adding an EVM chain is one
- * entry here and a SECOND one in `CHAIN_SLUG` (packages/pricing) — miss that and the
- * chain ingests correctly and is then never priced, silently (ADR-009 d3, amended
- * 2026-09-15). Zero code changes either way. Fee strategy is a chain property, not a
- * provider property — OP-stack chains carry an L1 data fee (ADR-005).
+ * Chains as configuration (ADR-009, 03-ingestion §7) — true of INGESTION only. An entry
+ * here does NOT finish the job: pricing, verified-token seeding and (when the chain names
+ * an env var this worker does not already read) the worker's own env record each need a
+ * change in source. ADR-009 d3's 2026-09-15 amendment is the authoritative list — read it
+ * before adding a chain; getting it wrong is silent, not loud. Fee strategy is a chain
+ * property, not a provider property — OP-stack chains carry an L1 data fee (ADR-005).
  */
 export type FeeStrategy = 'txlist' | 'receipts-opstack';
 

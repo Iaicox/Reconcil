@@ -14,7 +14,7 @@ const steps = [
   {
     n: '03',
     title: 'Confirm',
-    body: 'You approve each match — human-in-the-loop. Record status tracks open, partial, paid and overpaid as you go.',
+    body: 'Nothing counts until you confirm it: every write is flagged for approval, and clients like Claude Desktop ask first. Record status tracks open, partial, paid and overpaid as you go.',
   },
   {
     n: '04',

@@ -31,10 +31,13 @@
  * documented complexity cap, ADR-010 alt "unbounded subset-sum"), and ranks subsets by
  * FEWEST EVENTS first, with confidence only as a tiebreak — so the chosen split is the
  * smallest that fits, not the most confident one.
- * Two distinct cases therefore stay open, honestly: a record that would need more
+ * Two distinct cases therefore find no SPLIT, honestly: a record that would need more
  * than 6 events to settle at all, and — less obviously — one whose only exact split
  * includes a member too small to survive the top-6 cut even though fewer than
- * 6 events would suffice. Both are documented, visible failure modes, never hidden.
+ * 6 events would suffice. Whether such a record stays `open` depends on `isCandidate`:
+ * the subset search runs only when nothing single is within band, so the amount gate
+ * cannot fire, but an expected-address or known-counterparty hit still yields a
+ * single-event leg. Both are documented, visible failure modes, never hidden.
  */
 import {
   DEFAULT_DATE_WINDOW_DAYS,

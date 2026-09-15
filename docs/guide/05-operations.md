@@ -125,9 +125,12 @@ Each chain has a primary and a fallback, tried in order (ADR-009):
 | Base (8453) | Etherscan v2 | Blockscout (keyless) | JSON-RPC receipts (`BASE_RPC_URL`) |
 
 A keyless stack works — it falls through to Blockscout — but expect tighter rate limits.
-Adding a chain is a config entry in `packages/core/src/chains.config.ts` **and** a second one
-in `CHAIN_SLUG` (`packages/pricing/src/providers/types.ts`). Miss the second and the chain
-ingests correctly and is then never priced, with no error (ADR-009 d3, amended 2026-09-15).
+Adding a chain starts with a config entry in `packages/core/src/chains.config.ts`, which
+covers ingestion and nothing else: pricing, verified-token seeding and — when the chain names
+an env var the worker does not already read — the worker's env schema each need a source
+change. Every miss is silent: the chain ingests correctly and is then never priced, or the
+worker throws on every provider call. **ADR-009 d3's 2026-09-15 amendment is the checklist**;
+do not add a chain from this page alone.
 
 ### Prices
 
@@ -146,7 +149,7 @@ They are the system telling you the limits of its own answer.
 | `COVERAGE_INCOMPLETE` | A wallet or stream in scope is still backfilling or has errored. | Check `ledger_status`. Wait for `live`. `last_error` is not yet populated by anything (ADR-008 d1), so a stalled stream shows as its last non-error status — check the worker log too. Do not quote the figure yet. |
 | `ANCHORED_BASELINE` | Figures rest on an `opening_balance` anchor, not full history. | Expected if you tracked in anchored mode. Disclose it in any report; re-track in `full` mode if you need real history. |
 | `DATA_STALE` | The checkpoint is older than the freshness threshold. | The worker is probably down or rate-limited. Check `docker compose logs worker`. |
-| `UNVERIFIED_EXCLUDED` | Spam-suspected tokens were omitted (the default). | Usually correct. Pass `include_unverified: true` if you genuinely need them. |
+| `UNVERIFIED_EXCLUDED` | You asked with the spam filter on (the default). It reflects the request flag, **not** a finding — it is emitted whether or not anything was actually dropped. | Usually correct. Pass `include_unverified: true` on the analytics tools if you genuinely need them. `analytics_stablecoin_movements` filters the same way but has no such flag and emits no warning — cross-check it against `analytics_list_events` if a stablecoin is missing. |
 | `PRICE_MISSING` | No price snapshot for a (token, date). The fiat value was omitted. | Let the price job catch up, or accept the token-denominated figure. Never substitute your own rate into an exported pack without noting it. |
 | `FX_DATE_SHIFTED` | A weekend/holiday: the previous ECB rate was used. | Informational — standard accounting practice, but disclose it if material. |
 | `SANITIZED_HEAVY` | More than 30% of an untrusted string's characters were lost — to hostile-charset stripping, to truncation at the length cap, or both combined. | Could mean the name was mostly hostile characters (treat that counterparty with suspicion) — or simply a long legitimate name that got truncated. Check the sanitized value before assuming malice. |
@@ -276,8 +279,10 @@ What the deployment guarantees, and what it asks of you.
   construction anywhere in the dependency tree. A dependency-cruiser rule and a full
   lockfile scan enforce it in CI (ADR-011, MiCA red line P8).
 - **Append-only ledger.** `chain_events` is never updated or deleted.
-- **Tenant identity comes from the transport session**, never from tool arguments — no tool
-  call can reach another tenant's data (ADR-006).
+- **Tenant identity comes from the transport session**, never from tool arguments. Scoped
+  reads resolve through the tenant's own wallets, so a read cannot reach another tenant's
+  data (ADR-006). One write is the exception — `directory_upsert_entity` accepts a
+  `client_id` it never checks against the tenant; see the known-gaps register.
 - **Hostile strings are contained.** Chain- and import-sourced text is sanitized (Unicode
   normalize, control/bidi strip, charset allowlist, length caps) and delivered only under
   `untrusted` keys. Raw provider payloads never leave the server.

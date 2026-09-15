@@ -73,7 +73,13 @@ type WarningCode =
   | 'COVERAGE_INCOMPLETE'   // some requested wallet still backfilling / errored
   | 'ANCHORED_BASELINE'     // figures rest on an opening_balance anchor, not full history
   | 'DATA_STALE'            // checkpoint older than freshness threshold
-  | 'UNVERIFIED_EXCLUDED'   // spam-filtered tokens were omitted (default)
+  | 'UNVERIFIED_EXCLUDED'   // DERIVED FROM THE REQUEST FLAG, not from what was excluded: the
+                            // four tools that take include_unverified emit it whenever it is
+                            // unset, whether or not an unverified token existed. Two tools
+                            // never emit it — analytics_gas has no spam filter (native only),
+                            // analytics_stablecoin_movements filters with no flag and no
+                            // warning, which is the real gap (ADR-011 layer 3). The close
+                            // pack emits it unconditionally: five emit sites in all.
   | 'PRICE_MISSING'         // no snapshot for (token, date); value omitted, not guessed
   | 'FX_DATE_SHIFTED'       // weekend/holiday: previous ECB rate used
   | 'SANITIZED_HEAVY'       // >30% of an untrusted string lost to charset-stripping and/or truncation
@@ -472,9 +478,13 @@ dropped (it could only overshoot), the survivors are sorted descending by value 
 tiebreak, and the top 6 are taken. Every subset within that pool is tried — documented
 complexity cap, no heuristics hidden in prompts — and subsets are ranked by FEWEST EVENTS
 first, with confidence only as a tiebreak, so the proposed split is the smallest that fits
-rather than the highest-scoring one. Two cases therefore stay open, honestly: a record that
-would need more than 6 events to settle at all, and one whose only exact split includes a
-member too small to survive the top-6 cut even though fewer than 6 events would suffice.
+rather than the highest-scoring one. Two cases therefore find no SPLIT, honestly: a record
+that would need more than 6 events to settle at all, and one whose only exact split includes
+a member too small to survive the top-6 cut even though fewer than 6 events would suffice.
+Neither case pins the record at `open` by itself. The subset search runs only when no single
+event is within band, so in both cases the amount gate cannot fire — but a single-event leg is
+still proposed if the event matches the record's expected address or a known counterparty. A
+record with neither does stay `open`.
 
 *Corrected 2026-09-15 (ADR sweep).* This paragraph described the pool as "the ≤ 6
 LARGEST-valued candidate events in the date window", which is what ADR-010's 2026-08-06

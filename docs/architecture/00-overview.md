@@ -83,7 +83,7 @@ Notes:
 
 | Context | Responsibility | Owns tables | Package |
 |---|---|---|---|
-| **Ingestion** | Providers → normalized events; checkpoints; finality; backfill/live; integrity checks | `chain_events` (writes), `ingestion_checkpoints`, `tokens` (discovery) | `packages/ingestion` |
+| **Ingestion** | Providers → normalized events; checkpoints; finality; backfill/live (integrity checks: designed, not built — ADR-005 d4) | `chain_events` (writes), `ingestion_checkpoints`, `tokens` (discovery) | `packages/ingestion` |
 | **Ledger** | Deterministic computation over events: balances, flows, gas, counterparty turnover | reads `chain_events`, `tokens` | `packages/ledger` |
 | **Pricing** | Daily price snapshots, ECB FX; valuation with pinned snapshot IDs | `price_snapshots`, `fx_rates` | `packages/pricing` |
 | **Directory** | Address book: entities, labels, curated global labels | `entities`, `entity_addresses` | `packages/db` (thin; logic in tools) |

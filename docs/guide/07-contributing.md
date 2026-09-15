@@ -22,8 +22,8 @@ pnpm build              # tsc -b (this is also the typecheck)
 pnpm typecheck          # build-ordered tsc -b
 pnpm lint               # eslint per package (flat config at the root)
 pnpm test               # vitest per package (--passWithNoTests where there are none)
-pnpm depcruise          # dependency direction + signing-library ban — run after build
-pnpm check:supply-chain # lockfile scan for signing/key-material packages
+pnpm depcruise          # dependency direction + DIRECT signing-lib imports — after build
+pnpm check:supply-chain # the transitive signing ban: scans both lockfiles
 pnpm smoke:compose      # full compose stack + stdio client + tool calls, then tears down
 ```
 
@@ -146,7 +146,8 @@ without noticing.
 - **Tenant identity comes from the transport session, never from tool arguments.** Chain data
   tables are global by design. The tenant-owned repositories take a tenant context;
   `packages/ledger` does not — it receives an address set resolved from the tenant's wallets
-  one layer up, and nothing enforces that a new caller does the same. (ADR-006, ADR-012)
+  one layer up, and nothing enforces that a new caller does the same. One write tool,
+  `directory_upsert_entity`, does not validate its `client_id` at all. (ADR-006, ADR-012)
 - **MCP wire names use underscores.** `analytics_balances`, not `analytics.balances` — dots
   break the Claude API tool-name constraint. (ADR-012)
 - **No Python.** TypeScript and Node only.
@@ -173,10 +174,15 @@ that rule is what keeps the design pack trustworthy.
 
 ## Adding a chain
 
-One entry in `packages/core/src/chains.config.ts` — chain id, native token, finality depth,
-poll interval, fee strategy, provider list, and (for OP-stack chains) the RPC env var. No
-code changes. That "chains are configuration" property is a deliberate architectural seam
-(ADR-009); keep it.
+Start with one entry in `packages/core/src/chains.config.ts` — chain id, native token,
+finality depth, poll interval, fee strategy, provider list, and (for OP-stack chains) the
+name of an RPC env var. That covers **ingestion**, and it is the only part where the "chains
+are configuration" seam is real (ADR-009).
+
+It is not the whole job, and every remaining step fails silently or deep inside a job rather
+than at boot. **Follow ADR-009 d3's 2026-09-15 amendment, which lists all four sites** —
+pricing's `CHAIN_SLUG` map, a curated-token seed row per chain, and (naming an env var is
+not the same as the worker reading it) the worker's own env schema and provider record.
 
 ## Working with the board
 

@@ -127,8 +127,9 @@ export async function ingestOnce(deps: ProcessorDeps, target: IngestTarget): Pro
     const page = await bundle.indexer.getNativeTxs(q);
     // Trace-level ETH movements over the SAME window, on their own page budget
     // (ADR-005 d2). Optional capability: a chain whose providers serve no trace
-    // data ingests txlist-only, exactly as before — the integrity job surfaces
-    // the resulting drift rather than ingestion failing every page.
+    // data ingests txlist-only, exactly as before. The integrity job would surface
+    // the resulting drift rather than ingestion failing every page — that job is
+    // designed and not built (ADR-005 d4, noted 2026-09-15), so today nothing does.
     const internal = bundle.indexer.getInternalTxs
       ? await bundle.indexer.getInternalTxs({ ...q })
       : undefined;
