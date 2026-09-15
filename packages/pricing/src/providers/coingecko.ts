@@ -1,6 +1,9 @@
 /**
  * CoinGecko — secondary price source (ADR-007), keyed by `tokens.coingecko_id`.
- * `/coins/{id}/history?date=DD-MM-YYYY` returns that day's close in USD. Free/demo
+ * `/coins/{id}/history?date=DD-MM-YYYY` returns a single figure for that UTC date in USD.
+ * Which instant CoinGecko resolves a bare date to is NOT established anywhere in this repo
+ * (no captured fixture pins it) — ADR-007 d1 flags it as inference for the same reason. This
+ * used to say "that day's close", which is what ADR-007 used to say too. Free/demo
  * tier via `x_cg_demo_api_key`. No coingecko id ⇒ null (this token isn't mapped).
  */
 import { numberToDecimalString } from '../decimal.js';

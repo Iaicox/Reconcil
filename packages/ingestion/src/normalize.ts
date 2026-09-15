@@ -36,10 +36,12 @@ interface InternalValueMove {
  * It does allocate two BigInts and two lowercased strings per comparison, which is the cost
  * the deleted label comparator was hand-optimized to avoid — and that argument applies more
  * strongly here, since this is now the only ranking path and values run to 78 digits. Left
- * as is deliberately: a parent-tx trace group is a handful of rows (79 traces over 79 txs in
- * every captured fixture), so the sort is effectively O(1) per group and a precomputed sort
- * key would trade legibility on an idempotency-key derivation for nothing measurable. Revisit
- * only with a profile, never on principle.
+ * as is deliberately: a parent-tx trace group is small, so the sort is effectively O(1) per
+ * group and a precomputed sort key would trade legibility on an idempotency-key derivation
+ * for nothing measurable. Note what that rests on — every captured fixture has 79 traces over
+ * 79 distinct transactions, i.e. group size 1, so the comparator is never even called on
+ * recorded data. That is evidence of absence, not of smallness; ADR-005 d2 uses the same
+ * absence to call a provider claim untestable. Revisit with a profile, never on principle.
  *
  * Takes `InternalValueMove['it']`, not `RawInternalTx`: that filter also narrows `to` to a
  * string, so a `?? ''` fallback here would be an unreachable branch pretending otherwise.

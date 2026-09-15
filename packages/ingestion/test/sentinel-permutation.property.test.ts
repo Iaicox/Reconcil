@@ -40,17 +40,26 @@ const HASH = '0xDD10000000000000000000000000000000000000000000000000000000000010
  * A deliberately tiny endpoint pool, so two generated rows routinely agree on two of the
  * three tuple components and only the third separates them. A wide pool would make almost
  * every pair differ in `value` alone and leave the `from` and `to` branches of the comparator
- * unexercised — the generator could then not go red on a mutation deleting either. (Measured
- * over 3000 seeded runs: ~570 pairs differing only in `from`, ~600 only in `to`.)
+ * unexercised — the generator could then not go red on a mutation deleting either. Measured
+ * over `fc.sample(groupArb, { numRuns: 3000, seed: 42 })`: 507 pairs differing only in
+ * `from`, 534 only in `to`, 1686 only in `value`, and 2264 of the 3000 sets mixing both hash
+ * spellings, with lengths 2/3/4/5 at 827/775/684/714. The seed is quoted so the figures are
+ * reproducible — an earlier version of this note gave round numbers from no stated run, which
+ * is the one claim in this file a reader could not check.
  *
- * One entry is a mixed-case spelling of another, which exercises the parent-tx grouping but
- * **not** the comparator's `toLowerCase()`: `uniqueArray`'s selector dedupes on the LOWERCASED
- * tuple, so two rows differing only in address case can never co-occur in a generated set, and
- * dropping `toLowerCase()` from the comparator leaves it a deterministic function of row
- * content — permutation invariance still holds. That mutation is pinned by an explicit case in
- * `normalize.test.ts` ("address casing cannot change the order") instead. Said here because a
- * docstring claiming a property the generator cannot reach is the failure this whole file is
- * about.
+ * One entry is a mixed-case spelling of another and exercises **nothing** — it is decorative,
+ * and labelling it as such is the point. It cannot reach the comparator's `toLowerCase()`,
+ * because `uniqueArray`'s selector dedupes on the LOWERCASED tuple, so two rows differing only
+ * in address case never co-occur in a generated set; and dropping `toLowerCase()` from the
+ * comparator would leave it a deterministic function of row content anyway, so permutation
+ * invariance would still hold. Nor does it exercise the parent-tx grouping — that is `HASHES`
+ * below, which carries its own note. The comparator's lowercasing is pinned by an explicit
+ * case in `normalize.test.ts` ("address casing cannot change the order").
+ *
+ * Left in place and labelled rather than deleted, because two successive drafts of this
+ * docstring claimed it was load-bearing — first for the comparator, then for the grouping —
+ * and a docstring asserting a property the generator cannot reach is the failure this whole
+ * file is about.
  */
 const ADDRS = [
   '0xaa00000000000000000000000000000000000001',

@@ -457,13 +457,21 @@ output: { suggestions: Array<{
 ```
 
 The engine (not the LLM) scores candidates; the agent's job is to *present* rationale and
-collect the human decision. Split/partial detection uses a bounded subset search: the
-pool is the ≤ 6 LARGEST-valued candidate events in the date window (largest first, so a
-full settlement needs the fewest legs), and every subset within that pool is tried —
-documented complexity cap, no heuristics hidden in prompts. Two cases therefore stay
-open, honestly: a record that would need more than 6 events to settle at all, and one
-whose only exact split includes a member too small to make the top-6-by-size pool even
-though fewer than 6 events would suffice.
+collect the human decision. Split/partial detection uses a bounded subset search over a pool
+built in three steps, in this order: every candidate valued above `open + tolerance` is
+dropped (it could only overshoot), the survivors are sorted descending by value with an event-id
+tiebreak, and the top 6 are taken. Every subset within that pool is tried — documented
+complexity cap, no heuristics hidden in prompts — and subsets are ranked by FEWEST EVENTS
+first, with confidence only as a tiebreak, so the proposed split is the smallest that fits
+rather than the highest-scoring one. Two cases therefore stay open, honestly: a record that
+would need more than 6 events to settle at all, and one whose only exact split includes a
+member too small to survive the top-6 cut even though fewer than 6 events would suffice.
+
+*Corrected 2026-09-15 (ADR sweep).* This paragraph described the pool as "the ≤ 6
+LARGEST-valued candidate events in the date window", which is what ADR-010's 2026-08-06
+amendment said and not what `findBestSubset` builds: the ceiling filter runs BEFORE the
+top-6 cut, so a window holding an event larger than `open + tolerance` yields a different
+pool. The miss-modes named above are unaffected.
 
 A suggestion always carries a non-empty `rationale`: the engine only emits a leg when its
 scored confidence is `> 0` — a candidate with no articulable reason (e.g. landing exactly

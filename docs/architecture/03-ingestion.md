@@ -229,9 +229,12 @@ sanitized display strings. A curated seed (natives, USDC/USDT/DAI, WETH, per cha
 
 ## 8. Price & FX ingestion (P5, ADR-007)
 
-Daily job: for every token appearing in the ledger (verified first), fetch the UTC close
-for missing `(token, date)` pairs — **DefiLlama** primary (keyed by chain+contract,
-generous free history), **CoinGecko** secondary (needs `coingecko_id` mapping); ECB daily
+Daily job: for every token appearing in the ledger (verified first), fetch one price per UTC
+date for missing `(token, date)` pairs — both providers are asked for **00:00 UTC**, so the
+figure is the day's open rather than its close (ADR-007 d1, amended 2026-09-15). **DefiLlama**
+primary (keyed by chain+contract, generous free history), **CoinGecko** secondary (needs
+`coingecko_id` mapping — which no production path currently writes, see `09-known-gaps.md`);
+ECB daily
 reference rates into `fx_rates`. Gap healing: valuation code never fetches inline — a
 missing snapshot yields `PRICE_MISSING` (C4) and enqueues the gap for the next `prices`
 run; deterministic reads, eventually complete data.

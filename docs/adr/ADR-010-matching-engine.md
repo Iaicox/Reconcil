@@ -183,9 +183,12 @@ matching; P8 requires human confirmation.
   finer than that still rounds — a documented contract, not an error.
 - **Honest subset-search wording.** The engine's docstring and this contract's §6.4 text
   previously implied the only miss-mode was "a record only a larger combination would
-  settle." The pool is actually the ≤ 6 LARGEST-valued candidates in the date window, so
-  an exact split whose small member falls outside that top-6-by-size pool is *also*
-  unreachable, independent of whether ≤ 6 events would have sufficed. Both failure modes
+  settle." The pool is actually a top-6 *selection*, so an exact split whose small member
+  falls outside it is *also* unreachable, independent of whether ≤ 6 events would have
+  sufficed. **Superseded in part on 2026-09-15:** this amendment described that selection as
+  "the ≤ 6 LARGEST-valued candidates in the date window", which is still not what the code
+  builds — the ceiling filter runs before the cut. Decision 3's 2026-09-15 amendment above
+  has the three steps in order; the miss-mode named here is unaffected. Both failure modes
   are now named explicitly; no behavior changed for this point — a characterization test
   pins the small-member case as documented behavior, so widening the pool selection later
   is a conscious choice, not an accidental fix.

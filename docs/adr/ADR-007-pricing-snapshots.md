@@ -17,21 +17,25 @@ date. Stablecoins pose a policy question: book at peg (1.0) or at market (±0.3%
    *Amended 2026-09-15 (ADR sweep — accuracy).* Two words here described something the
    implementation does not do.
 
-   - It said daily UTC **close**. What the code asks for is **00:00 UTC** — DefiLlama gets a
-     literal midnight timestamp with `?searchWidth=6h`, CoinGecko a bare `date=DD-MM-YYYY`.
-     The requested instant is therefore the day's *open*, systematically, whatever each
-     provider resolves it to. Open vs close is a defensible choice for accounting and is the
-     one in force; it simply is not what this said.
+   - It said daily UTC **close**. It is not a close. DefiLlama is asked for a literal
+     **00:00 UTC** timestamp with `?searchWidth=6h` — the day's open, and that half is
+     unambiguous. CoinGecko is asked for a bare `date=DD-MM-YYYY`, which requests no instant
+     at all and leaves the choice to the provider.
 
-     Two things follow that this repo does **not** establish, flagged as inference rather
-     than stated as fact because no captured fixture or provider contract here pins them:
-     which instant CoinGecko resolves a bare date to, and whether `searchWidth` searches
-     backwards as well as forwards (the adapter's own prose says "the close nearest a
-     timestamp within searchWidth", which reads symmetric). If it does search backwards, a
-     tick from the *previous* UTC date can be persisted under the requested one with no
-     warning — FX has `FX_DATE_SHIFTED` for exactly that shape and prices have no
-     equivalent. Recorded in `09-known-gaps.md` with the same caveat, because the honest
-     first step there is a captured fixture, not a fix.
+     So the accurate statement is the weaker one: **one figure per UTC date, from a provider
+     asked for the start of it or for nothing more precise than the date.** That is a
+     defensible granularity for accounting and is the one in force; "close" was never it.
+
+     Two things this repo does **not** establish, flagged as inference rather than stated as
+     fact because no captured fixture or provider contract here pins either: which instant
+     CoinGecko resolves a bare date to, and whether `searchWidth` searches backwards as well
+     as forwards (the adapter's own prose says "the close nearest a timestamp within
+     searchWidth", which reads symmetric). If it does search backwards, a tick from the
+     *previous* UTC date could be persisted under the requested one, and nothing would record
+     it — `DailyPrice` carries no timestamp, and there is no price analogue of
+     `FX_DATE_SHIFTED`. `09-known-gaps.md` carries that with the same split: the missing
+     provenance is confirmed, the neighbouring-date reachability is not, and the first step
+     there is to capture a fixture rather than write a fix.
    - It said the date of an event is the UTC date of `block_time`, unqualified. That holds
      for a `day`-grouped row. For a `month` group the valuation date is the month's last day,
      and for an **ungrouped** aggregate it is `period.to` — a caller-supplied parameter

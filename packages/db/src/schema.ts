@@ -218,7 +218,7 @@ export const chainEvents = pgTable(
 
 // ---------------------------------------------------------------- pricing ---
 
-// Daily UTC close snapshots (P5). Append-only: corrections are new rows under
+// One price snapshot per UTC date (P5). Append-only: corrections are new rows under
 // a different source ('manual'); calculations pin the exact row they used by FK.
 export const priceSnapshots = pgTable(
   'price_snapshots',

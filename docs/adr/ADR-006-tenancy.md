@@ -22,11 +22,16 @@ of the data: chain events and prices are public facts, identical for everyone.
    tenant context; event queries always join through the tenant's `wallets`". Neither half
    describes the code. `packages/ledger/src` contains **zero** occurrences of `tenantId`:
    every method there takes `(db, params)` where the scope is an already-resolved `string[]`
-   of addresses, and the predicate is an `inArray` over that list —
-   `or(inArray(fromAddr, …), inArray(toAddr, …))` at every non-gas site — a materialised
-   list, not a join. The tenant property is derived exactly one layer up, in
-   `resolveScope` (`packages/mcp-tools/src/scope.ts`), which selects `wallets` filtered by
-   `ctx.tenantId`; `recon` re-derives the same set inside its own tenant-scoped transaction.
+   of addresses, and the predicate is an `inArray` over that materialised list rather than a
+   join — in several shapes depending on what the query means: a single-sided
+   `inArray(toAddr, …)` or `inArray(fromAddr, …)` for the two halves of a balance,
+   `or(…)` where either endpoint counts, and `externalCondition`'s
+   `or(and(toIn, fromOut), and(fromIn, toOut))` in `scope-sql.ts` where the question is
+   "exactly one endpoint is ours" (that last one is deliberate — the plain `or` over-counted
+   wallet-to-wallet moves, fixed in PR #23). The tenant property is derived exactly one
+   layer up, in `resolveScope` (`packages/mcp-tools/src/scope.ts`), which selects `wallets`
+   filtered by `ctx.tenantId`; `recon` re-derives the same set inside its own tenant-scoped
+   transaction.
 
    That is a defensible layering — the ledger is a pure query package over global chain data
    — but the invariant it actually holds is weaker than the one stated: *"every CALLER of a

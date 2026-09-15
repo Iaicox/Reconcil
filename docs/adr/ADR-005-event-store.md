@@ -43,16 +43,18 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    nothing is dropped and nothing is duplicated. (Not quite the same *(key, payload)* pairs:
    two tuple-equal rows can still differ in their untouched provider payload. That is the
    excluded property spelled out below, and it is the honest limit of this sentence.) Two
-   rows carrying the same LABEL are not interchangeable at all, which is the defect the
+   rows carrying the same LABEL need not be interchangeable at all, which is the defect the
    2026-09-13 distinctness condition had to patch; the decimal-path shape test beside it
    confined the label path to inputs where it would agree with the tuple anyway. Three
    mechanisms across two review rounds, each narrowing further toward "use the tuple" — so
    use the tuple.
 
-   The label path's stated benefit, preserving execution order, **reached no consumer.** Not
-   one query anywhere orders by `log_index` DESCENDING. Six order by it ascending — the five
-   ledger reads (`balances.ts`, `counterparties.ts`, `flows.ts`, `gas.ts`, `list-events.ts`)
-   plus the close pack's transactions CSV (`exporters/src/close-pack.ts`) — and because the
+   The label path's stated benefit, preserving execution order, **reached no consumer.** No
+   PRODUCTION read orders by `log_index` descending (integration tests do, to read sentinels
+   back in rank order — which is the only place rank order is ever wanted). Six order by it
+   ascending: the five ledger reads (`balances.ts`, `counterparties.ts`, `flows.ts`, `gas.ts`,
+   `list-events.ts`) and the close pack's transactions CSV, which is an in-memory sort rather
+   than a query but renders the same inversion into an exported file. Because the
    sentinel is `-(1000+n)`, `n = 2` sorts *before* `n = 0` in every one of them: execution
    order was inverted everywhere it could be observed, exported CSV included. The remaining
    `chain_events` readers (the recon and journal paths) order by `block_time, id` and never

@@ -235,14 +235,26 @@ under a policy the operator did not choose. Where: `packages/db/src/schema.ts` (
 `packages/pricing/src/value.ts`, `packages/mcp-tools/src/recon/match-repo.ts`.
 *(ADR sweep, 2026-09-15)*
 
-**A price silently taken from the previous UTC date raises no warning.** DefiLlama is queried
-at midnight UTC with `searchWidth=6h`, so it may return a tick from up to six hours *before*
-the requested date; the row is persisted under the requested date and nothing records which
-instant it came from (`DailyPrice` carries no date field). FX has `FX_DATE_SHIFTED` for exactly
-this shape. Why deferred: the provider does not currently return the observed timestamp through
-this adapter, so the warning needs an adapter change as well as a schema column. Trigger: fold
-into whatever slice next touches the price adapters — most likely the `coingecko_id` entry
-above. Where: `packages/pricing/src/providers/defillama.ts`,
+**Nothing records which instant a price came from, so a price taken from a neighbouring UTC
+date would be silent. SUSPECTED on the "would", CONFIRMED on the "silent".**
+
+Confirmed: `DailyPrice` carries no date or timestamp field, so whatever the provider actually
+returned is discarded and the row is persisted under the date `fill.ts` asked for. There is no
+price analogue of `FX_DATE_SHIFTED`, which exists for exactly this shape on the FX side.
+
+Suspected, and deliberately not asserted: that a *neighbouring* date is reachable. DefiLlama is
+queried at midnight UTC with `?searchWidth=6h`, and whether that window searches backwards as
+well as forwards is an inference from the adapter's own prose ("the close nearest a timestamp
+within searchWidth") — no captured fixture in this repo pins it, and the same caveat is written
+into ADR-007 d1. CoinGecko is worse-specified still: it is sent a bare `date=DD-MM-YYYY` and
+what instant it resolves that to is not established here either.
+
+Why deferred, and what the first step actually is: **capture a fixture**, not write a fix. A
+recorded DefiLlama response for a date whose nearest tick precedes midnight would settle the
+"would" in one commit and tell you whether the warning is needed at all. Only then is it worth
+an adapter change plus a schema column to carry the observed timestamp. Trigger: fold the
+capture into whatever slice next touches the price adapters — most likely the `coingecko_id`
+entry above. Where: `packages/pricing/src/providers/defillama.ts`,
 `packages/pricing/src/providers/types.ts` (`DailyPrice`), `packages/pricing/src/fill.ts`.
 *(ADR sweep, 2026-09-15)*
 
@@ -365,27 +377,26 @@ against a volatile token; write the repro before changing anything. Where:
 **The subset-search heuristic's known miss-mode: the candidate pool is a top-6 SELECTION,
 not "any ≤ 6 events."** An exact split whose smallest member falls outside that pool is
 unreachable by the search, even though ≤ 6 events would in principle suffice — a second,
-independent miss-mode from the already-documented "needs a larger combination" case.
-
-*Corrected 2026-09-15 (ADR sweep).* This entry said "the ≤ 6 largest-valued events in the
-date window", copying the ADR-010 amendment's wording — and the ADR sweep found that
-that description is not what `findBestSubset` builds either. It drops every event above
-`open + band`
-FIRST, then sorts descending, then takes 6: with `open = 3000`, `band = 30` and a window of
-`[5000, 900, 800, 700, 600, 500, 400]` the pool is `{900…400}`, not `{5000…500}`. The
-miss-mode this entry records is unaffected; its characterisation of the pool was wrong in the
-same way the ADR was, which is how a wrong description survives a review — it agreed with the
-other copy. `engine.ts`'s docstring and ADR-010 d3 now describe the three steps in order.
-
-Why deferred: a conscious complexity
+independent miss-mode from the already-documented "needs a larger combination" case. *(The
+pool is built in three steps and the order matters: every event above `open + band` is dropped
+FIRST, the survivors are sorted descending with an event-id tiebreak, and only then are 6
+taken. This entry used to say "the ≤ 6 largest-valued events in the date window", copying the
+ADR-010 amendment's wording, and that is a different pool — with `open = 3000`, `band = 30`
+and a window of `[5000, 900, 800, 700, 600, 500, 400]` the real pool is `{900…400}`, not
+`{5000…500}`. Corrected 2026-09-15; the miss-mode recorded here is unaffected. Worth noting
+how it survived: it agreed with the other copy.)* Why deferred: a conscious complexity
 cap (ADR-010), now characterization-tested so widening the pool later is a deliberate
 choice, not an accidental behavior change; records the search misses simply stay
 `open`/`partial` for manual matching — a visible, honest failure mode, not silent
 incorrectness. Trigger: real invoice data shows the small-member-outside-top-6 case often
 enough to justify a larger or smarter pool (e.g. also including the ≤ 6 smallest, or a
 proper bounded subset-sum). Where: `packages/recon/src/match/engine.ts`
-(`MAX_SUBSET_EVENTS`, `findBestSubset`); documented in the ADR-010 amendment (2026-08-06,
-"Honest subset-search wording"). *(sweep — ADR-010 amendment on `fix/match-engine-edges`)*
+(`MAX_SUBSET_EVENTS`, `findBestSubset`), and described in order in ADR-010 d3's 2026-09-15
+amendment, `02-mcp-contracts.md` §6.4 and `packages/recon/test/match.test.ts`. (This line used
+to point at the 2026-08-06 "Honest subset-search wording" amendment as the documentation —
+that amendment is the copy carrying the wrong pool description, and is now marked superseded
+in part rather than cited.) *(sweep — ADR-010 amendment on `fix/match-engine-edges`;
+pool description corrected 2026-09-15)*
 
 **`score.ts`'s weight-rescale branch is unreachable by the current `WEIGHTS` and untested;
 there is no final bound if `WEIGHTS` is ever retuned above 1.** The rescale exists to keep
@@ -496,10 +507,10 @@ emit site is `if (!includeUnverified) warnings.push(…)`, and the close pack pu
 unconditionally, so it fires on a tenant with no unverified tokens and can never signal that
 something *was* hidden. As a disclosure of the default policy it is fine; as ADR-011 layer 3's
 "nor silently disappear" it carries no information, because it is a constant. The fix is to
-thread the excluded count out of the ledger queries and emit on `> 0` — cheap per tool,
-the four analytics tools that emit it, plus the close pack. Trigger: fold into any slice that
-touches the analytics warning
-path. Where: `packages/mcp-tools/src/tools/analytics-{balances,flows,counterparties,
+thread the excluded count out of the ledger queries and emit on `> 0` — cheap per site, and
+there are five: the four analytics tools that emit the warning, plus the close pack. Trigger:
+fold into any slice that touches the analytics warning path. Where:
+`packages/mcp-tools/src/tools/analytics-{balances,flows,counterparties,
 list-events}.ts`, `packages/mcp-tools/src/tools/close-pack-data.ts`. *(ADR sweep, 2026-09-15)*
 
 **`analytics_stablecoin_movements` excludes unverified tokens with no warning and no opt-in.**
@@ -732,11 +743,12 @@ because ADR-011's read-only claim leans on that boundary. Trigger: fold into any
 `.dependency-cruiser.cjs`; the rule itself is a few lines. Where: `.dependency-cruiser.cjs`,
 ADR-001. *(ADR sweep, 2026-09-15)*
 
-**Nothing keeps `ee/` empty, and `ee/` is exempt from every gate.** No tool knows about it: the
-only two references that affect a command are a comment in `pnpm-workspace.yaml` (the
-`packages:` globs simply never match it — there is no exclusion directive) and the ESLint
-ignore list. `README.md`, `CLAUDE.md` and a task card describe the convention in prose, which
-is where it lives and why it reads as enforced. Code dropped there would be
+**Nothing keeps `ee/` empty, and `ee/` is exempt from every gate.** Exactly one tool
+configuration names it, and it is an *exclusion*: `eslint.config.mjs` ignores `ee/**`.
+`pnpm-workspace.yaml` mentions it only in a comment — the `packages:` globs simply never match
+`ee/`, so it is outside the workspace by omission rather than by directive. The convention
+itself lives in prose (`README.md`, `CLAUDE.md`, `ee/README.md`, a task card), which is why it
+reads as enforced. Code dropped there would be
 invisible to `pnpm lint` (ignored), `pnpm typecheck` (not a project reference), `pnpm depcruise`
 (which cruises `apps packages`) and `pnpm check:supply-chain` — so the directory reserved for
 the paid tier is the one place where ADR-011's "guardrail claims are literally verifiable from

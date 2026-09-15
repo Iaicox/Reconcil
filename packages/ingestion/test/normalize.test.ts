@@ -308,6 +308,13 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
     //
     // Pinned here rather than in the property test: that generator dedupes on the LOWERCASED
     // tuple, so it can never place two case-variant rows in one group.
+    //
+    // Honest limit, so nobody reads more into this than it gives: each branch is pinned at
+    // BRANCH granularity, not per line. Dropping `.toLowerCase()` from `b.from` goes red;
+    // dropping it from `a.from` alone survives, because a two-element sort calls the
+    // comparator in the order that hides it. Killing that would need a three-row fixture
+    // ordered to force both argument positions, which is more machinery than the mutant is
+    // worth — but it is a gap, not coverage.
     const byTo = run([
       trace({ from: '0xaa', to: '0xBBBB', value: '1' }),
       trace({ from: '0xaa', to: '0xaaaa', value: '2' }),
