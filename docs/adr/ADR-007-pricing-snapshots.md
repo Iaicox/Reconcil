@@ -17,14 +17,21 @@ date. Stablecoins pose a policy question: book at peg (1.0) or at market (±0.3%
    *Amended 2026-09-15 (ADR sweep — accuracy).* Two words here described something the
    implementation does not do.
 
-   - It said daily UTC **close**. Both providers are queried at **00:00 UTC** — DefiLlama
-     with `historical/<midnight>?searchWidth=6h`, CoinGecko with its `date=DD-MM-YYYY`
-     00:00 snapshot. So the stored figure is the day's *open*, systematically, and the
-     `searchWidth` window can return a tick from up to six hours **before** midnight, i.e.
-     from the previous UTC date, which is then persisted under the requested date with no
-     warning. (FX has `FX_DATE_SHIFTED` for exactly this shape; prices have no equivalent —
-     tracked in `09-known-gaps.md`.) Open vs close is a defensible choice for accounting and
-     is the one in force; it simply is not what this said.
+   - It said daily UTC **close**. What the code asks for is **00:00 UTC** — DefiLlama gets a
+     literal midnight timestamp with `?searchWidth=6h`, CoinGecko a bare `date=DD-MM-YYYY`.
+     The requested instant is therefore the day's *open*, systematically, whatever each
+     provider resolves it to. Open vs close is a defensible choice for accounting and is the
+     one in force; it simply is not what this said.
+
+     Two things follow that this repo does **not** establish, flagged as inference rather
+     than stated as fact because no captured fixture or provider contract here pins them:
+     which instant CoinGecko resolves a bare date to, and whether `searchWidth` searches
+     backwards as well as forwards (the adapter's own prose says "the close nearest a
+     timestamp within searchWidth", which reads symmetric). If it does search backwards, a
+     tick from the *previous* UTC date can be persisted under the requested one with no
+     warning — FX has `FX_DATE_SHIFTED` for exactly that shape and prices have no
+     equivalent. Recorded in `09-known-gaps.md` with the same caveat, because the honest
+     first step there is a captured fixture, not a fix.
    - It said the date of an event is the UTC date of `block_time`, unqualified. That holds
      for a `day`-grouped row. For a `month` group the valuation date is the month's last day,
      and for an **ungrouped** aggregate it is `period.to` — a caller-supplied parameter
@@ -86,13 +93,15 @@ date. Stablecoins pose a policy question: book at peg (1.0) or at market (±0.3%
    - **"Even 1.0 has provenance" does not hold on the reconciliation path**, and ADR-010 d5
      already says so ("a same-currency stablecoin at face value (peg, no snapshot)"). The two
      decisions contradicted each other and the code follows ADR-010: a stablecoin leg whose
-     peg currency equals the record currency is excluded from `resolvePrices`, valued by an
-     identity multiply, and stored with `price_snapshot_id = NULL`. **ADR-010 d5 governs the
-     recon path**; this decision governs the pricing read-core, where a `peg_for_stables`
+     peg currency equals the record currency is excluded from `resolvePrices` and valued by a
+     bare `formatUnits` of its base units, then stored with `price_snapshot_id = NULL`.
+     (Numerically that is ×1, but no rate is read and none is written, so an auditor grepping
+     for a 1.0 finds nothing.) **ADR-010 d5 governs the recon path**; this decision governs
+     the pricing read-core, where a `peg_for_stables`
      resolution does pin a materialised `source='peg'` row. The cost of the ADR-010 rule is
-     that a depeg is invisible to a confirmed leg, because the multiplier is a literal rather
-     than a row — that is P5 face-value pinning working as designed, and it is stated here so
-     the two decisions stop disagreeing on paper.
+     that a depeg is invisible to a confirmed leg, because the peg is assumed rather than
+     read from a row — which is P5 face-value pinning working as designed, and is stated here
+     so the two decisions stop disagreeing on paper.
 
 ## Alternatives considered
 

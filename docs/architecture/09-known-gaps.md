@@ -288,7 +288,8 @@ the hosted multi-tenant milestone. Where: `packages/ledger/src/*`,
 
 **Tenant deletion does not erase export files.** The cascade covers all ten tenant-owned
 tables, but exports write invoice references and counterparty names to disk and the `exports`
-row records only `file_path` — so a deletion removes the pointer and leaves the content under
+row holds a `file_path` pointing at them (alongside `params` and `manifest` jsonb) rather than
+the content itself — so a deletion removes the pointer and leaves the files under
 the export root. ADR-006's GDPR consequence has been narrowed to the database accordingly.
 Why deferred: doing it properly means owning a file lifecycle (delete on cascade, or scrub on a
 retention schedule) that nothing else in the product needs yet. Trigger: the first tenant
@@ -328,13 +329,13 @@ freshness/fold-correctness hardening pass. Where: `packages/ledger/test/ledger.i
 
 ## Money representation
 
-**`RawAmount` is applied to nothing, and the money-arithmetic lint rule ADR-004 d5 named does
+**`RawAmount` is applied to nothing, and the money-arithmetic lint rule ADR-004 named does
 not exist.** The brand is declared and exported in `packages/core/src/money.ts` and used on
 zero values anywhere in `src/`: `formatUnits` takes a plain `bigint`, and the column is
 `numeric(…, mode: 'bigint')` with no `.$type<RawAmount>()`. `eslint.config.mjs` has no
 `no-restricted-syntax` and nothing that mentions money. What actually holds the line is real
 but different — Zod `decimalString` at the wire, `mode: 'bigint'` at the DB edge, SQL-side
-aggregation so no JS number sees a sum — and ADR-004 d5 now says so. Why deferred: wiring the
+aggregation so no JS number sees a sum — and ADR-004 now says so. Why deferred: wiring the
 brand touches every money-carrying signature in four packages, which is a mechanical but wide
 change, and it buys nothing until a second person writes money code. Trigger: the first
 money-typed helper added by someone other than the author, or any `number` appearing in a money
@@ -361,11 +362,22 @@ against a volatile token; write the repro before changing anything. Where:
 
 ## Face B (reconciliation & matching)
 
-**The subset-search heuristic's known miss-mode: the candidate pool is the ≤ 6
-largest-valued events in the date window, not "any ≤ 6 events."** An exact split whose
-smallest member falls outside that top-6-by-size pool is unreachable by the search, even
-though ≤ 6 events would in principle suffice — a second, independent miss-mode from the
-already-documented "needs a larger combination" case. Why deferred: a conscious complexity
+**The subset-search heuristic's known miss-mode: the candidate pool is a top-6 SELECTION,
+not "any ≤ 6 events."** An exact split whose smallest member falls outside that pool is
+unreachable by the search, even though ≤ 6 events would in principle suffice — a second,
+independent miss-mode from the already-documented "needs a larger combination" case.
+
+*Corrected 2026-09-15 (ADR sweep).* This entry said "the ≤ 6 largest-valued events in the
+date window", copying the ADR-010 amendment's wording — and the ADR sweep found that
+that description is not what `findBestSubset` builds either. It drops every event above
+`open + band`
+FIRST, then sorts descending, then takes 6: with `open = 3000`, `band = 30` and a window of
+`[5000, 900, 800, 700, 600, 500, 400]` the pool is `{900…400}`, not `{5000…500}`. The
+miss-mode this entry records is unaffected; its characterisation of the pool was wrong in the
+same way the ADR was, which is how a wrong description survives a review — it agreed with the
+other copy. `engine.ts`'s docstring and ADR-010 d3 now describe the three steps in order.
+
+Why deferred: a conscious complexity
 cap (ADR-010), now characterization-tested so widening the pool later is a deliberate
 choice, not an accidental behavior change; records the search misses simply stay
 `open`/`partial` for manual matching — a visible, honest failure mode, not silent
@@ -485,7 +497,8 @@ unconditionally, so it fires on a tenant with no unverified tokens and can never
 something *was* hidden. As a disclosure of the default policy it is fine; as ADR-011 layer 3's
 "nor silently disappear" it carries no information, because it is a constant. The fix is to
 thread the excluded count out of the ledger queries and emit on `> 0` — cheap per tool,
-five tools plus the close pack. Trigger: fold into any slice that touches the analytics warning
+the four analytics tools that emit it, plus the close pack. Trigger: fold into any slice that
+touches the analytics warning
 path. Where: `packages/mcp-tools/src/tools/analytics-{balances,flows,counterparties,
 list-events}.ts`, `packages/mcp-tools/src/tools/close-pack-data.ts`. *(ADR sweep, 2026-09-15)*
 
@@ -719,9 +732,11 @@ because ADR-011's read-only claim leans on that boundary. Trigger: fold into any
 `.dependency-cruiser.cjs`; the rule itself is a few lines. Where: `.dependency-cruiser.cjs`,
 ADR-001. *(ADR sweep, 2026-09-15)*
 
-**Nothing keeps `ee/` empty, and `ee/` is exempt from every gate.** It is referenced in exactly
-two places: a comment in `pnpm-workspace.yaml` (the `packages:` globs simply never match it —
-there is no exclusion directive) and the ESLint ignore list. Code dropped there would be
+**Nothing keeps `ee/` empty, and `ee/` is exempt from every gate.** No tool knows about it: the
+only two references that affect a command are a comment in `pnpm-workspace.yaml` (the
+`packages:` globs simply never match it — there is no exclusion directive) and the ESLint
+ignore list. `README.md`, `CLAUDE.md` and a task card describe the convention in prose, which
+is where it lives and why it reads as enforced. Code dropped there would be
 invisible to `pnpm lint` (ignored), `pnpm typecheck` (not a project reference), `pnpm depcruise`
 (which cruises `apps packages`) and `pnpm check:supply-chain` — so the directory reserved for
 the paid tier is the one place where ADR-011's "guardrail claims are literally verifiable from
@@ -866,7 +881,7 @@ number is gone.) The reconciliation from 32 ledger lines:
   The sweep asked one question of every numbered decision in ADR-001…013 — *does the
   implementation derive what the decision says it derives?* — which is how both of the
   entries above were originally found, and the answer was no far more often than expected.
-  Fourteen decisions had their text corrected in that branch, because the ADR described
+  All thirteen ADRs were amended in that branch — most because the text described
   something the code neither does nor should. The thirty-one recorded here are the other
   half: cases where the ADR is right and the code is not, so the correction is a code change
   with its own branch. They cluster — five in pricing, five in sanitization, six in Face B —

@@ -31,9 +31,11 @@ pitch without giving away the future paid tier.
    *Amended 2026-09-15 (ADR sweep — accuracy).* Two things worth writing down, because the
    convention is doing less than it sounds like.
 
-   - **Nothing keeps `ee/` empty, and `ee/` is exempt from every gate.** It is referenced in
-     exactly two places: a comment in `pnpm-workspace.yaml` (the `packages:` globs simply
-     never match it — there is no exclusion directive) and the ESLint ignore list. Code
+   - **Nothing keeps `ee/` empty, and `ee/` is exempt from every gate.** No tool knows about
+     it: the only two references that affect a command are a comment in `pnpm-workspace.yaml`
+     (the `packages:` globs simply never match it — there is no exclusion directive) and the
+     ESLint ignore list. `README.md`, `CLAUDE.md` and a task card describe the convention in
+     prose, which is where it lives and why it reads as enforced. Code
      dropped there would be invisible to `pnpm lint` (ignored), `pnpm typecheck` (not a
      project reference), `pnpm depcruise` (which cruises `apps packages`) and
      `pnpm check:supply-chain` — so the one directory reserved for the paid tier is the one

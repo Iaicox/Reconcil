@@ -76,7 +76,7 @@ MiCA guardrails, enforced structurally where possible:
   no code path that could sign or send.
 
   *Amended 2026-09-15 (ADR sweep — accuracy).* This named dependency-cruiser as the
-  mechanism. Dependency-cruiser sets `doNotFollow: ['node_modules']`, so its
+  mechanism. Dependency-cruiser sets `doNotFollow: { path: ['node_modules', 'dist'] }`, so its
   `no-signing-libraries` rule only ever sees direct import edges from first-party source — it
   cannot say anything about the *tree*, which is the word that makes this claim worth making.
   What delivers the stated scope is the lockfile scanner, which walks both
@@ -108,8 +108,11 @@ MiCA guardrails, enforced structurally where possible:
   *Amended 2026-09-15 (ADR sweep — accuracy).* This ended "enforced by the shared envelope
   builder + contract tests, not by memory". **Neither mechanism does it.** `buildEnvelope`
   is generic in `data` and inspects nothing — its own docstring states sanitization as a
-  precondition on the caller — and there is no sweeping contract test over the registry;
-  the only raw-related tests assert that ingestion *stores* raw values.
+  precondition on the caller — and no test anywhere asserts the absence of a raw key across
+  the registry. (Two tests do cover the convention where it is exercised:
+  `recon-import-invoices.itest.ts` asserts `untrusted.counterparty_name` is present and
+  scrubbed, and `server.test.ts` sweeps every tool DESCRIPTION for the untrusted note. Neither
+  looks at response data across tools, which is what this sentence claimed.)
 
   What is genuinely structural is narrower and worth naming precisely, because it is the part
   a reviewer can rely on: the **token** path, where `TokenMeta` carries no raw field and

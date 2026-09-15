@@ -16,10 +16,17 @@
  * candidate is even scored (A4/A5) — nothing is owed, so no candidate can be "the"
  * payment for it.
  *
- * Split/partial payments are found by a bounded subset search: the pool is the
- * ≤ 6 LARGEST-valued candidate events in the date window (largest first, so a full
- * settlement needs the fewest legs), and the search then tries every subset within
- * that pool (the documented complexity cap, ADR-010 alt "unbounded subset-sum").
+ * Split/partial payments are found by a bounded subset search. The pool is built in three
+ * steps, and the ORDER matters: every event valued above `open + band` is dropped first
+ * (it could only overshoot, since amounts are non-negative), the survivors are sorted
+ * descending by value with an `eventId` tiebreak, and only then are the top 6 taken. So it
+ * is not "the ≤ 6 largest-valued events in the date window" — a description this docstring
+ * and ADR-010's 2026-08-06 amendment both carried until the 2026-09-15 ADR sweep, and which
+ * gives a different pool whenever the window holds an event bigger than the record. The
+ * search then tries every subset within that pool (the documented complexity cap, ADR-010
+ * alt "unbounded subset-sum"), and ranks subsets by FEWEST EVENTS first, with confidence
+ * only as a tiebreak — so the chosen split is the smallest that fits, not the most
+ * confident one.
  * Two distinct cases therefore stay open, honestly: a record that would need more
  * than 6 events to settle at all, and — less obviously — one whose only exact split
  * includes a member too small to make the top-6-by-size pool even though fewer than

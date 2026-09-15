@@ -22,8 +22,9 @@ of the data: chain events and prices are public facts, identical for everyone.
    tenant context; event queries always join through the tenant's `wallets`". Neither half
    describes the code. `packages/ledger/src` contains **zero** occurrences of `tenantId`:
    every method there takes `(db, params)` where the scope is an already-resolved `string[]`
-   of addresses, and the predicate is `inArray(chainEvents.fromAddr, addresses)` — a
-   materialised list, not a join. The tenant property is derived exactly one layer up, in
+   of addresses, and the predicate is an `inArray` over that list —
+   `or(inArray(fromAddr, …), inArray(toAddr, …))` at every non-gas site — a materialised
+   list, not a join. The tenant property is derived exactly one layer up, in
    `resolveScope` (`packages/mcp-tools/src/scope.ts`), which selects `wallets` filtered by
    `ctx.tenantId`; `recon` re-derives the same set inside its own tenant-scoped transaction.
 
@@ -64,8 +65,9 @@ of the data: chain events and prices are public facts, identical for everyone.
 
   *Amended 2026-09-15 (ADR sweep — accuracy).* It used to say PII lives only in tenant-owned
   tables, full stop, which is not true of the deployment. Exports write invoice references and
-  counterparty names into **files on disk**; the `exports` row records only `file_path`, so
-  the cascade removes the pointer and leaves the content. A tenant deletion therefore erases
+  counterparty names into **files on disk**; the `exports` row holds a `file_path` pointing at
+  them (alongside `params` and `manifest` jsonb) rather than the content itself, so the
+  cascade removes the pointer and leaves the files. A tenant deletion therefore erases
   the database and not the close packs, PDFs and journal drafts under the export root. Closing
   it means deleting or scrubbing an export directory on cascade, which is a code change and is
   tracked in `09-known-gaps.md`.

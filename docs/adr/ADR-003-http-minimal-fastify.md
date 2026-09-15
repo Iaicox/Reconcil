@@ -21,8 +21,8 @@ host for:
 three methods the transport implements. The route is registered with `app.all('/mcp', …)`
 (`apps/mcp-server/src/http.ts`), so PUT, PATCH, HEAD and OPTIONS match it too: each spends a
 rate-limit token and a live `resolveTenantByBearer` DB round-trip before the SDK rejects it.
-Enumerating three methods here (and in the code's own docstring) described an HTTP surface
-narrower than the one that exists. Narrowing the route to match is a code change and is
+Enumerating three methods here described an HTTP surface narrower than the one that exists.
+Narrowing the route to match is a code change and is
 tracked in `09-known-gaps.md`; nothing here depends on it, since an unsupported method is
 still refused.
 
