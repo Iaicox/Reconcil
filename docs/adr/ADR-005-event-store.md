@@ -38,12 +38,16 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    tuple as a fallback. It is now unused for ranking, because of the requirement in the
    paragraph above: **content satisfies "a function of the row set" by construction, and a
    label cannot.** If the rank comes from row content, two rows with identical content are
-   interchangeable *by definition* — a re-fetch that reorders them yields the same set of
-   (key, payload) pairs, so nothing is dropped and nothing is duplicated. Two rows carrying
-   the same LABEL are not interchangeable, which is the defect the 2026-09-13 distinctness
-   condition had to patch; the decimal-path shape test beside it confined the label path to
-   inputs where it would agree with the tuple anyway. Three mechanisms across two review
-   rounds, each narrowing further toward "use the tuple" — so use the tuple.
+   interchangeable *by definition* — a re-fetch that reorders them derives the same set of
+   keys, and each key carries the same derived columns whichever way round they came, so
+   nothing is dropped and nothing is duplicated. (Not quite the same *(key, payload)* pairs:
+   two tuple-equal rows can still differ in their untouched provider payload. That is the
+   excluded property spelled out below, and it is the honest limit of this sentence.) Two
+   rows carrying the same LABEL are not interchangeable at all, which is the defect the
+   2026-09-13 distinctness condition had to patch; the decimal-path shape test beside it
+   confined the label path to inputs where it would agree with the tuple anyway. Three
+   mechanisms across two review rounds, each narrowing further toward "use the tuple" — so
+   use the tuple.
 
    The label path's stated benefit, preserving execution order, **reached no consumer.** Not
    one query anywhere orders by `log_index` DESCENDING. Six order by it ascending — the five
@@ -98,6 +102,7 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    transactions, i.e. not one multi-trace transaction. It stops being safe at the first real
    mainnet ingest, at which point re-deriving sentinels is a migration rather than a
    decision.
+
    One uniform key ⇒ one dedup mechanism (`ON CONFLICT DO NOTHING`) everywhere.
    `token_id` is functionally dependent on the first three columns for real logs (a log
    carries exactly one token), but load-bearing for anchored opening balances: anchoring
