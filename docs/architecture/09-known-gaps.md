@@ -20,6 +20,14 @@ this same doc-sync slice, and are recorded here because they are exactly the kin
 decision this register exists to hold. This document does not restate ADR rationale —
 where an item is really an ADR-level trade-off, it links to the ADR instead of repeating it.
 
+Entries tagged *(ADR sweep, 2026-09-15)* have a different provenance again, and it is worth
+stating because it explains why they arrive in clusters. They come from reading ADR-001…013
+and asking one question of every numbered decision: **does the implementation derive what the
+decision says it derives?** — not "is there a bug". Where the ADR was wrong, the ADR was
+corrected in that branch. Where the ADR is right and the code is not, the item is here. The
+two entries that prompted the sweep were found the same way, which is the argument for
+re-reading a decision against its code periodically rather than only when something breaks.
+
 Every branch referenced here has since merged, so all file references describe `main`.
 
 ## Ingestion
@@ -95,88 +103,197 @@ alongside the `status='live'` gap above but exercising a different code path. Tr
 same as above — pin alongside the next unrelated edit to that logic. Where:
 `apps/worker/src/main.ts` (`getCheckpointBlock`). *(Task 12, `fix/worker-queues`)*
 
-**`compareTraceIds` changed, and the sentinel it derives is half an idempotency key.** The
-comparator was fixed on 2026-09-13 (it cycled: `"9" < "10" < "1a" < "9"`, and two distinct
-labels could tie and hand the ordering to arrival order). Its output becomes the
-`log_index` sentinel `-(1000 + n)` on every internal transfer, which is part of
-`UNIQUE (chain_id, tx_hash, log_index, token_id)` — so for any tx whose trace labels order
-differently under the new rule, a re-ingest derives a *different* sentinel, `ON CONFLICT DO
-NOTHING` stops matching, and the same value move is inserted twice into an append-only
-table with no rollback path. Ingestion does re-serve rows: it re-fetches the overlap-by-one
-boundary block, and a provider failover can re-serve a window.
+**The internal-transfer sentinel has been re-derived twice in 2026-09, and before the first
+mainnet ingest that becomes a migration.** *(Replaces two entries closed on 2026-09-15: the
+`compareTraceIds` comparator change, and the ADR-005 d2 proposal that superseded it. The
+proposal was acted on — `docs/adr/ADR-005-event-store.md` d2 now derives the rank from the
+`(from, to, value)` tuple alone, and `compareTraceIds`, `compareDecimalDigits`,
+`isDecimalTracePath` and their property test are gone. What survives both entries is the part
+neither of them closed.)*
 
-Why this was accepted rather than migrated, and what now guards it: the label shapes whose
-ordering actually moved are **leading zeros** (`007` vs `7`), **non-decimal notations**
-(`0x10`, `1e3`), an empty segment, and a label REPEATED within one tx — and none of them
-occurs. Every trace label recorded anywhere in this repo is plain digits and underscores
-(`0`, `1`, `10`, `0_1`, `0_2`, `0_10`, `0_1_2`), for which old and new agree exactly. That
-was an argument about fixtures, so it is now also an invariant in code: `normalize()`
-takes the label-ordering path only when every label in the group is a plain decimal path
-(`isDecimalTracePath`) AND the labels are distinct. Any other shape — including one a
-future provider adapter might invent — falls to `compareTraceTuple`, which orders by
-from/to/value and so does not depend on how a provider chose to name its traces.
+`-(1000+n)` is half of `UNIQUE (chain_id, tx_hash, log_index, token_id)` on an append-only
+table, so a changed derivation does not collide with an already-stored row — it inserts a
+duplicate, and there is no rollback path. The derivation changed on 2026-09-13 (label
+ordering narrowed) and again on 2026-09-15 (label ordering removed).
 
-The distinctness half is a behaviour change of its own, and in the same direction: a group
-with two traces labelled alike previously took the label path, tied, and fell to ARRIVAL
-order — the one thing the sentinel must never be a function of. It now takes the tuple, so
-for that shape the derived sentinel differs from what a pre-change run would have stored.
-Same migration question as the rest of this entry, same answer: the shape appears in no
-recorded fixture, and there is no deployment holding rows to disagree with. ADR-005 d2
-carries the condition. `''` could never reach the comparator even before that, for the
-same reason. There are also no production deployments — the validation gate is a business
-milestone, not a shipped product — so there is no pre-existing table to disagree with.
+Why that is acceptable today, stated so the expiry is checkable rather than assumed: there are
+no deployments holding rows, and the second change is a **provable no-op on every row this
+repo has recorded**. It alters the sentinel only for a transaction carrying ≥ 2 value-moving
+internal traces — a single-trace tx is `n = 0` under any rule — and across all three captured
+`txlistinternal` fixtures there are 79 value-moving traces spread over 79 distinct parent
+transactions, i.e. not one multi-trace transaction. No fixture in the repo exercises
+multi-trace ordering at all, under either scheme.
 
-Trigger: before the first real deployment ingests mainnet history — at which point
-re-deriving sentinels for already-stored internal transfers becomes a migration, not a
-comment. Where: `packages/ingestion/src/normalize.ts` (`compareTraceIds`,
-`isDecimalTracePath`, `sentinelRank`), ADR-005 d2.
-*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13)*
+Trigger: before the first real deployment ingests mainnet history. At that point re-deriving
+sentinels for stored internal transfers is a migration (identify txs with ≥ 2 internal traces,
+re-derive, reconcile against the stored rows) rather than a paragraph. Where:
+`packages/ingestion/src/normalize.ts` (`compareTraceTuple`, `sentinelRank`), ADR-005 d2.
+*(ADR sweep, 2026-09-15 — two entries closed, this one carried forward)*
 
-**ADR-005 d2 derives the sentinel from provider METADATA while requiring it to be a function
-of the ROW SET — and the thing that buys never arrives.** Raised 2026-09-13 after the same
-decision needed two amendments in two consecutive review rounds; recorded here rather than
-acted on, because it is an ADR change plus an ingestion simplification and does not belong
-in the branch that surfaced it.
+**ADR-008 d1's "failures surface in `ledger_status`, never swallowed" is not wired.**
+`ingestion_checkpoints` has a `status='error'` state and a `last_error` column, `ledger_status`
+reads both, and nothing writes either — `checkpoint-repo.ts` says so in its own comment. A
+failure therefore surfaces as a retained BullMQ job plus a `logger.error` line. The compounding
+case is a wallet whose page-1 backfill exhausts its 8 attempts: the job is retained by design,
+every 15-second onboard re-add dedupes against it, and the checkpoint sits at `queued`
+permanently while `ledger_status` reports it as normally queued. Why not fixed here: this
+branch is ADR-scope; ADR-008 d1 now carries a dated note saying the decision is not met.
+Trigger: before any deployment where an operator relies on `ledger_status` to notice a stalled
+wallet — i.e. before the hosted demo. Where: `packages/ingestion/src/write/checkpoint-repo.ts`,
+`apps/worker/src/main.ts`, `packages/ledger/src/status.ts`. *(ADR sweep, 2026-09-15)*
 
-The decision says `n` "must be a function of the row set alone, or a re-fetch that returns
-the same traces in a different order would renumber them into each other's slots". It then
-derives `n` from the provider's trace LABEL, which is not row content — it is how a provider
-chose to name the row. Everything this branch added to that path (a total order over
-arbitrary strings, the decimal-path shape test, the distinctness test) is an attempt to make
-label-derived ranking behave like row-derived ranking. Each amendment narrows the label path
-further toward "use labels only where they would agree with the tuple anyway".
+**There is no rate limiting on the chain-provider path, and the concurrencies invert ADR-008
+d2's priority.** The decision promises "provider token buckets + Etherscan daily-budget guard
+pause backfills first, tails last". No limiter of any kind exists: the transport is a bare
+`fetch` with a timeout and documents itself as "deliberately dumb: no retries, no throttling";
+only the *price* bundle is wrapped (`throttled(…, 250)`). Nothing distinguishes a backfill
+call from a tail call, so there is no ordering to pause in — and the backfill worker runs at
+concurrency 5 against a tail worker at `chains.length` (2), so under contention backfill takes
+the larger share of a shared per-key budget and 429s the tail. Why not fixed here: a shared
+limiter keyed per provider credential is its own slice. Trigger: the first 429 storm, or the
+first paid provider plan with a real daily budget. Where: `apps/worker/src/main.ts`
+(`bundleFor`, worker concurrencies), `packages/ingestion/src/fixture-transport.ts`
+(`realFetchJson`). *(ADR sweep, 2026-09-15)*
 
-Note that **the tuple satisfies the requirement by construction, and the label cannot**.
-If the rank is
-derived from row content, two rows with identical content are interchangeable *by
-definition*: a re-fetch that reorders them yields the same set of (key, payload) pairs, so
-nothing is dropped and nothing is duplicated. Two rows with the same LABEL but different
-content are not interchangeable — which is the defect the distinctness amendment had to
-patch.
+**The whale estimate behind `suggests_anchored` is the account nonce, so it misses
+receive-only wallets entirely.** `estimateTxCount` calls `eth_getTransactionCount`, which
+counts only transactions the address SENT — no inbound transfers, no `tokentx` rows, no
+internal transfers. The wallets whose backfill costs most in an accounting product (a
+payment-receiving address, an exchange deposit address) have a nonce near zero and never trip
+the 50k threshold. It errs on the side of coverage, so the failure is cost and latency rather
+than wrong figures. `estimateTxCount` is also absent from the Blockscout adapter, so on Base
+nothing is ever flagged. Trigger: the first onboarding that takes hours, or Base becoming a
+primary chain. Where: `packages/ingestion/src/providers/etherscan-v2.ts` (`estimateTxCount`),
+`packages/ingestion/src/processors/probe.ts`, `packages/core/src/chains.config.ts`
+(`ANCHOR_SUGGEST_TX_THRESHOLD`). *(ADR sweep, 2026-09-15)*
 
-And **the label path's stated benefit does not reach any consumer**. It exists to preserve
-execution order ("both enumerate the call tree in execution order"). But the sentinel is
-`-(1000 + n)` and all five consuming queries order ascending by `log_index`
-(`balances.ts:117`, `counterparties.ts:101`, `flows.ts:122`, `gas.ts:101`,
-`list-events.ts:90`), so `n = 2` sorts *before* `n = 0`. Execution order is inverted
-everywhere it could be observed. Nothing depends on it, and nothing can.
+**ADR-009 d4's circuit breaker does not exist.** "5 consecutive failures → open 60 s →
+half-open probe" is implemented as a try/catch walk over the candidate list that returns on
+the first success: no failure counter, no open/closed state, no probe. Per-provider state
+would not survive anyway, because the worker builds a fresh bundle on every `ingestOnce`. The
+live cost is concrete: on Base the Etherscan free tier errors on every call, so every
+`getHead`, `getNativeTxs`, `getInternalTxs` and `getErc20Transfers` — per page — pays one
+guaranteed-wasted primary call before failing over, against the same budget the entry above is
+about. Trigger: same as the rate-limiting entry; they are the same slice. Where:
+`packages/ingestion/src/providers/provider-factory.ts` (`attemptOn`), `apps/worker/src/main.ts`
+(`bundleFor`, which discards any per-bundle state). *(ADR sweep, 2026-09-15)*
 
-Proposal: amend d2 so the `(from, to, value)` tuple is the ONLY rank source. That deletes
-`compareTraceIds`, `compareDecimalDigits`, `isDecimalTracePath`, their property test, and
-collapses both 2026-09-13 amendments into a simpler decision. The raw label is not lost —
-`normalize()` already stores the full provider row in `chain_events.raw`, so it stops being
-part of the idempotency key without leaving the database.
+**Capability degradation reaches no tool, so ADR-009 d1's "the tool reports which provider can
+serve it" has no surface.** A capability miss throws inside the asynchronous `anchor` job with
+a generic "no provider serves X on chain N" that names no provider, and per ADR-008's
+2026-07-23 amendment the MCP write tool does not touch the provider layer. Combined with the
+unwired `last_error` above, "features degrade explicitly" currently means a worker log line.
+Separately, `getReceipts` degrades to an empty array rather than failing over, even though the
+Blockscout adapter implements the capability — the consumer then throws loudly, so no wrong
+answer, but it is the opposite of explicit. Trigger: when `ledger_status` gains an error
+surface (the entry above), expose capability there in the same slice. Where:
+`packages/ingestion/src/providers/provider-factory.ts` (`requireCapability`, `getReceipts`).
+*(ADR sweep, 2026-09-15)*
 
-Cost, stated honestly: this changes the derived sentinel for ALL internal transfers, not
-only the edge shapes the amendments covered, so the blast radius is larger than either
-amendment. Same migration question as the entry above, same answer today — no deployment
-holds rows to disagree with — but that answer expires at the first real ingest.
+## Pricing
 
-Trigger: before the first real deployment ingests mainnet history, and ideally alongside a
-plan-mode sweep for the same pattern elsewhere (a decision whose stated invariant is not
-what its implementation derives from). Where: `docs/adr/ADR-005-event-store.md` (decision 2),
-`packages/ingestion/src/normalize.ts`, `packages/ingestion/test/trace-order.property.test.ts`.
-*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13 — raised, not acted on)*
+**Which `price_snapshot_id` gets pinned is decided by row scan order, not by the data.** The
+candidate query in `resolve.ts` carries **no `ORDER BY`**, and `pickSnapshot` reduces with a
+strict `<`, so any tie keeps whichever row Postgres returned first. The tie is reachable, not
+theoretical: `marketPref` returns `0` for **every** `manual` row regardless of currency, and
+the unique key `(token_id, price_date, currency, source)` lets a manual/USD and a manual/EUR
+row coexist for one (token, date). The winner decides both the cited id and the figure, since
+one needs FX and the other does not — so two runs of the same tool call can cite different
+snapshots for the same number, which is exactly what P5/C4 forbid. The same function's peg
+lookup (`candidates.find(c => c.source === 'peg')`) takes the first peg row without checking
+its currency.
+
+This is the defect ADR-007's own 2026-08-05 amendment fixed for FX — `isBetterSameDate` is a
+strict total order on source rank, then name, then highest id — and never applied to prices.
+The fix is that total order plus a deterministic `ORDER BY`, and it wants a test that seeds two
+same-rank rows. **Highest-severity item found by the ADR sweep**; recorded rather than fixed
+only because this branch is ADR-scope. Trigger: immediately — this is the next branch. Where:
+`packages/pricing/src/resolve.ts` (`pickSnapshot`, `marketPref`, `resolvePrices`), against the
+pattern in `packages/pricing/src/fx.ts` (`isBetterSameDate`). *(ADR sweep, 2026-09-15)*
+
+**The CoinGecko secondary source can never serve, and native tokens are unpriceable by both
+sources.** `tokens.coingecko_id` is read by the gap query and written by no production path —
+not by the curated seed migration, not by discovery — and the adapter returns `null` when it is
+absent, so ADR-007 d2's failover is one element deep. Worse for natives, which have no contract
+address: DefiLlama's adapter needs an address or a CoinGecko id, so the seeded verified native
+ETH row is unpriceable by both, every ETH balance and `gas_fee` figure degrades to
+`PRICE_MISSING`, and `priceGaps` re-emits the same (token, date) on every daily tick forever
+with `pricesInserted` silently 0. Trigger: before any demo that values ETH or gas — which is
+most of Face A. Where: `packages/db/migrations/0002_seed_curated_tokens.sql`,
+`packages/pricing/src/providers/{coingecko,defillama}.ts`, `packages/pricing/src/gaps.ts`.
+*(ADR sweep, 2026-09-15)*
+
+**The stablecoin valuation policy is a tool argument, not a tenant setting.**
+`tenants.settings` exists as a column and is read nowhere. `policy` is an optional field on the
+caller-supplied valuation argument, defaulting to `'market'`, and reconciliation passes
+`policy: 'market'` as a literal — the inverse of ADR-007 d4's stated reconciliation default of
+peg. On an MCP surface "caller-supplied" means the model picks the accounting policy per call.
+Why not fixed here: the right shape (tenant setting, overridable per call, recorded in the
+citation) is a decision the validation interviews are supposed to inform — ADR-007 d4 marks it
+as interview question Q1. Trigger: when Q1 is answered, or sooner if any figure is exported
+under a policy the operator did not choose. Where: `packages/db/src/schema.ts` (`settings`),
+`packages/pricing/src/value.ts`, `packages/mcp-tools/src/recon/match-repo.ts`.
+*(ADR sweep, 2026-09-15)*
+
+**A price silently taken from the previous UTC date raises no warning.** DefiLlama is queried
+at midnight UTC with `searchWidth=6h`, so it may return a tick from up to six hours *before*
+the requested date; the row is persisted under the requested date and nothing records which
+instant it came from (`DailyPrice` carries no date field). FX has `FX_DATE_SHIFTED` for exactly
+this shape. Why deferred: the provider does not currently return the observed timestamp through
+this adapter, so the warning needs an adapter change as well as a schema column. Trigger: fold
+into whatever slice next touches the price adapters — most likely the `coingecko_id` entry
+above. Where: `packages/pricing/src/providers/defillama.ts`,
+`packages/pricing/src/providers/types.ts` (`DailyPrice`), `packages/pricing/src/fill.ts`.
+*(ADR sweep, 2026-09-15)*
+
+**A chain is two config entries, not one, and the second miss is silent.** ADR-009 d3 says
+"adding an EVM chain = one entry (+ API key)". `ChainConfig` carries no price-source key, so
+pricing keeps its own map — `CHAIN_SLUG` — and `fill.ts` skips an unmapped chain with a bare
+`continue`: no log, no counter, nothing in `FillResult`. A chain added per the ADR ingests
+correctly and is then never priced, with every figure returning `PRICE_MISSING` and nothing
+saying why. Trigger: adding a third chain. Where:
+`packages/pricing/src/providers/types.ts` (`CHAIN_SLUG`), `packages/pricing/src/fill.ts`,
+`packages/core/src/chains.config.ts`. *(ADR sweep, 2026-09-15)*
+
+## Tenancy & directory
+
+**`directory_upsert_entity` takes `client_id` from tool arguments with no tenant check — the
+only client-accepting tool that does.** `directory/repo.ts` writes `input.client_id` straight
+into the row, and the schema is `z.string().optional()`, not even a UUID. Every other
+client-accepting tool validates through `resolveClientId`, which predicates on
+`clients.tenant_id = ctx.tenantId`: `ledger_track_wallet`, `recon_import_invoices`,
+`recon_suggest_matches`, `recon_status`, the close pack and the journal drafts. The FK accepts
+any existing `clients.id`, so a tenant can persist an entity referencing another tenant's
+client, and the failure modes distinguish themselves (valid other-tenant UUID accepted,
+missing → PG `23503`, malformed → `22P02`), which makes it an existence oracle. It also breaks
+ADR-006's own cascade story: deleting the other tenant fires `ON DELETE SET NULL` and strips
+this tenant's entity of its attribution. The fix is one `resolveClientId` call plus an itest;
+it is the **second-highest severity** the sweep found, and ADR-scope is the only reason it is
+not in this branch. Trigger: immediately — same branch as the pricing determinism fix. Where:
+`packages/mcp-tools/src/directory/repo.ts`, `packages/core/src/schemas.ts`
+(`directoryUpsertEntityInput`), `packages/mcp-tools/src/scope.ts` (`resolveClientId`).
+*(ADR sweep, 2026-09-15)*
+
+**`@reconcil/ledger`'s public API cannot express tenancy, so the isolation invariant lives
+entirely in its callers.** `packages/ledger/src` contains zero occurrences of `tenantId`: every
+method takes an already-resolved `string[]` of addresses. The tenant property is derived one
+layer up in `resolveScope`, and every current caller routes through it — verified tool by tool.
+Nothing enforces that: no type, no lint rule, no dependency-cruiser rule, and `@reconcil/ledger`
+is an exported workspace package, so a future caller assembling addresses another way
+type-checks fine. Why deferred: the cheap fix (a branded `TenantScopedAddresses` that only
+`resolveScope` can mint) is a cross-package type change, and the expensive one is RLS, which
+ADR-006 d4 already sequences post-gate. Trigger: the second consumer of `@reconcil/ledger`, or
+the hosted multi-tenant milestone. Where: `packages/ledger/src/*`,
+`packages/mcp-tools/src/scope.ts` (`resolveScope`). *(ADR sweep, 2026-09-15)*
+
+**Tenant deletion does not erase export files.** The cascade covers all ten tenant-owned
+tables, but exports write invoice references and counterparty names to disk and the `exports`
+row records only `file_path` — so a deletion removes the pointer and leaves the content under
+the export root. ADR-006's GDPR consequence has been narrowed to the database accordingly.
+Why deferred: doing it properly means owning a file lifecycle (delete on cascade, or scrub on a
+retention schedule) that nothing else in the product needs yet. Trigger: the first tenant
+deletion request, or hosted multi-tenant. Where: `packages/mcp-tools/src/tools/export-run.ts`,
+`docs/architecture/schema.sql` (`exports.file_path`). *(ADR sweep, 2026-09-15)*
 
 ## Ledger
 
@@ -208,6 +325,39 @@ a full fold of events up to that point has always had this gap — not introduce
 arc, just observed while working in the area. Trigger: close it as part of any future
 freshness/fold-correctness hardening pass. Where: `packages/ledger/test/ledger.itest.ts`.
 *(Task 8, `fix/ledger-status-scope`)*
+
+## Money representation
+
+**`RawAmount` is applied to nothing, and the money-arithmetic lint rule ADR-004 d5 named does
+not exist.** The brand is declared and exported in `packages/core/src/money.ts` and used on
+zero values anywhere in `src/`: `formatUnits` takes a plain `bigint`, and the column is
+`numeric(…, mode: 'bigint')` with no `.$type<RawAmount>()`. `eslint.config.mjs` has no
+`no-restricted-syntax` and nothing that mentions money. What actually holds the line is real
+but different — Zod `decimalString` at the wire, `mode: 'bigint'` at the DB edge, SQL-side
+aggregation so no JS number sees a sum — and ADR-004 d5 now says so. Why deferred: wiring the
+brand touches every money-carrying signature in four packages, which is a mechanical but wide
+change, and it buys nothing until a second person writes money code. Trigger: the first
+money-typed helper added by someone other than the author, or any `number` appearing in a money
+path in review. Where: `packages/core/src/money.ts` (`RawAmount`), `packages/db/src/schema.ts`
+(`amount_raw`, `amount_applied_raw`), `eslint.config.mjs`. *(ADR sweep, 2026-09-15)*
+
+**`COMPARE_SCALE = 36` imposes a ceiling that throws, against ADR-004's "full precision
+internally". SUSPECTED, not confirmed.** The matcher re-parses every fiat decimal string into
+integer minor units at a fixed scale of 36 (`toMinor` → `parseUnits`), and `parseUnits` throws
+`RangeError` rather than rounding when the input carries more fractional digits than the scale.
+Fiat is produced by a `precision: 40` decimal clone, and `valueOne` divides for USD→EUR, whose
+result is non-terminating — so a value with a one- or two-digit integer part can carry 38–39
+fractional digits. If such a value reaches `toMinor`, the `RangeError` is not a `ToolError` and
+surfaces as an opaque `INTERNAL` from `recon_suggest_matches` / `recon_status`.
+
+What is confirmed: the ceiling, the throw, and that `divide` can produce more than 36 fractional
+digits. What is **not** confirmed is reachability end to end — it needs a EUR-target tenant
+valuing a USD-quoted snapshot, or a stored `fiat_value` above 36 dp, and no test or fixture
+exercises it. Recorded with the open question named rather than asserted, because the honest
+next step is a reproduction attempt, not a fix. Trigger: the first cross-currency reconciliation
+against a volatile token; write the repro before changing anything. Where:
+`packages/recon/src/match/score.ts` (`COMPARE_SCALE`, `toMinor`), `packages/core/src/money.ts`
+(`parseUnits`), `packages/pricing/src/value.ts` (`valueOne`). *(ADR sweep, 2026-09-15)*
 
 ## Face B (reconciliation & matching)
 
@@ -252,6 +402,148 @@ arc's own merge-surface discipline is explained rather than silent. No action ne
 Where: `packages/mcp-tools/src/tools/export-journal-drafts.ts`, on
 `chore/exporters-hardening`. *(Task 16, `chore/exporters-hardening`)*
 
+**Legs are never apportioned, so ADR-010 d2's batch-settlement half of the m:n model is
+unreachable.** Both emit sites in the engine set `amountAppliedRaw` to the **whole** event
+amount — the leg type says as much ("whole event in this slice") — so one 3,000 settlement
+proposed against three 1,000 invoices produces three legs each claiming 3,000. That is
+reachable, because `isCandidate` admits an out-of-band event on an expected-address or
+known-counterparty hit. Confirming the first passes the per-event budget check and derives
+`overpaid` from 3,000 against a 1,000 record; confirming the second raises `MATCH_CONFLICT`. So
+the scenario ADR-010 names as the reason pair-level legs exist fails on the first confirm and
+mislabels the record on the way. The schema is right and needs no change; what is missing is a
+split of the applied amount across the legs of one event, plus the status math that follows
+from it. Trigger: the first real batch settlement in an interview or a pilot — this is the
+Face B feature most likely to be asked for. Where: `packages/recon/src/match/engine.ts`
+(both `legs.push` sites), `packages/recon/src/match/types.ts` (`SuggestedLeg`),
+`packages/mcp-tools/src/recon/decision-repo.ts` (the budget check). *(ADR sweep, 2026-09-15)*
+
+**The full-match short-circuit is not derivable from the stored `rationale`, against ADR-010's
+"explainable to an auditor".** `withinBand` is inclusive and `amountScore` scores the band edge
+0, so a candidate sitting exactly on the edge with an address or history hit scores above zero,
+is suggested, sets `anyFullMatch` and therefore **suppresses the subset search** — while its
+rationale contains no `amount` entry at all. The split that was never proposed leaves no trace,
+and nothing in the record says why. The H18 fix ("a positive confidence is a non-empty
+rationale") holds; this is a different decision on the same line. Why deferred: the fix is
+either recording the suppression as a rationale entry or decoupling `anyFullMatch` from
+`withinBand`, and choosing between them is a scoring decision, not a bug fix. Trigger: the
+first auditor question about a split that was not offered. Where:
+`packages/recon/src/match/engine.ts` (`anyFullMatch`), `packages/recon/src/match/score.ts`
+(`withinBand`, `amountScore`). *(ADR sweep, 2026-09-15)*
+
+**`void` is specified as a manual record state and no shipped tool can set it.** ADR-010 d2
+calls it "a manual, terminal state, never derived". It exists in the schema, in the guard that
+refuses decisions on a void parent, and in two tests that set it by raw SQL — there is no
+`recon_void_record` tool and no other write path. So the guard is real and unreachable through
+the product. Why deferred: adding the tool is a scope decision (it is a write tool with its own
+HITL question), not a defect fix. Trigger: the first user who needs to write off an invoice.
+Where: `packages/db/src/schema.ts` (`external_records.status`),
+`packages/mcp-tools/src/recon/decision-repo.ts` (the void guard). *(ADR sweep, 2026-09-15)*
+
+**ADR-010 d4's HITL property has no mechanism on the in-process path, and `confirmed_by` cannot
+tell the two apart.** `recon_confirm_match` is an ordinary registered write tool; the audit
+column is written from a hardcoded `ACTOR = 'agent'` with no user id; and the CLI agent binds
+the whole registry in-process with no approval gate and a system prompt that says nothing about
+requiring confirmation. On the shipped MCP surface the guarantee is real — the tool is
+annotated non-read-only and a client such as Claude Desktop or Claude Code prompts the operator
+— but that is the *client's* property, not this system's, and it is absent for the CLI and the
+eval harness. Two independent pieces of work: a real actor on `ToolContext` written to
+`confirmed_by`, and a policy for the in-process binding (filter write tools, or require an
+explicit approval callback). Nothing here moves value, so P8 is not in question. Trigger:
+before any deployment where the audit trail has to answer "who confirmed this". Where:
+`packages/mcp-tools/src/recon/decision-repo.ts` (`ACTOR`), `apps/cli/src/agent/core.ts`
+(`toolSpecs`), `packages/mcp-tools/src/context.ts`. *(ADR sweep, 2026-09-15)*
+
+**`tokens.peg_currency` is unconstrained, so a mis-curated token is valued at face value with
+no snapshot and no warning.** The recon face-value branch fires on
+`isStablecoin && pegCurrency === record.currency`. Neither `tokens.peg_currency` nor
+`external_records.currency` has a CHECK constraint — the `'USD' | 'EUR'` restriction is a
+comment — so a token flagged `is_stablecoin=true, peg_currency='GBP'` against a GBP record is
+valued 1:1, matched and exported without ever consulting a price or emitting `PRICE_MISSING`.
+The volatile path is correctly guarded; this branch runs before that guard. Why deferred: the
+real fix is curation-side (a CHECK, or a verified-peg list), and the exposure requires operator
+error rather than hostile input. Trigger: the first non-USD/EUR peg, or opening token curation
+to users. Where: `docs/architecture/schema.sql` (`tokens.peg_currency`),
+`packages/mcp-tools/src/recon/match-repo.ts` (the face-value branch). *(ADR sweep, 2026-09-15)*
+
+**ADR-005 d1's "no materialized state to invalidate in MVP" predates Face B, which
+deliberately materializes `matches.fiat_value`.** It is pinned at confirm time (face value,
+P5) and read back — never re-derived from events — by `recon_status`'s open amounts, the
+confirm-time over-application check and `export_journal_drafts`. That is ADR-010 d5 working as
+designed, not drift. Recorded rather than reworded **deliberately**: carving Face B out of d1
+would read as a licence for more materialized state, which is the thing d1 exists to resist,
+and the honest statement is that one bounded exception exists and is justified elsewhere.
+Trigger: a second proposal to materialize a derived figure — at which point d1 needs a real
+rule ("derived figures are recomputed from events unless a pinning decision says otherwise, and
+each such decision names its own ADR") rather than an exception list. Where: ADR-005 d1,
+ADR-010 d5, `packages/db/src/schema.ts` (`matches.fiat_value`). *(ADR sweep, 2026-09-15)*
+
+## Sanitization & guardrails
+
+**`UNVERIFIED_EXCLUDED` is derived from the request flag, not from what was excluded.** Every
+emit site is `if (!includeUnverified) warnings.push(…)`, and the close pack pushes it
+unconditionally, so it fires on a tenant with no unverified tokens and can never signal that
+something *was* hidden. As a disclosure of the default policy it is fine; as ADR-011 layer 3's
+"nor silently disappear" it carries no information, because it is a constant. The fix is to
+thread the excluded count out of the ledger queries and emit on `> 0` — cheap per tool,
+five tools plus the close pack. Trigger: fold into any slice that touches the analytics warning
+path. Where: `packages/mcp-tools/src/tools/analytics-{balances,flows,counterparties,
+list-events}.ts`, `packages/mcp-tools/src/tools/close-pack-data.ts`. *(ADR sweep, 2026-09-15)*
+
+**`analytics_stablecoin_movements` excludes unverified tokens with no warning and no opt-in.**
+`computeStablecoinMovements` hard-filters `verified = true`; `analyticsStablecoinInput` has no
+`include_unverified`; the handler emits no `UNVERIFIED_EXCLUDED`. An auto-discovered stablecoin
+therefore disappears silently from the tool whose own description calls it the most common
+accountant question — exactly the failure ADR-011 layer 3 exists to prevent. (`analytics_gas`
+is native-only and correctly has neither.) The recon path filters the same way, so an
+unverified-token settlement is also silently unmatchable and silently absent from
+`recon_status`'s unmatched count. Trigger: same slice as the entry above; this one is the more
+urgent half, since here there is no way to see the excluded rows at all. Where:
+`packages/ledger/src/stablecoins.ts`, `packages/core/src/schemas.ts`
+(`analyticsStablecoinInput`), `packages/mcp-tools/src/recon/{match-repo,status-repo}.ts`.
+*(ADR sweep, 2026-09-15)*
+
+**Raw `counterparty_name` leaves the repository and is sanitized late, at a different cap, with
+its `heavy` flag discarded.** `journal-drafts-data.ts` selects the raw hostile import string and
+hands it to the exporter, which sanitizes at the default 64 — while `recon_import_invoices`
+sanitizes the same column at 128. The same name therefore renders two different truncations on
+two surfaces. And `journal-drafts.ts` takes `.display` only, dropping `heavy`, so the
+length-cap loss that the 2026-08-06 ADR-011 amendment was written to surface produces no
+warning on the export path at all. `heavy` is consumed at exactly three call sites in the tree,
+none of them an exporter. Why deferred: fixing it properly means sanitizing at the repository
+edge (one cap, one place) rather than adding a fourth call site, which touches the journal data
+shape. Trigger: the next slice that touches `journal-drafts-data.ts`. Where:
+`packages/mcp-tools/src/tools/journal-drafts-data.ts`, `packages/exporters/src/journal-drafts.ts`,
+`packages/core/src/sanitizer.ts`. *(ADR sweep, 2026-09-15)*
+
+**`ledger_trace_tool_call` echoes the stored `tool_calls.args` jsonb verbatim.** No
+sanitization, no `untrusted` key, no shape constraint. `recon_import_invoices` redacts inline
+`content`, but that is a size guard, not a hostility guard — `mapping` (CSV header strings
+pasted in from an attacker-supplied file) and `file_path` ride through unmodified and come back
+out on replay, into LLM context, with no marker for layer 2's "data, never instructions" rule to
+attach to. Why deferred: the audit tool's whole point is byte-fidelity of what was called, so
+the fix is an `untrusted` wrapper plus a documented shape rather than scrubbing — a contract
+change to §6 that wants its own slice. Trigger: before the hosted demo, where args come from
+untrusted tenants. Where: `packages/mcp-tools/src/tools/ledger-trace-tool-call.ts`,
+`docs/architecture/02-mcp-contracts.md` §6. *(ADR sweep, 2026-09-15)*
+
+**The injection eval grades the model's answer, not whether raw reached the response — and on
+the default CI path it covers one case.** The grader is `finalAnswer.includes(canary)`. Nothing
+asserts the canary is absent from the tool RESULTS, which is what layer 1 is. The case cannot
+presently detect a layer-1 regression at all: the planted token leaves
+`symbol_display`/`name_display` NULL and is `verified=false`, `name_raw` (which carries the
+actual instruction) is selected by no query in the codebase, and both canaries contain `_`,
+which the allowlist strips — so even a total sanitizer failure could not put the canary through
+the sanitized channel. Scope compounds it: two of thirty cases declare a canary, `--smoke` runs
+one of them, and `applicable.length === 0` is treated as vacuously satisfied, so a fork PR or a
+keyless clone reports a green gate with the injection metric at 0/0. Why deferred: making the
+grader assert over tool results is an eval-harness change (transcripts already carry the
+results, so it is tractable), and choosing canaries inside the allowlist charset is a fixture
+change; together they are a slice. Trigger: before relying on this gate in any external claim
+— ADR-011's "verifiable from CI" is partly about it. Where:
+`packages/evals/src/graders/injection.ts`, `apps/cli/src/evals/seed-case.ts`
+(`plantInjectionToken`), `apps/cli/src/evals/{gate,smoke}.ts`,
+`packages/evals/fixtures/evals/core-30.yaml`. *(ADR sweep, 2026-09-15)*
+
 ## Transport & auth
 
 **`hashKey` is computed twice per authenticated request.** Pure performance nit (sha256
@@ -259,49 +551,18 @@ over a short string, twice, per request) — not a correctness issue. Trigger: r
 auth-path latency ever becomes a measured concern. Where: `apps/mcp-server/src/auth.ts`
 (`hashKey`). *(Task 11, `fix/server-transport`)*
 
+**`/mcp` is registered with `app.all`, so unsupported methods pay for auth before being
+refused.** ADR-003 enumerated `POST/GET/DELETE` — the three the transport implements — and the
+route matches PUT, PATCH, HEAD and OPTIONS too: each spends an IP rate-limit token and a live
+`resolveTenantByBearer` DB round-trip before the SDK rejects it. Low impact (the request is
+still refused, and the rate limiter bounds the amplification), but it is unauthenticated work
+an attacker can direct. Why deferred: narrowing it means three explicit route registrations
+sharing one handler config, which is a small but real refactor of the hook wiring, and the ADR
+now states what is registered. Trigger: fold into any slice touching `http.ts`'s route setup.
+Where: `apps/mcp-server/src/http.ts` (`app.all('/mcp', …)`), ADR-003.
+*(ADR sweep, 2026-09-15)*
+
 ## Exporters
-
-**Whether `realpath`-based confinement is the right shape at all.** The ACCURACY half of this
-entry was declared closed on 2026-09-13, when ADR-012 d7 and `02-mcp-contracts.md` were first
-amended. It reopened twice and was amended again on 2026-09-14: the rule stated there was
-wrong about WHERE the boundary lies (it said "after confinement nothing is the caller's",
-while two `INVALID_INPUT` checks legitimately follow it), and then silent about the one
-exception the code relies on. "Amended" is not the same as "accurate", and three review
-rounds in a row found a drifted copy rather than a wrong behaviour — which is why the
-classification now lives in one compiler-checked table (`recon/import-fs.ts`) with the
-documents describing it rather than restating it.
-
-Filing it as "belongs with the ADR sweep, not
-the branch that surfaced it" was wrong — the deviation was introduced by that same branch,
-and CLAUDE.md's rule ("deviating from an ADR requires editing that ADR") has no later-is-fine
-clause. The branch amended ADR-005 d2 for its behaviour change while deferring this one; that
-inconsistency is what review caught.
-
-What remains is the design question. Five review rounds went into this path, each adding a
-mechanism: prefix check → realpath of the deepest existing ancestor → single-segment checks
-on every caller-supplied component → `mkdir -p` → realpath of the finished directory,
-anchored at the ROOT and required to be CONTAINED in it (equality was tried and refused a
-legitimate differently-cased path) → `{ flag: 'wx' }` →
-cleanup of partial writes → `rmdir` of the orphan on refusal. Each was found by review, not
-chosen by design, and each narrows a window the previous one left.
-
-The residue is structural rather than a missing tenth step. `realpath` answers "where does
-this path point RIGHT NOW", and every use of that answer happens afterwards — so a
-check-then-use built on it narrows the window and never closes it: `mkdir -p` still creates a
-directory behind a link planted mid-call, and the write that follows the check is a second
-lookup of a path the check has already released. Closing it properly wants
-`openat`/`O_NOFOLLOW` per segment, where the file descriptor IS the check — which Node's
-promises API does not expose (`fs.open` takes no `dirfd`). The real options are a native
-addon, a child process, or accepting the residue.
-
-Accepting it is the right call today and the ADR now says so plainly. But the reasoning
-deserves to be a decision made once rather than an accumulation of nine findings. Trigger:
-the ADR sweep (see the ADR-005 entry), or sooner if the export root is ever shared with a
-less-trusted co-tenant — which is the threat model under which the residue stops being
-acceptable. Where: `packages/mcp-tools/src/tools/export-run.ts`,
-`packages/mcp-tools/src/fs-confine.ts`, ADR-012 d7.
-*(review of `fix/evals-any-of-and-known-gaps`, 2026-09-13 — accuracy half closed the same
-day, design half open)*
 
 **Residual TOCTOU between `realpath` and `open` (narrowed, not closed).** The original entry
 said "Export I/O reads the path before its `realpath` re-check", and re-reading it while
@@ -444,9 +705,48 @@ label-resolution cases can be restored. Where: `apps/cli/src/evals/seed-case.ts`
 `packages/evals/src/seed.ts`, `packages/evals/fixtures/evals/core-30.yaml`.
 *(landing sweep — found by the first scorecard that carried transcripts, 2026-09-08)*
 
+**Dependency-cruiser has no `apps/* → packages/*` rule, so the edge its own header documents
+is unguarded.** `.dependency-cruiser.cjs` opens by stating the layer graph
+`apps/* → mcp-tools → { ledger, recon, exporters, pricing } → db → core`, and none of its ten
+rules constrains what an app may import from a package: `nothing-imports-apps` and
+`no-cross-app-imports` are other directions, and `not-to-unresolvable` is not a backstop
+because the root workspace declares `@reconcil/ingestion` as a devDependency (see the entry
+above), so an undeclared import from an app resolves by node_modules walk-up. The
+`evals-layer` comment reasons explicitly that "ingestion is still barred from the read-only MCP
+server runtime by `mcp-tools-layer` + `nothing-imports-apps`", which does not follow — neither
+rule covers `apps/mcp-server → ingestion`. No app violates the graph today. This matters
+because ADR-011's read-only claim leans on that boundary. Trigger: fold into any slice touching
+`.dependency-cruiser.cjs`; the rule itself is a few lines. Where: `.dependency-cruiser.cjs`,
+ADR-001. *(ADR sweep, 2026-09-15)*
+
+**Nothing keeps `ee/` empty, and `ee/` is exempt from every gate.** It is referenced in exactly
+two places: a comment in `pnpm-workspace.yaml` (the `packages:` globs simply never match it —
+there is no exclusion directive) and the ESLint ignore list. Code dropped there would be
+invisible to `pnpm lint` (ignored), `pnpm typecheck` (not a project reference), `pnpm depcruise`
+(which cruises `apps packages`) and `pnpm check:supply-chain` — so the directory reserved for
+the paid tier is the one place where ADR-011's "guardrail claims are literally verifiable from
+CI" would stop holding. Costs nothing today (the directory holds only a README), which is
+exactly why it is worth fixing before it holds anything. Trigger: the first commit that puts a
+file under `ee/`; better, add an emptiness assertion to CI now. Where: `pnpm-workspace.yaml`,
+`eslint.config.mjs`, `package.json` (`depcruise`, `check:supply-chain`), ADR-013 d4.
+*(ADR sweep, 2026-09-15)*
+
+**The closed-tier boundary ADR-013 draws is not where the code sits.** `integration_credentials`
+— QuickBooks/Xero OAuth tokens, AES-256-GCM ciphertext/nonce with a `key_version` for rotation
+— lives in `packages/db`, which d2 lists as open, while d3 puts the API-push connectors in
+`ee/`. Decision 4 keeps this from being a contradiction of fact (pre-gate the public repo is
+the whole repo), but a later `git mv` of the connectors into `ee/` leaves their credential
+table, encryption envelope and rotation column behind in the Apache-2.0 half. Probably the
+right split — schema is infrastructure, the OAuth flow is the product — but it should be a
+decision rather than a discovery at move time. Separately: every workspace package declares
+`"license": "Apache-2.0"` (13 of 13) and `site/` declares none, while being named in neither
+d2's open list nor d3's closed one. Trigger: the gate — this is a pre-split cleanup, not a
+defect. Where: `packages/db/src/schema.ts` (`integration_credentials`), `site/package.json`,
+ADR-013 d1/d3. *(ADR sweep, 2026-09-15)*
+
 ## Reconciling the count
 
-This register holds **30 entries**. The source ledger
+This register holds **58 entries**. The source ledger
 (`.superpowers/sdd/logical-stargazing-clover/progress.md`) has 26 lines matching the
 literal pattern `minor (deferred):`, plus 3 lines using a variant phrasing (`minor
 (deferred, …):`, Tasks 7/11/17) and 3 explicit `NOTE`/`OPEN AUDIT ITEM` lines (Tasks
@@ -532,22 +832,49 @@ number is gone.) The reconciliation from 32 ledger lines:
   a real consequence and overstated the half that did not.
 
 - **±0**: the `## Pricing` heading, empty since PR #66 removed both of its entries, is gone.
+  (It is back as of 2026-09-15 with five entries — see the +31 below. Worth noting rather than
+  quietly reinstating: pricing looked *finished* for one release, and a sweep that asked what
+  each decision derives from found the densest cluster in the repo there.)
 
 - **+1**: one entry ADDED by the review of that same sweep — `compareTraceIds` changing the
   sentinel it derives, with no migration for already-ingested rows. Recorded rather than
   migrated because the label shapes whose ordering moved do not occur in either provider's
-  output (see the entry for the evidence), and there is no deployment to disagree with yet.
+  output, and there was no deployment to disagree with yet. (Closed 2026-09-15 by the ADR
+  sweep — see the −3 below; the migration evidence it collected survives in the entry that
+  replaced it.)
 
 - **+1**: one entry RAISED by the review of this same branch and deliberately not acted on —
   ADR-005 d2 deriving the sentinel from provider metadata while requiring it to be a function
   of the row set. It is an ADR change plus an ingestion simplification, so it gets its own
-  branch rather than riding the one that surfaced it.
+  branch rather than riding the one that surfaced it. (Acted on and closed 2026-09-15.)
 
 - **+1**: a second entry raised by the same review and also not acted on — ADR-012 d7
   describing a confinement the implementation has outgrown. Same signal as the ADR-005 one,
-  found the same way, and it goes to the same sweep.
+  found the same way, and it goes to the same sweep. (Decided and closed 2026-09-15.)
 
-32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 + 1 + 1 + 1 = **30**, matching this document.
+- **−3**: three entries CLOSED and removed on 2026-09-15 by the ADR sweep (branch
+  `chore/adr-audit-sweep`). Two of them were the pair this sweep was called to act on — the
+  `compareTraceIds` comparator change and the ADR-005 d2 "derives from metadata" proposal;
+  the proposal was implemented, so `n` is now the `(from, to, value)` rank and the label
+  comparator and its property test are gone. Their residue — the sentinel having been
+  re-derived twice with no migration path — is one new entry rather than nothing, since that
+  part was never closed. The third is the exporters confinement *design* question, which is
+  now a decision in ADR-012 d7 (accept `realpath` check-then-use, with a stop rule and a
+  named trigger) instead of an open item.
+
+- **+31**: thirty-one entries RAISED by the same sweep, tagged *(ADR sweep, 2026-09-15)*.
+  The sweep asked one question of every numbered decision in ADR-001…013 — *does the
+  implementation derive what the decision says it derives?* — which is how both of the
+  entries above were originally found, and the answer was no far more often than expected.
+  Fourteen decisions had their text corrected in that branch, because the ADR described
+  something the code neither does nor should. The thirty-one recorded here are the other
+  half: cases where the ADR is right and the code is not, so the correction is a code change
+  with its own branch. They cluster — five in pricing, five in sanitization, six in Face B —
+  because a sweep finds a *pattern*, not a list, which is the argument for auditing a
+  register rather than only appending to it.
+
+32 − 1 + 5 + 4 + 4 + 5 + 2 − 10 + 1 − 15 + 1 + 1 + 1 − 3 + 31 = **58**, matching this
+document.
 
 **Re-audit note (2026-08-06 fix pass):** a review caught that Task 15's line bundled two
 unrelated facts (`node:22-slim floats on major` and a separate `next lint` deprecation
