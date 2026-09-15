@@ -431,9 +431,14 @@ describe('processors', () => {
       // `traceId` stopped being a rank source on 2026-09-15 (ADR-005 d2) and has no reader in
       // src/ any more. The whole argument that deleting the label path loses nothing rests on
       // the label surviving into chain_events.raw, so pin it here: without this test a later
-      // dead-code sweep sees an unread field and removes it from RawInternalTx, the zod
-      // schema and mapInternalRows, at which point the label really is gone from the database
-      // and the ADR's "not lost" reasoning is quietly false.
+      // dead-code sweep sees an unread field, removes it, and the label really is gone from
+      // the database while the ADR's "not lost" reasoning is quietly false.
+      //
+      // This covers the normalize() -> raw -> chain_events.raw half only. The fixture builds
+      // RawInternalTx literals directly, so the provider half — the zod schema keeping
+      // `traceId`/`index` and mapInternalRows coalescing them — is pinned by
+      // etherscan-v2.test.ts ("KEEPING traceId (audit payload for chain_events.raw)") and
+      // blockscout.test.ts instead. Both halves are needed; neither test covers the other.
       await reset('native', 0, 'queued');
       await runBackfillPage(
         deps(() => bundleOf({ internal: internalShort })),
@@ -477,6 +482,17 @@ describe('processors', () => {
       expect(res2.lastProcessedBlock).toBe(SAFE);
       expect(res2.inserted).toBe(2);
       expect(await internalCount()).toBe(1000); // every trace stored exactly once
+      // Every other assertion here counts rows, which is how this fixture's two-traces-per-tx
+      // shape went unguarded: with both traces at the default value they tie under the tuple
+      // and fall to arrival order, and nothing would have noticed. Read the slots of one tx so
+      // the fixture's distinct values are load-bearing rather than commented.
+      expect((await pool.query<{ log_index: number; amount_raw: string }>(
+        'SELECT log_index, amount_raw FROM chain_events WHERE tx_hash = $1 ORDER BY log_index DESC',
+        ['0xint0'],
+      )).rows).toEqual([
+        { log_index: -1000, amount_raw: '400' },
+        { log_index: -1001, amount_raw: '900' },
+      ]);
     });
 
     it('when both pages are full the cursor is the MINIMUM of the two candidates', async () => {

@@ -251,13 +251,19 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
   // ("is independent of the trace label"), over every label shape the deleted comparator had
   // a rule for. The cases here pin the concrete numbering instead.
   //
-  // Five cases used to live here asserting how trace LABELS ordered ("0_2 before 0_10",
-  // "2 before 10", "a repeated label falls to the tuple", "a shape neither provider sends
-  // falls to the tuple", and a key-multiset re-fetch check). All five lost their subject when
-  // the label path was deleted (ADR-005 d2, amended 2026-09-15). Four of them would have gone
-  // on passing while asserting nothing — and the multiset one was vacuous even before, since
-  // a k-row group always emits exactly {-1000 … -(999+k)} whatever the comparator does.
-  // Deleted rather than left green.
+  // Five cases used to live here named after trace LABELS ("0_2 before 0_10", "2 before 10",
+  // "a repeated label falls to the tuple", "a shape neither provider sends falls to the
+  // tuple", and a key-multiset re-fetch check). All five lost their SUBJECT when the label
+  // path was deleted (ADR-005 d2, amended 2026-09-15), and were replaced by the cases below.
+  //
+  // Correcting the reason given when they were removed, because it did not survive checking:
+  // four of the five still asserted something real — their fixtures made label order and
+  // tuple order disagree, so they were live tests of the tuple path wearing label-shaped
+  // names, and each went red under comparator→arrival. They were removed for being
+  // MISLEADING (a reader would take them as evidence the label path survives), not for being
+  // vacuous. Only the fifth, the key-multiset check, was genuinely unfalsifiable — a k-row
+  // group emits {-1000 … -(999+k)} whatever the comparator does — and that one is the reason
+  // sentinel-permutation.property.test.ts asserts a row→key MAP instead.
   it('ranks by the (from, to, value) tuple, never by the provider trace label', () => {
     // The three rows the label path used to order 0 < 0_2 < 0_10. The labels are inert now;
     // the values decide, and emission still follows arrival order.
@@ -276,12 +282,44 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
   it('ranks by the (from, to, value) tuple: from wins over to wins over value', () => {
     const events = run([trace({ value: '30' }), trace({ value: '10' }), trace({ value: '20' })]);
     expect(slots(events)).toEqual({ '10': -1000, '20': -1001, '30': -1002 });
-    // from wins over to wins over value
+    // `from` wins over the rest: 0xaa sorts first although its value is the smaller one, so
+    // a comparator that consulted `value` first would rank these the other way.
     const byFrom = run([
       trace({ from: '0xbb', to: '0xaa', value: '9' }),
       trace({ from: '0xaa', to: '0xzz', value: '1' }),
     ]);
     expect(slots(byFrom)).toEqual({ '1': -1000, '9': -1001 });
+    // `to` wins over `value`, which the pair above cannot show — there `from`-order and
+    // `value`-order agree, so it separates `from` from `to` and never `to` from `value`.
+    // Same `from`, and the smaller `to` carries the LARGER value.
+    const byTo = run([
+      trace({ from: '0xaa', to: '0xzz', value: '1' }),
+      trace({ from: '0xaa', to: '0xbb', value: '9' }),
+    ]);
+    expect(slots(byTo)).toEqual({ '9': -1000, '1': -1001 });
+  });
+
+  it('address casing cannot change the order — the comparator lowercases both endpoints', () => {
+    // A provider is free to return checksummed addresses, and two providers serving the same
+    // window may not agree on the casing. Raw string order puts every upper-case letter
+    // before every lower-case one ('B' is 0x42, 'a' is 0x61), so without the lowercasing
+    // `0xBB…` would sort before `0xaa…` and the two traces would swap sentinels between a
+    // checksummed response and a lower-cased one — an ADR-005 d2 double-insert on re-fetch.
+    //
+    // Pinned here rather than in the property test: that generator dedupes on the LOWERCASED
+    // tuple, so it can never place two case-variant rows in one group.
+    const byTo = run([
+      trace({ from: '0xaa', to: '0xBBBB', value: '1' }),
+      trace({ from: '0xaa', to: '0xaaaa', value: '2' }),
+    ]);
+    expect(slots(byTo)).toEqual({ '2': -1000, '1': -1001 });
+    // Both endpoints, not just one: the two branches lowercase independently, so a mutation
+    // dropping it from `from` alone survives a `to`-only case.
+    const byFrom = run([
+      trace({ from: '0xBBBB', to: '0xcc', value: '1' }),
+      trace({ from: '0xaaaa', to: '0xcc', value: '2' }),
+    ]);
+    expect(slots(byFrom)).toEqual({ '2': -1000, '1': -1001 });
   });
 
   it('a re-fetch that returns the same traces in a different order re-derives the SAME keys', () => {
@@ -331,8 +369,10 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
       // The 40-wei trace is the largest, so it is last under tuple order and takes the LAST
       // slot of whatever set it is ranked in. In a prefix that is a slot belonging to another
       // trace in the full set — storing the prefix would double-insert on the re-fetch.
+      // Asserted as the exact slot rather than as "differs from the full-set slot": the
+      // latter is implied by this line plus the `full` expectation above, so it would be a
+      // second assertion that no mutation can redden on its own.
       expect(prefix['40']).toBe(-(1000 + cut - 1));
-      expect(prefix['40']).not.toBe(full['40']);
     }
   });
 

@@ -41,7 +41,9 @@ const txRow = z.object({
 // as free-form text (not decQuantity: the dotted form is not a number) because it is
 // never arithmetic and never wire-bound. It was an ordering key inside normalize() until
 // 2026-09-15; it is now audit payload that rides into chain_events.raw and nothing more
-// (ADR-005 d2), which is why the schema stays permissive about its shape.
+// (ADR-005 d2). Free-form about the string's SHAPE, not about its type — `z.string()` still
+// rejects a provider that sends a JSON number, which 09-known-gaps.md records as a latent
+// hard parse failure. Demoting the label did not relax that and must not be read as having.
 const internalRow = z
   .object({
     blockNumber: decQuantity,

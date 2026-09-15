@@ -40,9 +40,17 @@ const HASH = '0xDD10000000000000000000000000000000000000000000000000000000000010
  * A deliberately tiny endpoint pool, so two generated rows routinely agree on two of the
  * three tuple components and only the third separates them. A wide pool would make almost
  * every pair differ in `value` alone and leave the `from` and `to` branches of the comparator
- * unexercised — the generator could then not go red on a mutation deleting either. One entry
- * is a mixed-case spelling of another, so the lowercasing is load-bearing here rather than
- * decorative.
+ * unexercised — the generator could then not go red on a mutation deleting either. (Measured
+ * over 3000 seeded runs: ~570 pairs differing only in `from`, ~600 only in `to`.)
+ *
+ * One entry is a mixed-case spelling of another, which exercises the parent-tx grouping but
+ * **not** the comparator's `toLowerCase()`: `uniqueArray`'s selector dedupes on the LOWERCASED
+ * tuple, so two rows differing only in address case can never co-occur in a generated set, and
+ * dropping `toLowerCase()` from the comparator leaves it a deterministic function of row
+ * content — permutation invariance still holds. That mutation is pinned by an explicit case in
+ * `normalize.test.ts` ("address casing cannot change the order") instead. Said here because a
+ * docstring claiming a property the generator cannot reach is the failure this whole file is
+ * about.
  */
 const ADDRS = [
   '0xaa00000000000000000000000000000000000001',
@@ -200,7 +208,11 @@ describe('the one property the tuple deliberately does not have (ADR-005 d2)', (
 
     expect(pairing(fwd)).toEqual([['0', -1000], ['1', -1001]]);
     expect(pairing(rev)).toEqual([['1', -1000], ['0', -1001]]);
-    // …while the half of the key dedup actually depends on is identical either way.
-    expect(new Set(fwd.map((e) => e.logIndex))).toEqual(new Set(rev.map((e) => e.logIndex)));
+    // There is deliberately no assertion here that the two runs emit the same SET of
+    // sentinels, although that is the reason the swap is harmless. It would be unfalsifiable
+    // for exactly the reason the header gives: a k-row group emits {-1000 … -(999+k)} under
+    // every comparator, so both sides are `{-1000, -1001}` no matter what the code does. An
+    // earlier draft of this file condemned that shape at the top and then wrote it at the
+    // bottom. The claim belongs in prose (and in ADR-005 d2), not in an `expect`.
   });
 });

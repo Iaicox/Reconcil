@@ -53,8 +53,9 @@ export interface RawInternalTx {
    * before assigning the −(1000+n) sentinels; it no longer does, because the sentinel is half
    * an idempotency key and a label is how a provider chose to NAME a row rather than what the
    * row is (ADR-005 d2). Ranking is now `(from, to, value)`, full stop. The Blockscout half of
-   * the old claim was never verifiable anyway: in the one captured fixture with rows, five
-   * SINGLE-trace transactions carry `index` 67, 81, 161, 98 and 17 — not a per-tx ordinal.
+   * the old claim was never verifiable anyway: in the smaller of the two captured fixtures
+   * with rows, five SINGLE-trace transactions carry `index` 67, 81, 161, 98 and 17 — which is
+   * not a per-tx ordinal.
    *
    * Its only consumer is `chain_events.raw`, and nothing in `src/` reads it back. That is
    * deliberate, not neglect: it is what makes "deleting the label path does not lose the

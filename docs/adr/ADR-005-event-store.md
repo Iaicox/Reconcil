@@ -45,15 +45,20 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    inputs where it would agree with the tuple anyway. Three mechanisms across two review
    rounds, each narrowing further toward "use the tuple" — so use the tuple.
 
-   The label path's stated benefit, preserving execution order, **reached no consumer.** The
-   sentinel is `-(1000+n)` and every query that reads events orders ASCENDING by `log_index`
-   (`balances.ts`, `counterparties.ts`, `flows.ts`, `gas.ts`, `list-events.ts`), so `n = 2`
-   sorts *before* `n = 0`: execution order was inverted everywhere it could be observed. The
-   premise was shaky too. This decision used to assert Blockscout's `index` enumerates the
-   call tree per transaction, but in the only captured fixture carrying rows, five
-   **single-trace** transactions have `index` 67, 81, 161, 98 and 17 — not a per-tx ordinal.
-   No fixture in the repo exercises multi-trace ordering at all, so the claim that the two
-   providers sort a tx's traces identically was never tested against either of them.
+   The label path's stated benefit, preserving execution order, **reached no consumer.** Not
+   one query anywhere orders by `log_index` DESCENDING. Six order by it ascending — the five
+   ledger reads (`balances.ts`, `counterparties.ts`, `flows.ts`, `gas.ts`, `list-events.ts`)
+   plus the close pack's transactions CSV (`exporters/src/close-pack.ts`) — and because the
+   sentinel is `-(1000+n)`, `n = 2` sorts *before* `n = 0` in every one of them: execution
+   order was inverted everywhere it could be observed, exported CSV included. The remaining
+   `chain_events` readers (the recon and journal paths) order by `block_time, id` and never
+   consult it at all.
+
+   The premise was shaky too. This decision used to assert Blockscout's `index` enumerates the
+   call tree per transaction, but in the smaller of the two captured fixtures carrying rows,
+   five **single-trace** transactions have `index` 67, 81, 161, 98 and 17 — not a per-tx
+   ordinal. No fixture in the repo exercises multi-trace ordering at all, so the claim that
+   the two providers sort a tx's traces identically was never tested against either of them.
 
    **What this gives up**, stated rather than glossed:
    - *The tie set widens.* Arrival order remains the final tiebreak and now fires for any two
@@ -74,8 +79,10 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
      cursor" the mechanism — but a redundancy behind it is gone, and it was conditional
      redundancy: it rested on provider behaviour nothing in this system verifies.
    - *Citation samples reorder.* `EVENT_REF_CAP` truncates inline event refs in query order,
-     so for a transaction with more than 64 internal transfers, which traces are sampled
-     changes. Cosmetic; no figure moves.
+     and it applies **per citation bucket** (a flows/gas/balances group spanning many
+     transactions), not per transaction — so it is enough for two reordered traces to sit
+     either side of a bucket's 64th ref. Cosmetic: the `totalCount` beside the refs stays
+     exact and the drilldown covers the rest, so no figure moves.
 
    The label is **not lost.** `normalize()` stores the mapped provider row in
    `chain_events.raw` with `traceId` included, and an integration test pins that round-trip

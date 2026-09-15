@@ -33,6 +33,14 @@ interface InternalValueMove {
  * caller's filter has already evaluated `BigInt(r.it.value) > 0n` on every row one step
  * earlier, so a malformed value fails there instead of inside a sort's inner loop.
  *
+ * It does allocate two BigInts and two lowercased strings per comparison, which is the cost
+ * the deleted label comparator was hand-optimized to avoid — and that argument applies more
+ * strongly here, since this is now the only ranking path and values run to 78 digits. Left
+ * as is deliberately: a parent-tx trace group is a handful of rows (79 traces over 79 txs in
+ * every captured fixture), so the sort is effectively O(1) per group and a precomputed sort
+ * key would trade legibility on an idempotency-key derivation for nothing measurable. Revisit
+ * only with a profile, never on principle.
+ *
  * Takes `InternalValueMove['it']`, not `RawInternalTx`: that filter also narrows `to` to a
  * string, so a `?? ''` fallback here would be an unreachable branch pretending otherwise.
  */
