@@ -18,12 +18,17 @@ Both raw and scaled exist, each exactly once:
 - **Aggregation: in SQL over raw.** `SUM(amount_raw) GROUP BY token_id` is exact
   (Postgres NUMERIC arithmetic is arbitrary-precision).
 - **Scaling: once, at the edge.** Display amount = raw ÷ 10^decimals, computed in
-  TypeScript with an arbitrary-precision decimal library after aggregation — never
-  row-by-row, never inside SQL expressions where implicit casts lurk.
+  TypeScript after aggregation — never row-by-row, never inside SQL expressions where
+  implicit casts lurk. *(Amended 2026-09-15: this said "with an arbitrary-precision decimal
+  library". It uses none — a power-of-ten scale is exact and terminating, so `formatUnits` is
+  pure bigint↔string. The decimal bullet below already said so and the two contradicted each
+  other; see the three classes of money division there.)*
 - **Wire format: strings.** JSON (MCP payloads, fixtures) carries all monetary values as
   decimal strings; Zod schemas reject JSON numbers for money fields.
-- **Code: `bigint` for raw, decimal lib for scaled/fiat**, branded types
-  (`RawAmount`, `DecimalString`).
+- **Code: `bigint` for raw, decimal strings for scaled, a decimal clone for fiat
+  arithmetic**, branded types (`RawAmount`, `DecimalString`). *(Amended 2026-09-15: this
+  said "decimal lib for scaled/fiat". Scaling needs no library — see the bullet above and
+  the three classes below; the clone is for fiat, where quotients do not terminate.)*
 
   *Amended 2026-09-15 (ADR sweep — accuracy).* This originally ended "; ESLint forbids
   arithmetic on money via `number`". **No such lint rule exists** — `eslint.config.mjs` is
@@ -62,7 +67,9 @@ Both raw and scaled exist, each exactly once:
   *Corrected again, same day.* The rule first written here — "every site that divides money
   configures its own decimal clone at `precision: 40, ROUND_HALF_UP`" — was stronger than the
   code and would have made a correct third site non-conformant the moment it was written.
-  Division over money happens in **three** classes, and only one of them wants a clone:
+
+  The rule has to be about what a division **produces**, not that one happens. Division
+  producing MONEY happens in three classes, and only the third wants a clone:
 
   1. **Exact power-of-ten scaling** — `formatUnits`/`parseUnits` in `core/money.ts`, raw base
      units ÷ 10^decimals. Terminating by construction, so it is done in `bigint`/string with
@@ -75,12 +82,24 @@ Both raw and scaled exist, each exactly once:
   3. **Non-terminating decimal division** — FX conversion (`pricing/src/decimal.ts`) and the
      VAT split (`exporters/src/decimal.ts`). Only here is a quotient unrepresentable and a
      rounding mode therefore load-bearing. **These, and only these, configure a private clone
-     at `precision: 40, ROUND_HALF_UP`, and round only at an export boundary.** A fourth such
-     site adopts the same clone rather than importing someone else's.
+     at `precision: 40, ROUND_HALF_UP`, and round only at an export boundary.** A further such
+     site configures its own clone rather than importing someone else's.
+
+  A fourth site divides money and produces something that is **not** money, and it is the one
+  place a monetary value legitimately becomes a `number`: `amountScore`
+  (`recon/src/match/score.ts`) returns `1 - Number(diff) / Number(band.bandMinor)`, a
+  dimensionless score in [0,1] used only to rank candidates. It does not violate "money is
+  never `number`" — nothing monetary comes back out, and the engine's own header says so — but
+  it is worth naming rather than leaving as an apparent exception. Note the cost: at
+  `COMPARE_SCALE = 36` both operands can exceed `2^53`, so each loses precision. The ratio
+  survives because they lose it proportionally, and a score only has to order candidates; a
+  future use of that quotient for anything but ranking would need a different construction.
 
   Stated this way because the failure this ADR sweep exists to catch is a decision whose rule
-  does not match what the code derives — and writing one that condemns correct code is the
-  same defect pointing the other way.
+  does not match what the code derives. Writing one that condemns correct code is the same
+  defect pointing the other way — and the first two attempts at this paragraph did exactly
+  that, first by demanding a clone everywhere, then by a taxonomy that had no room for a
+  division whose result is not money.
 
 ## Alternatives considered
 

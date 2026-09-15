@@ -61,8 +61,10 @@ with full rationale.
 - **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)`
   (uint256 does not fit BIGINT); JSON carries money as decimal strings; TS uses `bigint` or a
   decimal clone. Aggregate raw in SQL, scale once at the edge. Rounding only where a quotient
-  is non-terminating, and then only at an export boundary — the one carve-out is bounded
-  integer tolerance math over minor units (`computeBand`), which truncates deliberately.
+  is non-terminating, and then only at an export boundary. Two sanctioned carve-outs, both in
+  the matcher: `computeBand` truncates in bigint (integer operands at a fixed scale), and
+  `amountScore` converts two money bigints to `number` to produce a ranking score — the one
+  place money legitimately becomes a `number`, because nothing monetary comes back out.
   *(Branded types exist (`RawAmount`, `DecimalString`) but `RawAmount` is applied nowhere, and
   there is no lint rule against `number` arithmetic — what actually holds the line is Zod
   rejecting JSON numbers at the wire, `mode: 'bigint'` at the DB edge, and SQL-side
