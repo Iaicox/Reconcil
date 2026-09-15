@@ -46,8 +46,10 @@ const erc20Receipt = (hash: string): RawReceipt => ({
   logs: [{ logIndex: 5, address: TOKEN, topics: [TRANSFER_TOPIC, pad(ADDR), pad(DEST)], data: hex(500) }],
 });
 
-// One trace-level ETH inflow (txlistinternal): no gas fields, `traceId` orders the
-// traces that share a parent tx (see normalize()).
+// One trace-level ETH inflow (txlistinternal): no gas fields. `traceId` is provider payload
+// bound for chain_events.raw and nothing else — the traces that share a parent tx are ordered
+// by their (from, to, value) tuple (ADR-005 d2, amended 2026-09-15), so a fixture that wants
+// deterministic sentinels must give the traces of one tx DISTINCT values, not distinct labels.
 const internalTx = (
   block: number, hash: string, traceId: string | undefined, value = '400',
 ): RawInternalTx => ({
@@ -112,8 +114,13 @@ const internalShort: InternalFn = (q) => Promise.resolve({
     : [],
 });
 // Full internal page: exactly PAGE_LIMIT traces, 2 per parent tx over blocks 200..699.
+// The two traces of a tx carry DISTINCT values (400 / 900). They used to share the default
+// 400 and differ only in `traceId`, which ranked them deterministically while the label was a
+// rank source; under the tuple they would tie and fall to arrival order, leaving 500 of the
+// txs in this fixture numbered by the provider's response order — the one thing ADR-005 d2
+// forbids — with every assertion still green, because this fixture is only ever counted.
 const bigInternals = Array.from({ length: 1000 }, (_, i) =>
-  internalTx(200 + Math.floor(i / 2), `0xint${String(Math.floor(i / 2))}`, String(i % 2)));
+  internalTx(200 + Math.floor(i / 2), `0xint${String(Math.floor(i / 2))}`, String(i % 2), String(400 + (i % 2) * 500)));
 const internalFull: InternalFn = (q) => {
   const from = Number(q.fromBlock);
   return Promise.resolve({ items: bigInternals.filter((t) => Number(t.blockNumber) >= from).slice(0, 1000) });
@@ -122,16 +129,23 @@ const internalFull: InternalFn = (q) => {
 const internalSpamBlock: InternalFn = (q) => Promise.resolve({
   items: Number(q.fromBlock) <= 300
     ? Array.from({ length: 1000 }, (_, i) =>
-        internalTx(300, `0xflood${String(Math.floor(i / 2))}`, String(i % 2)))
+        internalTx(300, `0xflood${String(Math.floor(i / 2))}`, String(i % 2), String(400 + (i % 2) * 500)))
     : [],
 });
-// The mid-tx truncation hazard, worst case. One parent tx at block 1299 carries three
-// traces whose stable rank DEPENDS ON THE SET: '0xsplit' mixes a labelled trace with an
-// unlabelled one, so the whole-tx fetch ranks by the (from,to,value) tuple
-// (100 → −1000, 500 → −1001, 900 → −1002) while a page truncated after the first trace
-// would rank that trace alone by its label (900 → −1000). Storing the truncated page
-// would therefore drop the 100-wei trace on conflict AND re-insert the 900-wei one at a
-// second sentinel. 999 single-trace fillers put the cut exactly there.
+// The mid-tx truncation hazard, worst case. One parent tx at block 1299 carries three traces
+// whose rank DEPENDS ON THE SET, because a rank is a position among the rows present in the
+// call: the whole-tx fetch ranks them by tuple (100 → −1000, 500 → −1001, 900 → −1002), while
+// a page truncated after the first trace ranks that trace alone (900 → −1000). Storing the
+// truncated page would therefore drop the 100-wei trace on conflict AND re-insert the 900-wei
+// one at a second sentinel. The 900-wei trace arrives FIRST and is the largest, so it is last
+// under tuple order and the divergence is maximal at the first cut. 999 single-trace fillers
+// put the cut exactly there.
+//
+// This used to be explained as "mixes a labelled trace with an unlabelled one, so the whole
+// tx ranks by tuple while a truncated page ranks by label" — an explanation that died with
+// the label path (ADR-005 d2, amended 2026-09-15). The hazard did not: it is inherent to
+// rank-within-the-present-set, which is why processors/ingest.ts withholds rows above the
+// cursor rather than relying on any comparator being prefix-stable.
 const SPLIT_BLOCK = 1299;
 const splitTraces: RawInternalTx[] = [
   internalTx(SPLIT_BLOCK, '0xsplit', '5', '900'),
@@ -410,6 +424,28 @@ describe('processors', () => {
       expect(await internalRows()).toEqual([
         { tx: '0xint1', idx: -1000, amt: '400' },
         { tx: '0xint1', idx: -1001, amt: '900' },
+      ]);
+    });
+
+    it('keeps the provider trace label in chain_events.raw — the only place it lives now', async () => {
+      // `traceId` stopped being a rank source on 2026-09-15 (ADR-005 d2) and has no reader in
+      // src/ any more. The whole argument that deleting the label path loses nothing rests on
+      // the label surviving into chain_events.raw, so pin it here: without this test a later
+      // dead-code sweep sees an unread field and removes it from RawInternalTx, the zod
+      // schema and mapInternalRows, at which point the label really is gone from the database
+      // and the ADR's "not lost" reasoning is quietly false.
+      await reset('native', 0, 'queued');
+      await runBackfillPage(
+        deps(() => bundleOf({ internal: internalShort })),
+        { chainId: 1, address: ADDR, stream: 'native' },
+      );
+      const labels = (await pool.query<{ log_index: number; trace_id: string | null }>(
+        `SELECT log_index, raw->>'traceId' AS trace_id FROM chain_events
+          WHERE log_index <= -1000 ORDER BY log_index DESC`,
+      )).rows;
+      expect(labels).toEqual([
+        { log_index: -1000, trace_id: '0' },
+        { log_index: -1001, trace_id: '1' },
       ]);
     });
 
