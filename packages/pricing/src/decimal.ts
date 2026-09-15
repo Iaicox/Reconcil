@@ -1,7 +1,8 @@
 /**
  * Exact decimal arithmetic for fiat valuation (ADR-004, ADR-007). Fiat values
  * (price, fx, fiat_value) are non-integer and division enters here. NOT the only
- * decimal clone: exporters keeps its own for the VAT split, and has to —
+ * decimal clone: exporters keeps its own for the whole export boundary (rounding, sums,
+ * the VAT split), and has to —
  * dependency-cruiser forbids exporters → pricing. ADR-004 names the three classes
  * of money division and which of them needs a clone. Configured for **full precision
  * internally; round only at export**: 40 significant digits, half-up. Canonical

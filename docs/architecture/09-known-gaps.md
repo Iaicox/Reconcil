@@ -149,8 +149,11 @@ pause backfills first, tails last". No limiter of any kind exists: the transport
 only the *price* bundle is wrapped (`throttled(…, 250)`). Nothing distinguishes a backfill
 call from a tail call, so there is no ordering to pause in — and the backfill worker runs at
 concurrency 5 against a tail worker at `chains.length` (2), so under contention backfill takes
-the larger share of a shared per-key budget and 429s the tail. Why not fixed here: a shared
-limiter keyed per provider credential is its own slice. Trigger: the first 429 storm, or the
+the larger share of a shared per-key budget and 429s the tail. One visible orphan follows
+from it: the `RATE_LIMITED` tool ErrorCode is declared in the contract (§4) and thrown by
+nothing, because the counter that would raise it does not exist — the HTTP limiter is
+transport-level and answers with its own body. Why not fixed here: a shared limiter keyed per
+provider credential is its own slice. Trigger: the first 429 storm, or the
 first paid provider plan with a real daily budget. Where: `apps/worker/src/main.ts`
 (`bundleFor`, worker concurrencies), `packages/ingestion/src/fixture-transport.ts`
 (`realFetchJson`). *(ADR sweep, 2026-09-15)*
@@ -290,7 +293,8 @@ not in this branch. Trigger: immediately — same branch as the pricing determin
 **`@reconcil/ledger`'s public API cannot express tenancy, so the isolation invariant lives
 entirely in its callers.** `packages/ledger/src` contains zero occurrences of `tenantId`: every
 method takes an already-resolved `string[]` of addresses. The tenant property is derived one
-layer up: eight call sites use `resolveScope`, and three (`recon/match-repo.ts`,
+layer up: eight call sites use `resolveScope` (the six analytics tools, `ledger_status`, and
+`close-pack-data.ts` for both Face A exports), and three (`recon/match-repo.ts`,
 `recon/status-repo.ts`, `tools/journal-drafts-data.ts`) re-derive the same tenant-scoped
 select inline — the same guarantee reached twice, verified caller by caller.
 Nothing enforces that: no type, no lint rule, no dependency-cruiser rule, and `@reconcil/ledger`

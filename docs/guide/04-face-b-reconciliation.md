@@ -13,8 +13,10 @@ reconciliation fixture.
 
 The matching engine is deterministic TypeScript. It scores candidates by fixed rules and
 persists its proposals as `suggested`. The LLM's job is to *explain* those proposals; it
-never scores and never decides. Nothing reaches an export until a human confirms it (P8,
-ADR-010).
+never scores and never decides. Nothing reaches an export until a leg is **confirmed** (P8,
+ADR-010). Who confirms is your MCP client's business: it prompts you before running a write
+tool, and that prompt is the human step — the server cannot tell a human decision from an
+agent one, and records `confirmed_by = 'agent'` for both (ADR-010 d4, amended 2026-09-15).
 
 That is the whole design in one line: **the engine proposes, you dispose, the export follows
 your decision.**
@@ -225,8 +227,9 @@ could not attach to any invoice is money you received without a matching bill �
 
 The record's status is re-derived from its confirmed legs: `open` → `partially_matched` →
 `matched` → `overpaid`, by comparing the confirmed total against the invoice amount within
-the canonical tolerance band. (`void` exists too, and no shipped tool sets it — the state is in the schema and in the guard that refuses decisions on a void record, but nothing writes it (see 09-known-gaps.md); it is never
-derived.)
+the canonical tolerance band. `void` is a fifth state that is never derived — and today no
+shipped tool sets it either: it exists in the schema and in the guard that refuses decisions
+on a void record, with no write path (see `09-known-gaps.md`).
 
 Rejecting releases the leg:
 

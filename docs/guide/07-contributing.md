@@ -130,7 +130,7 @@ without noticing.
   a decimal clone. Aggregate raw in SQL, scale once at the edge, round only at export
   boundaries — two sanctioned exceptions inside the matcher (`computeBand` truncates in
   bigint, `amountScore` makes a ranking score out of two money bigints). Branded types exist
-  but `RawAmount` is applied nowhere and there is no money lint rule; see ADR-004. (ADR-004)
+  but `RawAmount` is applied nowhere and there is no money lint rule. (ADR-004)
 - **The LLM never computes.** Every figure comes from a deterministic function and must be
   traceable through the citation envelope. A number without provenance is a bug. (P1/P2, ADR-012)
 - **`chain_events` is append-only.** No UPDATE, no DELETE, ever. Idempotency via

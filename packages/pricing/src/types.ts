@@ -12,7 +12,8 @@ export type ValuationPolicy = 'market' | 'peg_for_stables';
 /** The opt-in valuation request (contracts §2 `Valuation`). */
 export interface Valuation {
   currency: Currency;
-  policy?: ValuationPolicy; // default resolved above (tenant setting); pricing treats undefined as 'market'
+  policy?: ValuationPolicy; // caller-supplied; pricing treats undefined as 'market'. ADR-007 d4
+  // INTENDS a tenant setting, but tenants.settings is read by nothing (amended 2026-09-15)
 }
 
 /** One quantity to value: scaled display units of a token on a UTC date. */

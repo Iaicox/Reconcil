@@ -141,7 +141,7 @@ They are the system telling you the limits of its own answer.
 
 | Code | Meaning | What to do |
 |---|---|---|
-| `COVERAGE_INCOMPLETE` | A wallet or stream in scope is still backfilling or has errored. | Check `ledger_status`. Wait for `live`, or investigate `last_error`. Do not quote the figure yet. |
+| `COVERAGE_INCOMPLETE` | A wallet or stream in scope is still backfilling or has errored. | Check `ledger_status`. Wait for `live`. `last_error` is not yet populated by anything (ADR-008 d1), so a stalled stream shows as its last non-error status — check the worker log too. Do not quote the figure yet. |
 | `ANCHORED_BASELINE` | Figures rest on an `opening_balance` anchor, not full history. | Expected if you tracked in anchored mode. Disclose it in any report; re-track in `full` mode if you need real history. |
 | `DATA_STALE` | The checkpoint is older than the freshness threshold. | The worker is probably down or rate-limited. Check `docker compose logs worker`. |
 | `UNVERIFIED_EXCLUDED` | Spam-suspected tokens were omitted (the default). | Usually correct. Pass `include_unverified: true` if you genuinely need them. |

@@ -137,7 +137,8 @@ Four steps, currently the spine of the page and worth keeping:
 2. **Match payments** — a deterministic engine proposes many-to-many matches across partial
    payments, overpayments and network fees. Confidence is a sum of weighted rules, not a
    model's opinion.
-3. **Confirm** — a human approves each match. Record status moves through open → partial →
+3. **Confirm** — each match is approved before it counts; your MCP client prompts you before
+   any write tool runs. Record status moves through open → partial →
    paid → overpaid.
 4. **Export** — EUR/USD fixed at payment date, VAT split out, emitted as QuickBooks or Xero
    manual-journal drafts for review.

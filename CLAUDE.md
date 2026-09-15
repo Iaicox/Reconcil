@@ -91,10 +91,10 @@ with full rationale.
   input and does cross the wire. (ADR-011)
 - **Tenant identity comes from the transport session, never from tool arguments.**
   Chain data tables are global by design. Tenant-owned repositories (recon, directory, audit)
-  take a tenant context and predicate on it; `packages/ledger` does NOT — it takes an address
-  set already resolved from the tenant's `wallets` — eight call sites via `resolveScope`,
-  three re-deriving the same tenant-scoped select inline — so a new caller of the ledger must
-  resolve its own scope the same way. Nothing enforces that, and one write tool
+  take a tenant context and predicate on it. `packages/ledger` does NOT: it takes an address
+  set already resolved from the tenant's `wallets`, by eight call sites through `resolveScope`
+  plus three that re-derive the same tenant-scoped select inline. So a new caller of the
+  ledger must resolve its own scope the same way, and nothing enforces that. One write tool
   (`directory_upsert_entity`) does not validate its `client_id` at all. (ADR-006, ADR-012)
 - **MCP tool wire names use underscores** (`analytics_balances`) — dots break the Claude
   API tool-name constraint; `analytics.*` namespaces are logical only. Swept over the whole

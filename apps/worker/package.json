@@ -2,7 +2,7 @@
   "name": "@reconcil/worker",
   "version": "0.0.0",
   "private": true,
-  "description": "BullMQ processors: backfill, live tail, prices, token resolve, integrity checks, exports.",
+  "description": "BullMQ processors: tail, backfill, prices, onboard, anchor, probe.",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {

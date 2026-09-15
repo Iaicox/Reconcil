@@ -51,7 +51,7 @@ Two boundaries matter:
 flowchart TB
     subgraph host["Customer infra or Railway (docker-compose)"]
         mcps["<b>mcp-server</b><br/>Node/TS. MCP tools over stdio and<br/>streamable HTTP (Fastify host: /mcp, /healthz)"]
-        worker["<b>worker</b><br/>Node/TS. BullMQ processors:<br/>backfill, live tail, prices, token resolve,<br/>integrity checks, exports"]
+        worker["<b>worker</b><br/>Node/TS. BullMQ processors:<br/>tail, backfill, prices, onboard, anchor, probe<br/>(token-resolve, integrity, exports: ADR-008 scope, not built)"]
         pg[("Postgres 16<br/>event store + everything durable")]
         redis[("Redis<br/>BullMQ queues (rate-limit budgets are designed, not built — ADR-008 d2)")]
         files[/"export artifacts<br/>(bind-mounted volume)"/]
@@ -109,8 +109,8 @@ pnpm workspaces + Turborepo (ADR-001).
 reconcil/
 ├── apps/
 │   ├── mcp-server/        # stdio entry + Fastify host for streamable HTTP (/mcp, /healthz)
-│   ├── worker/            # BullMQ processors (tail, backfill, prices, onboard, anchor, probe;
-│                          #  exports/integrity/token-resolve are ADR-008 scope, not built)
+│   ├── worker/            # BullMQ processors: tail, backfill, prices, onboard, anchor, probe
+│   │                      #  (token-resolve/integrity/exports are ADR-008 scope, not built)
 │   └── cli/               # thin agent (Agent SDK): demo REPL + `evals run`
 ├── packages/
 │   ├── core/              # domain types, zod schemas, Money, sanitizer, chains config

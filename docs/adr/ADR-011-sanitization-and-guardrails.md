@@ -88,7 +88,9 @@ MiCA guardrails, enforced structurally where possible:
 - **No investment advice**: agent system prompt prohibition + eval refusal cases (gate:
   100%). Tools return facts only — no performance judgments, no recommendation fields.
 - **Draft-for-review**: every journal artifact is labeled as a draft in file content and
-  tool output; only human-confirmed matches reach exports (ADR-010).
+  tool output; only CONFIRMED matches reach exports (ADR-010 d4 — which no longer claims the
+  confirmer is necessarily a human: that rests on the transport client's approval gate, and
+  `confirmed_by` records a hardcoded 'agent' either way).
 
 ## Alternatives considered
 

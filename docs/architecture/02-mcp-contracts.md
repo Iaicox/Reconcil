@@ -117,7 +117,9 @@ type ErrorCode =
   | 'PERIOD_TOO_LARGE'      // exceeds server-side limits (hint: split the period)
   | 'MATCH_CONFLICT'        // confirm would violate a matching invariant
   | 'NOT_SUGGESTED'         // confirm/reject on a match not in 'suggested' state
-  | 'RATE_LIMITED'          // provider budget exhausted (hint: retry later)
+  | 'RATE_LIMITED'          // provider budget exhausted (hint: retry later) — DECLARED BUT
+                            // UNREACHABLE: no budget counter exists, so no tool throws it
+                            // (the HTTP limiter is transport-level and does not use this)
   | 'INTERNAL';
 ```
 
@@ -140,12 +142,14 @@ interface Valuation {
 // Pagination: opaque cursor = base64(chain_id, block_number, log_index, id).
 ```
 
-Tenant identity is **not** an input: it comes from the transport session (ADR-012). Every
-tool resolves its scope from that tenant's `wallets` before any event query runs, and the
-tenant-owned repositories take the tenant context directly. It is **not** injected into every
-repository call — `packages/ledger` has no tenant parameter at all and receives an
-already-resolved address list (ADR-006 d2 as amended 2026-09-15). A tool can never be asked
-to read another tenant's data.
+Tenant identity is **not** an input: it comes from the transport session (ADR-012). It is
+**not** injected into every repository call — `packages/ledger` has no tenant parameter at
+all and receives an already-resolved address list (ADR-006 d2 as amended 2026-09-15). Two
+mechanisms carry the boundary instead: a tool that reads the chain tables by ADDRESS first
+resolves its scope from the tenant's `wallets`, and a tool that reads them by ROW ID reaches
+that id only through a tenant-predicated row it already owns (`recon_confirm_match` loads a
+`chain_events` row by the id on a `matches` leg selected under `tenant_id`). Either way a
+tool can never be asked to read another tenant's data.
 
 ## 6. Tool catalog
 
@@ -256,8 +260,9 @@ not the full counterparty set — these are the highest-activity counterparties,
 worth labeling first.
 
 Resolution: `entity_addresses` exact match (tenant rows shadow curated rows). The tool
-suggests labeling, the agent proposes it, the human confirms — the tool never invents
-names (P1).
+suggests labeling and the agent proposes it; the write tool records the decision — the tool
+never invents names (P1). (Who makes that decision rests on the client's approval gate, not
+on anything here — ADR-010 d4 as amended 2026-09-15.)
 
 **`analytics_stablecoin_movements`** — flows restricted to verified stablecoins.
 
@@ -331,11 +336,10 @@ output: { wallets: Array<{ address: string; chain_id: number;
 
 The `estimate` carries the **nonce > 50k probe** result (ADR-008 Q5) — `tx_count_hint` is the
 account nonce, so it counts only outbound transactions (ADR-008 d4, amended 2026-09-15). The
-probe runs
-asynchronously worker-side after `ledger_track_wallet` seeds the wallet, so it surfaces
+probe runs asynchronously worker-side after `ledger_track_wallet` seeds the wallet, so it surfaces
 here — not in the write tool's response (the MCP server may not import the provider
-layer; ADR-011 boundary). `suggests_anchored` is `true` when the estimated transaction
-count exceeds the tunable threshold **and** the wallet is not already anchored: the HITL
+layer; ADR-011 boundary). `suggests_anchored` is `true` when that nonce exceeds the
+tunable threshold **and** the wallet is not already anchored: the HITL
 nudge to re-track in `mode: 'anchored'`.
 
 **`ledger_track_wallet`** — the onboarding write tool.
@@ -355,8 +359,8 @@ backfill); `mode: 'anchored'` seeds `anchoring` with `anchor_from`, and the work
 an `opening_balance` baseline at the resolved anchor block (ADR-008). `enqueued.job_id` is
 the deterministic id the scanner will use — a `backfill:*` id under `full`, an `anchor:*`
 id under `anchored`. The tool never silently chooses anchored: the nonce probe's
-`suggests_anchored` surfaces on `ledger_status` and the **human decides** (HITL), then
-re-tracks with `mode: 'anchored'`.
+`suggests_anchored` surfaces on `ledger_status` and re-tracking with `mode: 'anchored'` is
+a separate, explicit call — the tool never upgrades a wallet on its own.
 
 **`ledger_trace_tool_call`** — audit replay of any previous answer.
 

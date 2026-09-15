@@ -45,20 +45,24 @@ A wallet is "live" when **all** its streams are live; `ledger_status` reports pe
 
 | Queue | Producer | Job unit | Priority | Concurrency |
 |---|---|---|---|---|
-| `tail` | scheduler (repeatable per chain) | one tick: all live checkpoints of a chain | high | 1 per chain |
-| `backfill` | `ledger_track_wallet`, retry logic | one page window per (chain, address, stream) | low | shared pool, provider-limited |
-| `prices` | scheduler (daily cron) + on-demand gaps | snapshot day × token set; ECB fetch | mid | 1 |
-| `token-resolve` | normalizer (unseen contract) | one token contract | mid | provider-limited |
-| `integrity` | scheduler (daily) + on-demand | one wallet spot-check | low | 1 |
-| `exports` | export tools | one export artifact | mid | 1 |
+| `tail` | scheduler (repeatable per chain) | one tick: all live checkpoints of a chain | — | `chains.length` |
+| `backfill` | `ledger_track_wallet`, retry logic | one page window per (chain, address, stream) | — | 5 |
+| `prices` | scheduler (daily cron) + on-demand gaps | snapshot day × token set; ECB fetch | — | 1 |
+| `anchor` / `probe` / `onboard` | `ledger_track_wallet`, scanner | anchor baseline, whale probe, onboarding scan | — | 2 / 2 / 1 |
+| `token-resolve`, `integrity`, `exports` | — | — | — | **not built** (ADR-008 d1 scope) |
 
 Rules:
 
-- **Live beats backfill.** Tail ticks must never starve behind a whale backfill:
-  separate queues, higher priority, and a reserved worker slot for `tail`.
-- Retries: exponential backoff (1 min → 1 h cap), 8 attempts, then the checkpoint goes
-  `error` (+ `last_error`) and the job lands in the DLQ. `ledger_status` surfaces it —
-  errors are user-visible, never swallowed.
+- **Live beats backfill**, by queue isolation rather than by priority. BullMQ `priority` is
+  never set anywhere and no worker slot is reserved; separate queues and separate workers are
+  what keep a whale backfill off the tail worker (`apps/worker/src/queues.ts` argues the
+  substitution). The concurrencies above do NOT reinforce it — backfill 5 against tail 2
+  share one provider budget — which is the gap §5 records.
+- Retries: exponential backoff (1 min → 1 h cap), 8 attempts, then the job is retained as
+  failed. The checkpoint is **meant** to go `error` (+ `last_error`) so `ledger_status`
+  surfaces it — that writer does not exist, so a wallet whose page-1 backfill exhausts its
+  attempts sits at `queued` indefinitely while `ledger_status` reports it as normal (ADR-008
+  d1, amended 2026-09-15; `09-known-gaps.md`).
 - Scheduling is repeatable-job based (BullMQ repeatables), not OS cron — one less
   moving part in compose.
 
@@ -177,7 +181,8 @@ the same correction, and `09-known-gaps.md` tracks both.*
 - **Not built.** Token bucket per `(provider, api_key)` (worker-side, Redis-backed budget
   counters) and an Etherscan daily budget guard pausing backfills while tails keep running.
   There is no rate limiter of any kind on the chain path today — only the price fetcher is
-  throttled — and backfill runs at concurrency 5 against a tail at 2, which inverts the
+  throttled — and backfill runs at concurrency 5 against a tail at `chains.length` (2 today),
+  which inverts the
   intended priority under contention.
 - **Not built.** Circuit breaker per provider: open after 5 consecutive failures, half-open
   probe after 60 s, open primary ⇒ route to secondary. Failover today is a try/catch walk

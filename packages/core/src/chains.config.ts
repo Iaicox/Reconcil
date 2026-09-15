@@ -57,9 +57,11 @@ export function chainById(chainId: number): ChainConfig {
 }
 
 /**
- * >50k probe threshold (ADR-008, open question Q5): a wallet whose provider-
- * estimated transaction count exceeds this is a "whale", and `ledger_status`
- * surfaces `suggests_anchored` so a human can re-track it in anchored mode. It is
+ * >50k probe threshold (ADR-008, open question Q5): a wallet whose account NONCE
+ * exceeds this is a "whale", and `ledger_status` surfaces `suggests_anchored` so it
+ * can be re-tracked in anchored mode. Nonce counts only OUTBOUND transactions, so a
+ * receive-only address never trips this however large its history (ADR-008 d4,
+ * amended 2026-09-15; tracked in 09-known-gaps.md). It is
  * a tunable guess — kept in one place so re-tuning is a one-line change.
  */
 export const ANCHOR_SUGGEST_TX_THRESHOLD = 50_000;

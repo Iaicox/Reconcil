@@ -41,12 +41,12 @@ of the data: chain events and prices are public facts, identical for everyone.
    ledger method must have resolved its address set from the tenant's wallets."* Nothing
    enforces it. `@reconcil/ledger` is an exported workspace package whose public API cannot
    express tenancy, so a future caller that assembles addresses another way type-checks
-   fine. Every current caller does resolve its addresses from the tenant's `wallets` —
-   most through `resolveScope` (eight call sites, serving the six analytics tools plus the
-   close pack and `ledger_status`), and three (`recon/match-repo.ts`, `recon/status-repo.ts`,
-   `tools/journal-drafts-data.ts`) by re-deriving the same tenant-scoped select inline, which
-   is the same guarantee reached a second way rather than an exception to it. The
-   missing enforcement is tracked in `09-known-gaps.md`.
+   fine. Every current caller does resolve its addresses from the tenant's `wallets`: eight
+   call sites go through `resolveScope` — the six analytics tools, `ledger_status`, and
+   `close-pack-data.ts`, which serves both Face A exports — and three re-derive the same
+   tenant-scoped select inline (`recon/match-repo.ts`, `recon/status-repo.ts`,
+   `tools/journal-drafts-data.ts`), which is the same guarantee reached a second way rather
+   than an exception to it. The missing enforcement is tracked in `09-known-gaps.md`.
 
    The tenant-owned repositories (`recon`, `directory`, audit) DO take a tenant context and
    predicate on it — with one exception, `directory_upsert_entity`'s `client_id`, recorded in

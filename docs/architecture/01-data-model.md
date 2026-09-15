@@ -131,10 +131,11 @@ discovery time. Tools only ever read `*_display`.
 
 `verified` gates spam: real wallets are full of scam airdrops (fake USDT etc.). Discovery
 inserts `verified = false`; a curated seed list (major stables, WETH, chain natives) ships
-`verified = true`. Analytics tools exclude unverified tokens by default. Four of them say so
-via an `UNVERIFIED_EXCLUDED` warning; `analytics_stablecoin_movements` excludes them with no
-warning and no opt-in (ADR-011 layer 3, amended 2026-09-15). The events are still in the
-ledger (nothing is dropped, only filtered at read time).
+`verified = true`. Analytics tools exclude unverified tokens by default and four say so via
+an `UNVERIFIED_EXCLUDED` warning. Two do not: `analytics_gas` is native-only and has no spam
+filter to warn about, while `analytics_stablecoin_movements` excludes them with no warning
+and no opt-in — the one real gap (ADR-011 layer 3, amended 2026-09-15). The events are still
+in the ledger either way (nothing is dropped, only filtered at read time).
 
 `is_stablecoin + peg_currency` drive Face B tolerance math and the `peg` valuation policy
 (ADR-007).
@@ -145,8 +146,7 @@ Both are global, append-only reference data with a natural key
 (`token/date/currency/source`, `date/base/quote/source`). Corrections never overwrite:
 they insert a new row under `source = 'manual'`, and consumers pick by explicit source
 priority. Anything valued through the pricing read-core (`matches`, export manifests) stores
-the exact
-`price_snapshot_id` / `fx_rate_id` it used — re-running the report cannot silently
+the exact `price_snapshot_id` / `fx_rate_id` it used — re-running the report cannot silently
 produce different numbers (P5).
 
 `source = 'peg'` rows are synthesized (price ≡ 1.0 in `peg_currency`) so that even

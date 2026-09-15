@@ -27,8 +27,11 @@ from an app still resolves by node_modules walk-up. No app imports something the
 ABOVE it today — though the graph is itself incomplete: `apps/cli` depends on
 `@reconcil/evals`, which appears in no arrow of it. The `apps/* → packages/*` edge is
 simply unguarded, and that gap is tracked in `09-known-gaps.md` rather than closed
-here. The signing-library half of this sentence is also not what delivers its stated scope
-— see ADR-011.
+here.
+
+The decision's parenthetical — "(also bans signing libraries — P8)" — is not what delivers
+its stated scope either: dependency-cruiser sees only direct first-party imports, and the
+transitive guarantee comes from `pnpm check:supply-chain`. See ADR-011.
 
 ## Alternatives considered
 

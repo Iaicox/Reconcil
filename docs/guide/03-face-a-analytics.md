@@ -20,13 +20,15 @@ Every response on this page came from a live stack.
   `chains: [1]` if you only care about Ethereum.
 - Idempotent: re-tracking returns the same `wallet_id` and enqueues nothing.
 
-**Large wallets.** Full history is the default. For a wallet with a very large transaction
-count, the worker's asynchronous probe raises a flag on `ledger_status`:
+**Large wallets.** Full history is the default. For a wallet that has SENT a great many
+transactions, the worker's asynchronous probe raises a flag on `ledger_status`:
 
 ```json
 "estimate": { "tx_count_hint": 128000, "suggests_anchored": true }
 ```
 
+`tx_count_hint` is the account **nonce** — outbound transactions only, so a receive-only
+address shows a small number however large its history, and will not be flagged (ADR-008 d4).
 That is a prompt for *you*, not an automatic decision (the tool never silently truncates
 history). If you accept it, re-track with an opening baseline:
 
@@ -47,6 +49,10 @@ honest by design. See [Operations → Backfill modes](05-operations.md#backfill-
 Per wallet, per chain, per stream: `status`, `last_processed_block`, `last_block_time`,
 `backfill_progress`, `last_error`. `status: "live"` means the stream is caught up to
 `head − finality_depth` and safe to quote.
+
+`last_error` and `status: "error"` are read here but **written by nothing today** — a stream
+whose retries are exhausted stays at its last status instead of surfacing (ADR-008 d1, amended
+2026-09-15). Do not treat their absence as evidence a stream is healthy.
 
 Do not skip this step at month-end. Every analytics answer carries the same coverage in its
 citations, but `ledger_status` is where you look *first*.

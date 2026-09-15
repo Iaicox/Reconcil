@@ -37,8 +37,8 @@ pitch without giving away the future paid tier.
      match `ee/`, so it is outside the workspace by omission rather than by directive. The
      convention itself lives in prose — `README.md`, `CLAUDE.md`, `ee/README.md`,
      `docs/README.md`, ADR-001, `docs/guide/07-contributing.md` twice, and a kanbn card that
-     is gitignored and so not checkable from a clone —
-     which is why it reads as enforced. Code dropped there would be invisible to `pnpm lint`
+     is gitignored and so not checkable from a clone — which is why it reads as enforced.
+     Code dropped there would be invisible to `pnpm lint`
      (ignored), `pnpm typecheck` (not a project reference), `pnpm depcruise` (which cruises
      `apps packages`) and
      `pnpm check:supply-chain` — so the one directory reserved for the paid tier is the one
