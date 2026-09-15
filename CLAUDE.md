@@ -32,7 +32,8 @@ pnpm build        # turbo run build — tsc -b with project references
 pnpm typecheck    # turbo run typecheck (build-ordered tsc -b)
 pnpm lint         # eslint per package (flat config at repo root)
 pnpm test         # vitest per package (--passWithNoTests for test-less packages)
-pnpm depcruise    # boundary rules + signing-lib ban — needs `pnpm build` first
+pnpm depcruise    # boundary rules + DIRECT signing-lib imports — needs `pnpm build` first
+pnpm check:supply-chain  # the transitive signing ban: scans both lockfiles (ADR-011)
 ```
 
 Dev entrypoints (tsx): `pnpm --filter @reconcil/mcp-server dev` (stdio) /

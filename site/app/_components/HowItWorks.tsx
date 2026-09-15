@@ -9,7 +9,7 @@ const steps = [
   {
     n: '02',
     title: 'Match payments',
-    body: 'A deterministic engine matches on-chain settlements to invoices across many-to-many splits: partial payments, overpayments and network fees included.',
+    body: 'A deterministic engine matches on-chain settlements to invoices: partial payments, overpayments and network fees included.',
   },
   {
     n: '03',

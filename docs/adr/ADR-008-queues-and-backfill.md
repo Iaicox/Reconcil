@@ -15,7 +15,8 @@ in disguise: a balance is only correct if computed from the address's complete h
 
 1. **BullMQ on Redis**, queues: `tail` (high priority, one repeatable tick per chain),
    `backfill` (low priority, one page-window job per chain/address/stream), `prices`
-   (daily), `token-resolve`, `integrity`, `exports`. Exponential backoff (1 min→1 h),
+   (daily), and — **as scope, not as shipped** — `token-resolve`, `integrity`, `exports`
+   (see the note below). Exponential backoff (1 min→1 h),
    8 attempts, DLQ; failures surface in `ledger_status`, never swallowed.
 
    *Note 2026-09-15 (ADR sweep — the decision stands, the implementation does not reach it).*
@@ -49,9 +50,10 @@ in disguise: a balance is only correct if computed from the address's complete h
    (≤ a few thousand txs) backfill in minutes within free-tier budgets.
 4. **Anchored window for whales** (nonce > 50k): fetch provider-attested balances at
    `anchor_block`, write `opening_balance` events (log_index −3), backfill from the
-   anchor. The choice is explicit and human-made — `ledger_track_wallet` returns
-   `suggests_anchored`, it never silently degrades coverage; all answers over anchored
-   coverage carry `ANCHORED_BASELINE` (C5).
+   anchor. The choice is explicit and human-made — `suggests_anchored` surfaces on
+   `ledger_status` (NOT in `ledger_track_wallet`'s response; see the 2026-07-23 amendment,
+   which this sentence predates), and nothing silently degrades coverage; all answers over
+   anchored coverage carry `ANCHORED_BASELINE` (C5).
 
    *Amended 2026-09-15 (ADR sweep — accuracy).* This said "est. > 50k **txs**". The estimate
    is `eth_getTransactionCount` — the account **nonce**, which counts only transactions the

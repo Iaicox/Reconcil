@@ -1,7 +1,9 @@
 /**
  * Chains as configuration (ADR-009, 03-ingestion §7): adding an EVM chain is one
- * entry here, zero code changes. Fee strategy is a chain property, not a provider
- * property — OP-stack chains carry an L1 data fee (ADR-005).
+ * entry here and a SECOND one in `CHAIN_SLUG` (packages/pricing) — miss that and the
+ * chain ingests correctly and is then never priced, silently (ADR-009 d3, amended
+ * 2026-09-15). Zero code changes either way. Fee strategy is a chain property, not a
+ * provider property — OP-stack chains carry an L1 data fee (ADR-005).
  */
 export type FeeStrategy = 'txlist' | 'receipts-opstack';
 

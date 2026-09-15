@@ -87,7 +87,8 @@ loop:
     INSERT ... ON CONFLICT (chain_id, tx_hash, log_index, token_id) DO NOTHING
     UPDATE ingestion_checkpoints SET last_processed_block = newCursor
   }
-  enqueue token-resolve for unseen contracts
+  // token-resolve is not built: unseen contracts are upserted inline with NULL display
+  // strings (token-repo.ts). The queue is ADR-008 d1 scope.
   if every page.length < limit: status = live; break
   // a full page means the window still holds rows the provider truncated, and a
   // block's events may be split across pages -> that page's candidate cursor is
@@ -110,7 +111,7 @@ recovery mode — it is the only mode (P4).
 All downstream coverage carries `anchor_block`, and every tool answer over it emits
 `ANCHORED_BASELINE` (C5) — the trade-off is visible to the accountant, by contract.
 Token set for the anchor: provider's token-balance listing at anchor time ∪ curated
-verified list; discrepancies show up in integrity checks.
+verified list; discrepancies would show up in integrity checks, once those exist (§4).
 
 ## 4. Finality & reorgs (P4)
 
@@ -127,7 +128,9 @@ Accounting tolerates minutes of lag; trading would not, and this system is not f
 trading. The knob is per-chain config; lowering it trades immutability guarantees for
 freshness and is documented as unsupported for accounting use.
 
-Safety net: the **integrity job** (daily + on-demand per wallet) recomputes native + top
+Safety net (**designed, not built** — ADR-005 d4 and ADR-008 d1 as amended 2026-09-15; no
+job exists and `last_integrity` is written by nothing): the **integrity job** would recompute
+native + top
 token balances from events at the checkpoint block and compares with the provider's
 balance-at-block. Drift ⇒ `last_integrity.clean = false`, surfaced in `ledger_status` and
 as a tool warning.
@@ -138,7 +141,8 @@ stream pulls `txlistinternal` alongside `txlist` (§3, ADR-005 d2), and the gold
 reconciliation now matches `eth_get_balance` to the wei through the production processor
 (`packages/evals/test/reconcile.itest.ts`). Two caveats remain, both loud rather than
 silent: a chain whose providers serve no trace data degrades to `txlist`-only (the
-integrity job catches the drift), and a single block holding ≥ `PAGE_LIMIT` (1000)
+integrity job would catch the drift, once it exists), and a single block holding ≥
+`PAGE_LIMIT` (1000)
 internal transfers for one wallet stalls that stream with an explicit error instead of
 skipping rows — the same block-granular pagination limit `txlist` has.
 
@@ -209,13 +213,16 @@ Accounting-grade gas on OP-stack chains cannot be derived from `gasUsed × gasPr
 | `txlist` | Ethereum | fee = `gasUsed × effectiveGasPrice` from the provider tx list — exact on L1 |
 | `receipts-opstack` | Base | batch `eth_getTransactionReceipt` via public RPC **for outgoing txs only** (sender pays; typically few per wallet); total fee = L2 exec fee + `l1Fee` |
 
-The integrity job cross-checks whichever strategy is active; systematic fee drift on an
+The integrity job would cross-check whichever strategy is active (not built, see §4);
+systematic fee drift on an
 OP-stack chain is the canary for a wrong strategy.
 
 ## 7. Chain & token configuration (Option C seam #2)
 
 ```ts
-// packages/core/chains.config.ts — adding an EVM chain = one entry, zero code changes.
+// packages/core/chains.config.ts — adding an EVM chain is TWO entries: this one, plus
+// CHAIN_SLUG in packages/pricing (ADR-009 d3, amended 2026-09-15). A chain missing from the
+// second ingests fine and is then never priced, silently.
 export const chains: ChainConfig[] = [
   { chainId: 1, name: 'ethereum',
     native: { symbol: 'ETH', decimals: 18 },
@@ -235,7 +242,8 @@ export const chains: ChainConfig[] = [
 ];
 ```
 
-Token discovery: first sight of an unknown ERC-20 contract enqueues `token-resolve`
+Token discovery (as intended): first sight of an unknown ERC-20 contract enqueues
+`token-resolve`
 (meta via provider, fallback `eth_call` on public RPC), inserting `verified = false` with
 sanitized display strings. A curated seed (natives, USDC/USDT/DAI, WETH, per chain) ships
 `verified = true` as a `db` seed migration.

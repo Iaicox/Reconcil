@@ -81,7 +81,7 @@ imports `apps/*` · no cross-app imports · no cycles.
 | Contract — tool schemas vs golden JSON | vitest snapshots | every commit |
 | Integration — fixtures in, ledger asserted | vitest + testcontainers Postgres | every commit |
 | E2E smoke — compose up, stdio client, tool calls | `pnpm smoke:compose` | pre-release |
-| Agent evals — 30 cases, deterministic graders | `packages/evals` + CLI runner | smoke on PR, full nightly |
+| Agent evals — 30 cases, deterministic graders | `packages/evals` + CLI runner | smoke on PR, full on manual dispatch |
 
 **No test touches the network.** Providers replay from recorded fixtures. If a change needs a
 new fixture, record it — do not add a live call.
@@ -112,10 +112,10 @@ The runner provisions its own Postgres via testcontainers if `DATABASE_URL` is u
 | `schema-parity` | PR + main | Drizzle migrations vs `docs/architecture/schema.sql`, `pg_dump` diff must be empty |
 | `integration` | PR + main | testcontainers Postgres per suite, fixture ingest, ledger assertions |
 | `evals-smoke` | PR | 6-case subset, 1 run — cheap contract-drift catch |
-| `evals-full` | nightly + manual | 30 cases × 3 runs, publishes a scorecard artifact |
-| `e2e-smoke` | manual / pre-release | the real compose stack (`pnpm smoke:compose`) |
+| `evals-full` | manual dispatch only | 30 cases × 3 runs, publishes a scorecard artifact |
+| `e2e-smoke` | weekly schedule / manual | the real compose stack (`pnpm smoke:compose`) |
 
-All of the above are jobs of the single `ci` workflow, which also runs on the nightly
+All of the above are jobs of the single `ci` workflow, which also runs on a WEEKLY
 schedule and on manual dispatch; a small `evals-preflight` helper job resolves whether
 `ANTHROPIC_API_KEY` is present. That key is used only by `evals-*`. Provider keys are never
 needed in CI. A missing key makes the eval jobs **skip**, never fail red.

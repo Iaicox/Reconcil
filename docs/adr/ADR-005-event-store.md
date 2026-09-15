@@ -117,8 +117,13 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    machinery as any flow (P2).
 4. **Reorgs via finality lag, no rollback path.** Ingestion never advances past
    `head − finality_depth(chain)` (Ethereum 64, Base 600, per-chain config). Stored
-   events are final by construction. A daily integrity job cross-checks computed vs
-   provider balances as the safety net.
+   events are final by construction. A daily integrity job cross-checking computed vs
+   provider balances is the intended safety net.
+
+   *Note 2026-09-15 (ADR sweep — the decision stands, the safety net is not built).* No
+   integrity job exists: `last_integrity` is read by `ledger_status` and written by nothing,
+   and `WarningCode` has no member for drift. Finality-by-construction is what carries d4
+   today, unaided. Tracked in `09-known-gaps.md` under the ADR-008 d1 surfacing gap.
 
 ## Alternatives considered
 

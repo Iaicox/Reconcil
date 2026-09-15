@@ -43,7 +43,7 @@ are minted with the keygen script ([Connect a client](02-connect-a-client.md#min
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `COINGECKO_API_KEY` | worker | Optional. Secondary price source; a demo key raises rate limits. DefiLlama (primary) and ECB (FX) are keyless. |
+| `COINGECKO_API_KEY` | worker | Optional, and **inert today**: the secondary source is keyed on `tokens.coingecko_id`, which no production path writes, so it never serves a price. DefiLlama (primary) and ECB (FX) are keyless. See `09-known-gaps.md`. |
 
 ### Behind a reverse proxy (mcp-server only)
 
@@ -125,7 +125,9 @@ Each chain has a primary and a fallback, tried in order (ADR-009):
 | Base (8453) | Etherscan v2 | Blockscout (keyless) | JSON-RPC receipts (`BASE_RPC_URL`) |
 
 A keyless stack works — it falls through to Blockscout — but expect tighter rate limits.
-Adding a chain is a config entry in `packages/core/src/chains.config.ts`, no code change.
+Adding a chain is a config entry in `packages/core/src/chains.config.ts` **and** a second one
+in `CHAIN_SLUG` (`packages/pricing/src/providers/types.ts`). Miss the second and the chain
+ingests correctly and is then never priced, with no error (ADR-009 d3, amended 2026-09-15).
 
 ### Prices
 
@@ -163,7 +165,7 @@ Domain failures come back as MCP tool errors with a structured payload:
 | `PERIOD_TOO_LARGE` | Exceeds server-side limits; split the period. |
 | `MATCH_CONFLICT` | Confirming would over-apply a settlement. |
 | `NOT_SUGGESTED` | Confirm/reject on a leg that is not in `suggested` state. |
-| `RATE_LIMITED` | Provider budget exhausted; retry later. |
+| `RATE_LIMITED` | Declared but unreachable — no budget counter exists, so no tool throws it (see 02-mcp-contracts §4). |
 | `INTERNAL` | Something broke. Detail is in the server log, never in the response — provider and chain text is hostile and must not reach an agent (ADR-011). |
 
 ## Exports on disk
@@ -283,7 +285,9 @@ What the deployment guarantees, and what it asks of you.
 
 **Your responsibilities:**
 
-- Bearer keys are full credentials with no scope and no expiry. Treat them accordingly.
+- Bearer keys are full credentials with **no scope**. Expiry is opt-in: `keygen
+  --expires-in-days N` sets one, and a key minted without it never expires (ADR-012, amended
+  2026-09-08). Treat them accordingly.
 - The HTTP host speaks plain HTTP — put TLS in front of it before it leaves localhost.
 - The database holds your financial records. Back it up; restrict access to 5432.
 - Only mount trusted directories as `RECONCIL_IMPORT_DIR`.

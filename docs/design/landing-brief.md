@@ -134,7 +134,7 @@ Four steps, currently the spine of the page and worth keeping:
 
 1. **Import invoices** — CSV in, receivables and payables, any currency, deduplicated on
    re-import.
-2. **Match payments** — a deterministic engine proposes many-to-many matches across partial
+2. **Match payments** — a deterministic engine proposes matches across partial
    payments, overpayments and network fees. Confidence is a sum of weighted rules, not a
    model's opinion.
 3. **Confirm** — each match is approved before it counts; your MCP client prompts you before

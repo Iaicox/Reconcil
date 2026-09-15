@@ -90,7 +90,7 @@ Reading order:
 | P5 | Persistent price snapshots | ADR-007, pinned FKs in `matches`/manifests |
 | P6 | Multi-provider abstraction | ADR-009, 03 §5 |
 | P7 | On-chain strings are hostile | 02 §7, ADR-011, `*_raw` vs `*_display` split |
-| P8 | MiCA red lines | ADR-011 (dep-cruiser signing ban, guardrail evals, drafts) |
+| P8 | MiCA red lines | ADR-011 (`check:supply-chain` lockfile signing ban, guardrail evals, drafts) |
 | P9 | Client secrets encrypted, never logged | 01 §7 (`integration_credentials`), log-scrub test in 04 |
 | P10 | Self-host first-class, multi-tenant schema | 00 §5, ADR-006 |
 | P11 | MCP-first | ADR-003, ADR-012, 02 |

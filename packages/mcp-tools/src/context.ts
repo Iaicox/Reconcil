@@ -1,7 +1,10 @@
 /**
  * Per-call context. Tenant identity comes from the transport session (ADR-012)
  * and is injected here — never read from tool arguments (ADR-006). Every tool is
- * `(ctx, input)`, and every repository read is scoped to `ctx.tenantId`.
+ * `(ctx, input)`. Tenant-owned reads are predicated on `ctx.tenantId` directly; reads of the
+ * GLOBAL chain tables are scoped either by an address set resolved from the tenant's wallets
+ * (`resolveScope`) or by a row id reached through a tenant-predicated row. `packages/ledger`
+ * itself has no tenant parameter — ADR-006 d2 as amended 2026-09-15.
  */
 import type { Db, Tx } from '@reconcil/db';
 

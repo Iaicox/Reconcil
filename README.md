@@ -64,7 +64,7 @@ NFTs, cost basis and realized P&L. Chains: Ethereum and Base.
 ```code
 apps/
   mcp-server/   MCP tools over stdio + streamable HTTP (Fastify host)
-  worker/       BullMQ processors: ingestion, prices, exports, integrity
+  worker/       BullMQ processors: tail, backfill, prices, onboard, anchor, probe
   cli/          thin agent (demos, eval runs)
 packages/
   core/         domain types, zod schemas, Money, sanitizer, chains config

@@ -73,8 +73,10 @@ Notes:
 
 - `mcp-server` and `worker` are **two commands over one image** (same codebase, different
   entrypoint) — one Dockerfile, no duplicated builds.
-- The server does not ingest; the worker does not serve. All provider I/O, rate limiting,
-  and retries live in the worker. The server reads the ledger and enqueues jobs.
+- The server does not ingest; the worker does not serve. All provider I/O and retries live
+  in the worker; the server reads the ledger and enqueues jobs. Provider rate limiting is
+  designed and **not built** — the chain path has no limiter at all (ADR-008 d2, amended
+  2026-09-15).
 - The web dashboard (Nuxt) is deliberately absent — post-gate (P11).
 
 ## 3. Bounded contexts
