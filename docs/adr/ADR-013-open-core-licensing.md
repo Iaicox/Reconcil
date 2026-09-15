@@ -35,10 +35,12 @@ pitch without giving away the future paid tier.
      configuration names it, and it is an *exclusion*: `eslint.config.mjs` ignores `ee/**`.
      `pnpm-workspace.yaml` mentions it only in a comment — the `packages:` globs simply never
      match `ee/`, so it is outside the workspace by omission rather than by directive. The
-     convention itself lives in prose (`README.md`, `CLAUDE.md`, `ee/README.md`, a task card),
-     which is why it reads as enforced. Code dropped there would be invisible to
-     `pnpm lint` (ignored), `pnpm typecheck` (not a
-     project reference), `pnpm depcruise` (which cruises `apps packages`) and
+     convention itself lives in prose (`README.md`, `CLAUDE.md`, `ee/README.md`,
+     `docs/guide/07-contributing.md` twice, and a kanbn card, which is gitignored and so not
+     checkable from a clone),
+     which is why it reads as enforced. Code dropped there would be invisible to `pnpm lint`
+     (ignored), `pnpm typecheck` (not a project reference), `pnpm depcruise` (which cruises
+     `apps packages`) and
      `pnpm check:supply-chain` — so the one directory reserved for the paid tier is the one
      directory where ADR-011's "guardrail claims are literally verifiable from CI" would stop
      being true. Adding it to the gates (or asserting it stays empty) is tracked in
@@ -52,7 +54,8 @@ pitch without giving away the future paid tier.
      behind. That is arguably the right split — schema is infrastructure, the OAuth flow is
      the product — and saying so now is cheaper than rediscovering it at the move.
 
-   One smaller gap: every workspace package declares `"license": "Apache-2.0"` (13 of 13), but
+   One smaller gap: every workspace member declares `"license": "Apache-2.0"` (12 of 12 —
+   3 apps and 9 packages; the root manifest declares it too but is not a member), but
    `site/` — not a workspace member, not named in d2's open list or d3's closed one — has no
    `license` field. It is not needed to self-host, so d2 holds; d1's "everything public" has
    no per-package field to back it there.

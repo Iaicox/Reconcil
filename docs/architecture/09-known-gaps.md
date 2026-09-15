@@ -392,10 +392,11 @@ incorrectness. Trigger: real invoice data shows the small-member-outside-top-6 c
 enough to justify a larger or smarter pool (e.g. also including the ≤ 6 smallest, or a
 proper bounded subset-sum). Where: `packages/recon/src/match/engine.ts`
 (`MAX_SUBSET_EVENTS`, `findBestSubset`), and described in order in ADR-010 d3's 2026-09-15
-amendment, `02-mcp-contracts.md` §6.4 and `packages/recon/test/match.test.ts`. (This line used
-to point at the 2026-08-06 "Honest subset-search wording" amendment as the documentation —
-that amendment is the copy carrying the wrong pool description, and is now marked superseded
-in part rather than cited.) *(sweep — ADR-010 amendment on `fix/match-engine-edges`;
+amendment, `02-mcp-contracts.md` §6.4 and `packages/recon/test/match.test.ts`. (This line
+used to cite the 2026-08-06 "Honest subset-search wording" amendment as the documentation.
+That amendment carried the wrong pool description too; its wording was corrected in place on
+2026-09-15, and the authoritative description now lives in d3.)
+*(sweep — ADR-010 amendment on `fix/match-engine-edges`;
 pool description corrected 2026-09-15)*
 
 **`score.ts`'s weight-rescale branch is unreachable by the current `WEIGHTS` and untested;
@@ -747,10 +748,11 @@ ADR-001. *(ADR sweep, 2026-09-15)*
 configuration names it, and it is an *exclusion*: `eslint.config.mjs` ignores `ee/**`.
 `pnpm-workspace.yaml` mentions it only in a comment — the `packages:` globs simply never match
 `ee/`, so it is outside the workspace by omission rather than by directive. The convention
-itself lives in prose (`README.md`, `CLAUDE.md`, `ee/README.md`, a task card), which is why it
-reads as enforced. Code dropped there would be
-invisible to `pnpm lint` (ignored), `pnpm typecheck` (not a project reference), `pnpm depcruise`
-(which cruises `apps packages`) and `pnpm check:supply-chain` — so the directory reserved for
+itself lives in prose (`README.md`, `CLAUDE.md`, `ee/README.md`, `docs/guide/07-contributing.md`
+twice, and a gitignored kanbn card), which is why it
+reads as enforced. Code dropped there would be invisible to `pnpm lint` (ignored),
+`pnpm typecheck` (not a project reference), `pnpm depcruise` (which cruises `apps packages`)
+and `pnpm check:supply-chain` — so the directory reserved for
 the paid tier is the one place where ADR-011's "guardrail claims are literally verifiable from
 CI" would stop holding. Costs nothing today (the directory holds only a README), which is
 exactly why it is worth fixing before it holds anything. Trigger: the first commit that puts a

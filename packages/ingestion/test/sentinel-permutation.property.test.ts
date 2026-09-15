@@ -47,19 +47,22 @@ const HASH = '0xDD10000000000000000000000000000000000000000000000000000000000010
  * reproducible — an earlier version of this note gave round numbers from no stated run, which
  * is the one claim in this file a reader could not check.
  *
- * One entry is a mixed-case spelling of another and exercises **nothing** — it is decorative,
- * and labelling it as such is the point. It cannot reach the comparator's `toLowerCase()`,
- * because `uniqueArray`'s selector dedupes on the LOWERCASED tuple, so two rows differing only
- * in address case never co-occur in a generated set; and dropping `toLowerCase()` from the
- * comparator would leave it a deterministic function of row content anyway, so permutation
- * invariance would still hold. Nor does it exercise the parent-tx grouping — that is `HASHES`
- * below, which carries its own note. The comparator's lowercasing is pinned by an explicit
- * case in `normalize.test.ts` ("address casing cannot change the order").
+ * One entry is a mixed-case spelling of another, and it is decorative HERE: `uniqueArray`'s
+ * selector dedupes on the LOWERCASED tuple, so two rows differing only in address case never
+ * co-occur in a generated set, and it does not exercise the parent-tx grouping either — that
+ * is `HASHES` below, which carries its own note.
  *
- * Left in place and labelled rather than deleted, because two successive drafts of this
- * docstring claimed it was load-bearing — first for the comparator, then for the grouping —
- * and a docstring asserting a property the generator cannot reach is the failure this whole
- * file is about.
+ * That is not the same as this file being blind to the comparator's `toLowerCase()`. Dropping
+ * it from BOTH sides leaves a consistent order over raw bytes, so permutation invariance still
+ * holds and this file stays green — that mutant is caught by `normalize.test.ts` ("address
+ * casing cannot change the order"). Dropping it from ONE side is caught HERE, because a
+ * one-sided drop destroys antisymmetry and the sort result then depends on input order, which
+ * is precisely the property asserted below. Both verified by mutation, 3/3 runs each.
+ *
+ * Spelled out because two successive drafts of this docstring got it wrong in opposite
+ * directions — first claiming the mixed-case entry pinned the comparator, then claiming this
+ * file could not catch the mutation at all — and a docstring that misstates its own coverage
+ * is the failure this whole file is about.
  */
 const ADDRS = [
   '0xaa00000000000000000000000000000000000001',

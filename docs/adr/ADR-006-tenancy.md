@@ -23,13 +23,16 @@ of the data: chain events and prices are public facts, identical for everyone.
    describes the code. `packages/ledger/src` contains **zero** occurrences of `tenantId`:
    every method there takes `(db, params)` where the scope is an already-resolved `string[]`
    of addresses, and the predicate is an `inArray` over that materialised list rather than a
-   join — in several shapes depending on what the query means: a single-sided
-   `inArray(toAddr, …)` or `inArray(fromAddr, …)` for the two halves of a balance,
-   `or(…)` where either endpoint counts, and `externalCondition`'s
-   `or(and(toIn, fromOut), and(fromIn, toOut))` in `scope-sql.ts` where the question is
-   "exactly one endpoint is ours" (that last one is deliberate — the plain `or` over-counted
-   wallet-to-wallet moves, fixed in PR #23). The tenant property is derived exactly one
-   layer up, in `resolveScope` (`packages/mcp-tools/src/scope.ts`), which selects `wallets`
+   join — in whatever shape the question needs. Four at least: a single-sided
+   `inArray(toAddr, …)` or `inArray(fromAddr, …)` for the two halves of a balance; `or(…)`
+   where either endpoint counts; `scope-sql.ts`'s `externalCondition`, which is
+   `or(and(toIn, fromOut), and(fromIn, toOut))` for direction `both` and one `and(…)` arm for
+   `in`/`out`, answering "exactly one endpoint is ours" (deliberate — a plain `or`
+   over-counted wallet-to-wallet moves, fixed in PR #23); and `internalCondition`, an
+   `and(…)` of both endpoints, which is how a self-transfer is identified.
+
+   The tenant property is derived exactly one layer up, in `resolveScope`
+   (`packages/mcp-tools/src/scope.ts`), which selects `wallets`
    filtered by `ctx.tenantId`; `recon` re-derives the same set inside its own tenant-scoped
    transaction.
 
@@ -38,7 +41,10 @@ of the data: chain events and prices are public facts, identical for everyone.
    ledger method must have resolved its address set from the tenant's wallets."* Nothing
    enforces it. `@reconcil/ledger` is an exported workspace package whose public API cannot
    express tenancy, so a future caller that assembles addresses another way type-checks
-   fine. Every current caller does route through `resolveScope`, verified tool by tool; the
+   fine. Every current caller does resolve its addresses from the tenant's `wallets` —
+   eleven through `resolveScope`, and three (`recon/match-repo.ts`, `recon/status-repo.ts`,
+   `tools/journal-drafts-data.ts`) by re-deriving the same tenant-scoped select inline, which
+   is the same guarantee reached a second way rather than an exception to it. The
    missing enforcement is tracked in `09-known-gaps.md`.
 
    The tenant-owned repositories (`recon`, `directory`, audit) DO take a tenant context and
@@ -76,6 +82,10 @@ of the data: chain events and prices are public facts, identical for everyone.
   the database and not the close packs, PDFs and journal drafts under the export root. Closing
   it means deleting or scrubbing an export directory on cascade, which is a code change and is
   tracked in `09-known-gaps.md`.
-- The cross-tenant isolation guarantee rests on the repository layer until RLS lands —
-  acceptable while deployments are single-tenant; revisit at hosted multi-tenant
-  (tracked in ADR-013 consequences).
+- The cross-tenant isolation guarantee rests on application code until RLS lands: on the
+  tenant-owned repositories for their own tables, and on the TOOL layer (`resolveScope`) for
+  everything read out of the global chain tables — see d2 as amended. Acceptable while
+  deployments are single-tenant; revisit at hosted multi-tenant (tracked in ADR-013
+  consequences). This bullet said "rests on the repository layer", which is the half of the
+  picture d2's amendment corrects; the title's "repository-layer scoping" is kept as the
+  ADR's stable name and reads as a summary of that same half.

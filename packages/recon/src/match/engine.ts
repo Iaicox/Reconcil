@@ -23,10 +23,12 @@
  * is not "the ≤ 6 largest-valued events in the date window" — a description this docstring
  * and ADR-010's 2026-08-06 amendment both carried until the 2026-09-15 ADR sweep, and which
  * gives a different pool whenever the window holds an event above `open + band` (the OPEN
- * amount plus tolerance, not the record total). The search then tries every subset within that pool (the documented complexity cap, ADR-010
- * alt "unbounded subset-sum"), and ranks subsets by FEWEST EVENTS first, with confidence
- * only as a tiebreak — so the chosen split is the smallest that fits, not the most
- * confident one.
+ * amount plus tolerance, not the record total). The candidates entering all this are already
+ * restricted to the record's date window, which the wording above does not repeat but the
+ * code applies first (`windowed`). The search then tries every subset within the pool (the
+ * documented complexity cap, ADR-010 alt "unbounded subset-sum"), and ranks subsets by
+ * FEWEST EVENTS first, with confidence only as a tiebreak — so the chosen split is the
+ * smallest that fits, not the most confident one.
  * Two distinct cases therefore stay open, honestly: a record that would need more
  * than 6 events to settle at all, and — less obviously — one whose only exact split
  * includes a member too small to survive the top-6 cut even though fewer than

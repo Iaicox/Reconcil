@@ -56,7 +56,7 @@ async function seedEvent(tokenId: number, date: string): Promise<void> {
   });
 }
 
-describe('priceGaps — verified (token, date) closes not yet priced', () => {
+describe('priceGaps — verified (token, date) pairs not yet priced', () => {
   it('lists distinct verified token-dates and excludes unverified and already-priced', async () => {
     await seedToken(1);
     await seedToken(2);

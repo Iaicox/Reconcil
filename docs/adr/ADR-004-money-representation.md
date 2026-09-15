@@ -59,11 +59,28 @@ Both raw and scaled exist, each exactly once:
   `domain-depends-only-on-db-core` rule forbids `exporters → pricing`, so "confined to
   pricing" and the enforced boundary graph could never both be true.
 
-  The accurate rule is the one both clones already follow: **every site that divides money
-  configures its own decimal clone at `precision: 40, ROUND_HALF_UP`, and rounds only at an
-  export boundary.** Pricing divides for FX; exporters divide for the VAT split, at 2dp, on
-  the way out. Any third such site adopts the same clone rather than importing someone
-  else's.
+  *Corrected again, same day.* The rule first written here — "every site that divides money
+  configures its own decimal clone at `precision: 40, ROUND_HALF_UP`" — was stronger than the
+  code and would have made a correct third site non-conformant the moment it was written.
+  Division over money happens in **three** classes, and only one of them wants a clone:
+
+  1. **Exact power-of-ten scaling** — `formatUnits`/`parseUnits` in `core/money.ts`, raw base
+     units ÷ 10^decimals. Terminating by construction, so it is done in `bigint`/string with
+     no library at all. That carve-out is the previous paragraph's own point.
+  2. **Bounded integer arithmetic over minor units** — `computeBand`
+     (`recon/src/match/score.ts`) derives a tolerance as `(openMinor × pctE4) / 1_000_000n`
+     in `bigint`, truncating. It divides money and has no clone, deliberately: the operands
+     are already integers at a fixed scale, truncation narrows the band rather than widening
+     it, and the e4 precision contract is ADR-010's (amendment A6), not this decision's.
+  3. **Non-terminating decimal division** — FX conversion (`pricing/src/decimal.ts`) and the
+     VAT split (`exporters/src/decimal.ts`). Only here is a quotient unrepresentable and a
+     rounding mode therefore load-bearing. **These, and only these, configure a private clone
+     at `precision: 40, ROUND_HALF_UP`, and round only at an export boundary.** A fourth such
+     site adopts the same clone rather than importing someone else's.
+
+  Stated this way because the failure this ADR sweep exists to catch is a decision whose rule
+  does not match what the code derives — and writing one that condemns correct code is the
+  same defect pointing the other way.
 
 ## Alternatives considered
 

@@ -18,8 +18,11 @@ Consequences (ADR-006):
 
 - Two tenants tracking the same address share one ingestion run and one checkpoint —
   no duplicate provider spend, no duplicate rows.
-- A tenant "sees" only events reachable through its `wallets` (repository layer joins on
-  tracked addresses; every MCP tool executes inside a tenant context).
+- A tenant "sees" only events reachable through its `wallets` — every MCP tool executes
+  inside a tenant context and resolves its address set from that tenant's wallets before
+  any event query runs. Not a join: the resolved addresses are passed down as a list
+  (`resolveScope`, ADR-006 d2 as amended 2026-09-15 — this line used to say "repository
+  layer joins on tracked addresses", which is neither where nor how it happens).
 - Deleting a tenant cascades through its ownership tables; public chain data stays (it is
   public by nature — the private fact was *which* addresses the tenant tracked, and that
   is deleted). GDPR-relevant PII lives in `entities` (names) and `external_records`
@@ -37,9 +40,11 @@ Consequences (ADR-006):
 - `decimals` lives in the `tokens` registry (immutable per ERC-20 contract in practice),
   not denormalized into events.
 - **Aggregate raw, scale once.** SQL sums run over `amount_raw` grouped by token; the
-  result is divided by `10^decimals` exactly once, at the edge, in TypeScript, using an
-  arbitrary-precision decimal library. Never scale row-by-row (rounding drift), never in SQL
-  (float traps in intermediate casts).
+  result is divided by `10^decimals` exactly once, at the edge, in TypeScript — with no
+  library at all, since a power-of-ten scale is exact and terminating (`formatUnits` is pure
+  bigint↔string). A decimal clone is for the non-terminating cases (FX, the VAT split); see
+  ADR-004, which names the three classes. Never scale row-by-row (rounding drift), never in
+  SQL (float traps in intermediate casts).
 - Fiat values (`price`, `fiat_value`, `amount` on invoices) are unconstrained `NUMERIC` in
   the display units of the named currency, full precision internally.
 - **Rounding happens only at export boundaries**: half-up to 2 decimal places per journal
@@ -55,9 +60,11 @@ type RawAmount = bigint & { readonly __brand: 'RawAmount' };      // base units
 type DecimalString = string & { readonly __brand: 'DecimalString' }; // "1523.42", no exponent
 
 // Boundaries: Postgres NUMERIC <-> string <-> bigint/Decimal. JSON: always strings.
-// `number` is banned for monetary values: branded types + ESLint rule
-// (no-restricted-syntax on arithmetic over money fields) + Zod schemas that
-// reject JSON numbers for amount fields.
+// `number` is banned for monetary values. What enforces that today: Zod schemas reject
+// JSON numbers for amount fields, `mode: 'bigint'` keeps amount_raw out of float range at
+// the DB edge, and aggregation is SQL-side so no JS number sees a sum. NOT the type system:
+// `RawAmount` is declared and applied nowhere, and there is no no-restricted-syntax rule —
+// this comment claimed both until the 2026-09-15 ADR sweep (ADR-004).
 ```
 
 ## 3. Event store: `chain_events` (ADR-005)

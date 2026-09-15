@@ -23,7 +23,9 @@ resolvability — but **no rule constrains what `apps/*` may import from `packag
 `nothing-imports-apps` and `no-cross-app-imports` are different directions, and
 `not-to-unresolvable` is not a backstop either, because the root workspace declares
 `@reconcil/ingestion` as a devDependency (see `09-known-gaps.md`) so an undeclared import
-from an app still resolves by node_modules walk-up. No app violates the graph today; the
+from an app still resolves by node_modules walk-up. No app imports something the graph puts
+ABOVE it today — though the graph is itself incomplete: `apps/cli` depends on
+`@reconcil/evals`, which appears in no arrow of it. The
 edge is simply unguarded, and that gap is tracked in `09-known-gaps.md` rather than closed
 here. The signing-library half of this sentence is also not what delivers its stated scope
 — see ADR-011.

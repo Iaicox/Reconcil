@@ -63,8 +63,14 @@ date. Stablecoins pose a policy question: book at peg (1.0) or at market (±0.3%
    natives a price key) is the fix. Tracked in `09-known-gaps.md`.
 3. **Append-only snapshots, pinned by FK.** `price_snapshots` / `fx_rates` rows are never
    updated; corrections insert under `source='manual'` with explicit priority. Everything
-   that values anything (`matches`, export manifests) stores `price_snapshot_id` /
-   `fx_rate_id`. Missing price ⇒ `PRICE_MISSING` warning, never interpolation (C4).
+   valued **through the pricing read-core** (`matches`, export manifests) stores
+   `price_snapshot_id` / `fx_rate_id`. Missing price ⇒ `PRICE_MISSING` warning, never
+   interpolation (C4).
+
+   *Qualified 2026-09-15 (ADR sweep).* This said "everything that values anything", which d4
+   below and ADR-010 d5 contradict: a same-currency stablecoin leg is valued at face value
+   without consulting the read-core and stores NULL refs. The universal was the half of the
+   d3/d4 disagreement nobody had noticed — correcting d4 alone would have left it standing.
 
    *Note 2026-09-15 (ADR sweep — the decision stands, the implementation violates it).* WHICH
    snapshot gets pinned is not currently a function of the data. The candidate query carries

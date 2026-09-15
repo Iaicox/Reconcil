@@ -50,15 +50,16 @@ transfers, fees, synthetic anchors), and whether to build reorg rollback machine
    use the tuple.
 
    The label path's stated benefit, preserving execution order, **reached no consumer.** No
-   PRODUCTION read orders by `log_index` descending (integration tests do, to read sentinels
-   back in rank order — which is the only place rank order is ever wanted). Six order by it
+   PRODUCTION read orders by `log_index` descending. Six order by it
    ascending: the five ledger reads (`balances.ts`, `counterparties.ts`, `flows.ts`, `gas.ts`,
    `list-events.ts`) and the close pack's transactions CSV, which is an in-memory sort rather
    than a query but renders the same inversion into an exported file. Because the
    sentinel is `-(1000+n)`, `n = 2` sorts *before* `n = 0` in every one of them: execution
    order was inverted everywhere it could be observed, exported CSV included. The remaining
-   `chain_events` readers (the recon and journal paths) order by `block_time, id` and never
-   consult it at all.
+   `chain_events` readers — the recon and journal paths — order by `block_time, id`; they do
+   read `log_index`, but only to carry it in an event ref, never to sequence anything. The
+   four descending reads are all in `processors.itest.ts`, reading sentinels back in rank
+   order, which is the only place rank order is ever wanted.
 
    The premise was shaky too. This decision used to assert Blockscout's `index` enumerates the
    call tree per transaction, but in the smaller of the two captured fixtures carrying rows,

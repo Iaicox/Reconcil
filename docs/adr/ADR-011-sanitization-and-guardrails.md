@@ -118,9 +118,10 @@ MiCA guardrails, enforced structurally where possible:
   a reviewer can rely on: the **token** path, where `TokenMeta` carries no raw field and
   `toTokenView` is the single conversion to the wire, so no analytics tool can emit
   `symbol_raw`/`name_raw` even by accident. `chain_events.raw` is likewise selected by nothing
-  outside the ingestion writer. Everything else — the recon, import, status, journal and audit
-  paths — is per-SELECT column-list convention: correct today, verified path by path, and
-  held by nothing but review. Two known soft spots are tracked in `09-known-gaps.md`: raw
+  in `src/` outside the ingestion writer (one integration test reads it back, deliberately —
+  ADR-005 d2 depends on that round-trip). Everything else — the recon, import, status,
+  journal and audit paths — is per-SELECT column-list convention: correct today, verified
+  path by path, and held by nothing but review. Two known soft spots are tracked in `09-known-gaps.md`: raw
   `counterparty_name` leaves the repo and is sanitized late in the exporter, at a different
   cap than the import path uses and with its `heavy` flag discarded (so the truncation the
   2026-08-06 amendment exists to surface produces no warning there); and

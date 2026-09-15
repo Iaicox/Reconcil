@@ -59,9 +59,14 @@ These are the constraints a coding session can violate without noticing; each ha
 with full rationale.
 
 - **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)`
-  (uint256 does not fit BIGINT); JSON carries money as decimal strings; TS uses
-  `bigint`/decimal lib with branded types. Aggregate raw in SQL, scale once at the edge.
-  Rounding only at export boundaries. (ADR-004)
+  (uint256 does not fit BIGINT); JSON carries money as decimal strings; TS uses `bigint` or a
+  decimal clone. Aggregate raw in SQL, scale once at the edge. Rounding only where a quotient
+  is non-terminating, and then only at an export boundary — the one carve-out is bounded
+  integer tolerance math over minor units (`computeBand`), which truncates deliberately.
+  *(Branded types exist (`RawAmount`, `DecimalString`) but `RawAmount` is applied nowhere, and
+  there is no lint rule against `number` arithmetic — what actually holds the line is Zod
+  rejecting JSON numbers at the wire, `mode: 'bigint'` at the DB edge, and SQL-side
+  aggregation. Do not rely on the type system here.)* (ADR-004)
 - **The LLM never computes.** All figures come from deterministic functions and must be
   traceable through the citation envelope (`tool_call_id`, event refs, pinned
   price/fx snapshot IDs). A number without provenance is a bug. (P1/P2, ADR-012)
@@ -70,7 +75,9 @@ with full rationale.
   advances past `head − finality_depth` — there is deliberately no reorg rollback path.
   (ADR-005)
 - **No signing or key material anywhere in the dependency tree** — the product is
-  read-only by construction (MiCA); a dependency-cruiser CI rule will enforce it. (ADR-011)
+  read-only by construction (MiCA). Enforced by `pnpm check:supply-chain`, which scans both
+  lockfiles; the dependency-cruiser `no-signing-libraries` rule sees only direct first-party
+  imports (`doNotFollow` skips `node_modules`) and cannot speak for the tree. (ADR-011)
 - **On-chain and imported strings are hostile input.** Only sanitized `*_display` values
   may reach tool responses, and only under `untrusted` keys; `*_raw` and provider `raw`
   JSONB never leave the server. This ban is about hostile **string** fields
@@ -78,10 +85,13 @@ with full rationale.
   base units as a decimal string, e.g. on `analytics_list_events` events) is not hostile
   input and does cross the wire. (ADR-011)
 - **Tenant identity comes from the transport session, never from tool arguments.**
-  All repository methods are tenant-scoped; chain data tables are global by design.
-  (ADR-006, ADR-012)
+  Chain data tables are global by design. Tenant-owned repositories (recon, directory, audit)
+  take a tenant context and predicate on it; `packages/ledger` does NOT — it takes an address
+  set already resolved from the tenant's `wallets` by `resolveScope`, so a new caller of the
+  ledger must resolve its own scope the same way. Nothing enforces that. (ADR-006, ADR-012)
 - **MCP tool wire names use underscores** (`analytics_balances`) — dots break the Claude
-  API tool-name constraint; `analytics.*` namespaces are logical only. (ADR-012)
+  API tool-name constraint; `analytics.*` namespaces are logical only. Swept over the whole
+  registry, with uniqueness, in `apps/mcp-server/test/server.test.ts`. (ADR-012)
 - **No Python in this project** — TypeScript/Node only (hard constraint from the brief).
 
 ## Conventions

@@ -309,12 +309,16 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
     // Pinned here rather than in the property test: that generator dedupes on the LOWERCASED
     // tuple, so it can never place two case-variant rows in one group.
     //
-    // Honest limit, so nobody reads more into this than it gives: each branch is pinned at
-    // BRANCH granularity, not per line. Dropping `.toLowerCase()` from `b.from` goes red;
-    // dropping it from `a.from` alone survives, because a two-element sort calls the
-    // comparator in the order that hides it. Killing that would need a three-row fixture
-    // ordered to force both argument positions, which is more machinery than the mutant is
-    // worth — but it is a gap, not coverage.
+    // Coverage, measured rather than assumed — all three mutants of the lowercasing die, but
+    // not all to the same test, and that is worth knowing:
+    //   drop it on BOTH sides  → this case goes red (the property test stays green: the
+    //                            comparator is still a consistent order, just over raw bytes)
+    //   drop it on ONE side    → sentinel-permutation.property.test.ts goes red, because a
+    //                            one-sided drop destroys antisymmetry and the sort result
+    //                            then depends on input order — which is the whole property.
+    // An earlier version of this comment claimed the one-sided `a.from` mutant survived. It
+    // does not; that came from mirroring the assertions in a harness instead of running the
+    // suite. Verified 3/3 runs on each mutant.
     const byTo = run([
       trace({ from: '0xaa', to: '0xBBBB', value: '1' }),
       trace({ from: '0xaa', to: '0xaaaa', value: '2' }),

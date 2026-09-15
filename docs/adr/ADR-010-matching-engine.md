@@ -77,8 +77,10 @@ matching; P8 requires human confirmation.
    *Amended 2026-09-15 (ADR sweep — accuracy).* Two descriptions here do not match the
    engine, and one amendment below describes a mechanism that never runs.
 
-   - **The subset pool is a selection, and neither this decision nor the 2026-08-06
-     "honest subset-search wording" amendment describes the one that ships.** `findBestSubset`
+   - **The subset pool is a selection, and until this sweep neither this decision nor the
+     2026-08-06 "honest subset-search wording" amendment described the one that ships**
+     (that amendment has since been corrected in place; this is the authoritative account).
+     `findBestSubset`
      first drops every event larger than `open + band` (it could only overshoot), *then* sorts
      what remains descending by value with an `eventId` tiebreak, *then* takes the top 6. The
      ceiling filter runs BEFORE the cut, so with `open = 3000`, `band = 30` and a window of
@@ -185,10 +187,11 @@ matching; P8 requires human confirmation.
   previously implied the only miss-mode was "a record only a larger combination would
   settle." The pool is actually a top-6 *selection*, so an exact split whose small member
   falls outside it is *also* unreachable, independent of whether ≤ 6 events would have
-  sufficed. **Superseded in part on 2026-09-15:** this amendment described that selection as
-  "the ≤ 6 LARGEST-valued candidates in the date window", which is still not what the code
-  builds — the ceiling filter runs before the cut. Decision 3's 2026-09-15 amendment above
-  has the three steps in order; the miss-mode named here is unaffected. Both failure modes
+  sufficed. **Corrected in place on 2026-09-15:** this amendment used to describe that
+  selection as "the ≤ 6 LARGEST-valued candidates in the date window", which is not what the
+  code builds either — the ceiling filter runs before the cut, so a window holding an event
+  above open+band yields a different pool. Decision 3's 2026-09-15 amendment above has the
+  three steps in order; the miss-mode named here is unaffected. Both failure modes
   are now named explicitly; no behavior changed for this point — a characterization test
   pins the small-member case as documented behavior, so widening the pool selection later
   is a conscious choice, not an accidental fix.
