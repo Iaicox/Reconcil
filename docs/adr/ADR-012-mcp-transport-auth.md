@@ -3,7 +3,9 @@
 **Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-08-06 (transport-level
 defense in depth — decision 6; model-controlled write roots — decision 7) ·
 2026-09-13 (decision 7: the error contract has two halves, and the no-write-outside
-guarantee is about content, not directories)
+guarantee is about content, not directories) · 2026-09-15 (ADR sweep: decision 7's shape
+question decided — `realpath` check-then-use accepted, with a stop rule and a trigger;
+decision 5's tool-name constraint is now enforced by a registry sweep)
 
 ## Context
 
@@ -32,6 +34,18 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    no server process in the eval loop, deterministic and fast.
 5. **Tool naming**: wire names use underscores (`analytics_balances`); dots break the
    Claude API's tool-name constraint (`^[a-zA-Z0-9_-]+$`). Namespaces are conventions.
+
+   *Amended 2026-09-15 (ADR sweep).* This stated a constraint that **nothing checked.** The
+   registry is a plain array, dispatch is `tools.find((t) => t.name === name)`, and the only
+   assertions were per-tool spot checks — so `analytics.balances` would have shipped and
+   failed at the Claude API rather than in CI. Worse, nothing checked **uniqueness**: two
+   descriptors sharing a name is not an error anywhere, and `find` would silently return the
+   first while the server still advertised both.
+
+   Both are now swept over the whole registry in `apps/mcp-server/test/server.test.ts`. The
+   test enumerates `tools` rather than naming any, so a tool added later is covered by
+   existing on the list — which is the point: a constraint stated in an ADR and checked
+   nowhere is a convention, and this one is cheap enough to be a rule.
 6. **Transport-level defense in depth, layered on top of bearer auth (2026-08-06).** Two
    protections that don't change the auth model itself, added to the streamable-HTTP
    entrypoint:
@@ -146,8 +160,47 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    model can already read those files, and it costs a layout self-hosters actually use.
    Revisit if the export root is ever shared between tenants.
 
-   The deeper question — whether a confinement this shaped should
-   be built out of `realpath` at all — is recorded in `09-known-gaps.md` for the ADR sweep.
+   **The shape question, decided 2026-09-15 (ADR sweep): `realpath`-based check-then-use is
+   accepted, and no further mechanism is added to this path.**
+
+   The question was whether a confinement like this should be built out of `realpath` at all.
+   Five review rounds each added a step to it — prefix check, ancestor realpath, per-segment
+   checks, post-`mkdir` re-resolve, `wx`, cleanup, orphan `rmdir` — every one found by review
+   rather than chosen by design, and every one narrowing a window the previous one left. That
+   pattern is the actual finding: it does not terminate, because the residue is structural.
+   `realpath` answers "where does this path point *right now*", and every use of that answer
+   happens afterwards. `mkdir -p` still creates a directory behind a link planted mid-call,
+   and the write that follows the check is a second lookup of a path the check has released.
+
+   Closing it properly needs the file descriptor to BE the check — `openat`/`O_NOFOLLOW` per
+   segment — which Node's promises API does not expose (`fs.open` takes no `dirfd`, and
+   `O_NONBLOCK` is likewise unavailable, which is why a writer-less FIFO can still block an
+   `open` and hold a libuv threadpool thread). The three real options are a native addon, a
+   child process, or accepting the residue. **Accept**, for a reason that is about the threat
+   model rather than about cost:
+
+   > This confinement exists against **H2, model-controlled input**. A model supplies a
+   > string; it cannot plant a symlink. Every remaining window requires a **co-resident writer
+   > with filesystem access to the export or import root** — who is already inside the trust
+   > boundary those roots assume, since they can read every exported file and drop a CSV into
+   > the import directory regardless of what this code does. A native addon would buy nothing
+   > against H2, and against the co-resident writer it would harden one path while leaving the
+   > root itself readable.
+
+   A native addon also costs what this project has specifically refused elsewhere: a
+   compile step, a platform matrix, and a dependency with native code in the tree that
+   ADR-011's supply-chain guard would have to reason about.
+
+   **The stop rule, which is the part with lasting value.** No further check-then-use
+   mechanism is added here. A finding on this path is answered by either changing the threat
+   model or doing nothing — not by a tenth narrowing. Reviews will keep producing them,
+   because each one is locally correct; the accumulation is what this decision ends.
+
+   **Trigger that reopens it:** the export or import root is shared with a less-trusted
+   co-tenant process. At that point the residue stops being acceptable, the answer is
+   fd-based confinement (addon or child process) rather than another `realpath`, and the
+   per-tenant root separation this ADR does not currently require becomes the cheaper half of
+   the fix.
 
 ## Alternatives considered
 

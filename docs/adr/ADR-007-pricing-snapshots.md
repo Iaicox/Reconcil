@@ -10,22 +10,89 @@ date. Stablecoins pose a policy question: book at peg (1.0) or at market (±0.3%
 
 ## Decision
 
-1. **Granularity: daily UTC close.** Accounting works on dates; intraday pricing is
-   trading-grade complexity with no accounting payoff. The date of an event is the UTC
-   date of `block_time`.
+1. **Granularity: one price per UTC date.** Accounting works on dates; intraday pricing is
+   trading-grade complexity with no accounting payoff. The date of an *event* is the UTC date
+   of its `block_time`.
+
+   *Amended 2026-09-15 (ADR sweep — accuracy).* Two words here described something the
+   implementation does not do.
+
+   - It said daily UTC **close**. Both providers are queried at **00:00 UTC** — DefiLlama
+     with `historical/<midnight>?searchWidth=6h`, CoinGecko with its `date=DD-MM-YYYY`
+     00:00 snapshot. So the stored figure is the day's *open*, systematically, and the
+     `searchWidth` window can return a tick from up to six hours **before** midnight, i.e.
+     from the previous UTC date, which is then persisted under the requested date with no
+     warning. (FX has `FX_DATE_SHIFTED` for exactly this shape; prices have no equivalent —
+     tracked in `09-known-gaps.md`.) Open vs close is a defensible choice for accounting and
+     is the one in force; it simply is not what this said.
+   - It said the date of an event is the UTC date of `block_time`, unqualified. That holds
+     for a `day`-grouped row. For a `month` group the valuation date is the month's last day,
+     and for an **ungrouped** aggregate it is `period.to` — a caller-supplied parameter
+     (`repDate`, `packages/mcp-tools/src/rep-date.ts`), which `02-mcp-contracts.md` §6.1
+     already documents. The consequence is worth stating plainly rather than leaving to be
+     discovered: the same underlying rows queried with a different `period.to` pin a
+     different `price_snapshot_id` and produce a different fiat total. Reproducibility is
+     per *request*, not per row set, and a citation is what closes that gap — which is why
+     the pinned id travels with the figure.
 2. **Sources:** DefiLlama primary (keyed by chain+contract address — no ID-mapping
    table needed, generous free historical depth), CoinGecko secondary (via
    `tokens.coingecko_id`), `manual` for corrections. **ECB daily reference rates** for
    EUR (rule: latest published rate ≤ target date; the used date is visible in
    citations — `FX_DATE_SHIFTED` warning).
+
+   *Note 2026-09-15 (ADR sweep — the decision stands, the implementation does not reach it
+   yet).* The CoinGecko secondary **cannot currently serve anything**: `tokens.coingecko_id`
+   is read by the gap query and written by no production path — not by the curated seed
+   migration, not by token discovery — and the adapter returns `null` when it is absent. The
+   failover is therefore one element deep in practice. The sharper consequence is for
+   **native** tokens, which have no contract address: DefiLlama's adapter needs an address or
+   a CoinGecko id, so seeded verified native ETH is unpriceable by both sources, every ETH
+   balance and `gas_fee` figure degrades to `PRICE_MISSING`, and the gap re-queries on every
+   tick forever. This decision is not being weakened — populating `coingecko_id` (and giving
+   natives a price key) is the fix. Tracked in `09-known-gaps.md`.
 3. **Append-only snapshots, pinned by FK.** `price_snapshots` / `fx_rates` rows are never
    updated; corrections insert under `source='manual'` with explicit priority. Everything
    that values anything (`matches`, export manifests) stores `price_snapshot_id` /
    `fx_rate_id`. Missing price ⇒ `PRICE_MISSING` warning, never interpolation (C4).
-4. **Stablecoin policy is a tenant setting** (`market` | `peg_for_stables`), default:
-   peg for reconciliation tolerance math, market for analytics valuation. Peg valuations
-   cite a synthetic `source='peg'` snapshot row — even 1.0 has provenance. The default is
-   a validation-interview question (Q1).
+
+   *Note 2026-09-15 (ADR sweep — the decision stands, the implementation violates it).* WHICH
+   snapshot gets pinned is not currently a function of the data. The candidate query carries
+   **no `ORDER BY`**, and `pickSnapshot` reduces with a strict `<`, so any tie keeps whichever
+   row Postgres happened to return first. The tie is reachable: the preference key returns the
+   same value for **every** `manual` row regardless of currency, and the unique key
+   `(token_id, price_date, currency, source)` lets a manual/USD and a manual/EUR row coexist
+   for one (token, date). The winner decides both the cited `price_snapshot_id` and the figure
+   itself, since one of them needs FX and the other does not — so two runs of the same tool
+   call can disagree. (The same function's peg lookup takes the first `source='peg'` row
+   without checking its currency.)
+
+   This is the defect the 2026-08-05 amendment below fixed for FX — `isBetterSameDate` is a
+   strict total order on source rank, then name, then highest id — and never applied to
+   prices. The fix is that total order, applied here. Tracked in `09-known-gaps.md`.
+4. **Stablecoin policy is `market` | `peg_for_stables`.** Peg valuations resolved through the
+   pricing read-core cite a synthetic `source='peg'` snapshot row — even 1.0 has provenance.
+   The intended default is peg for reconciliation tolerance math, market for analytics
+   valuation; the default is a validation-interview question (Q1).
+
+   *Amended 2026-09-15 (ADR sweep — accuracy).* Two claims, both overstated.
+
+   - **It is not a tenant setting.** `tenants.settings` exists as a column and is read by
+     nothing. `policy` is an optional field on the caller-supplied valuation argument,
+     defaulting to `'market'`, and reconciliation passes `policy: 'market'` as a literal —
+     the inverse of the stated reconciliation default. So the accounting policy is currently
+     chosen per call, by the caller, which for an MCP surface means by the model. Wiring it
+     to the tenant is tracked in `09-known-gaps.md`; the ADR keeps the intended default as
+     the target rather than pretending it is in force.
+   - **"Even 1.0 has provenance" does not hold on the reconciliation path**, and ADR-010 d5
+     already says so ("a same-currency stablecoin at face value (peg, no snapshot)"). The two
+     decisions contradicted each other and the code follows ADR-010: a stablecoin leg whose
+     peg currency equals the record currency is excluded from `resolvePrices`, valued by an
+     identity multiply, and stored with `price_snapshot_id = NULL`. **ADR-010 d5 governs the
+     recon path**; this decision governs the pricing read-core, where a `peg_for_stables`
+     resolution does pin a materialised `source='peg'` row. The cost of the ADR-010 rule is
+     that a depeg is invisible to a confirmed leg, because the multiplier is a literal rather
+     than a row — that is P5 face-value pinning working as designed, and it is stated here so
+     the two decisions stop disagreeing on paper.
 
 ## Alternatives considered
 

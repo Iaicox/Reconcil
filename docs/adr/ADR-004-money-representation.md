@@ -23,16 +23,47 @@ Both raw and scaled exist, each exactly once:
 - **Wire format: strings.** JSON (MCP payloads, fixtures) carries all monetary values as
   decimal strings; Zod schemas reject JSON numbers for money fields.
 - **Code: `bigint` for raw, decimal lib for scaled/fiat**, branded types
-  (`RawAmount`, `DecimalString`); ESLint forbids arithmetic on money via `number`.
+  (`RawAmount`, `DecimalString`).
+
+  *Amended 2026-09-15 (ADR sweep — accuracy).* This originally ended "; ESLint forbids
+  arithmetic on money via `number`". **No such lint rule exists** — `eslint.config.mjs` is
+  `recommended` + `recommendedTypeChecked` plus a CJS override, with no `no-restricted-syntax`
+  and nothing that mentions money. And the branded half is aspirational too: `RawAmount` is
+  declared and exported (`packages/core/src/money.ts`) and applied to **zero** values
+  anywhere in `src/` — `formatUnits` takes a plain `bigint`, and the column is
+  `mode: 'bigint'` with no `.$type<RawAmount>()`. `DecimalString` is real and is applied.
+
+  What actually holds the line today, and is worth naming because it is what a reviewer can
+  check: `decimalString`/`nonNegativeDecimalString` in `packages/core/src/schemas.ts` reject
+  JSON numbers for every money field at the wire, `mode: 'bigint'` keeps `amount_raw` out of
+  float range at the DB edge, and aggregation is SQL-side so no JS number ever sees a sum.
+  Those are three real barriers; neither named mechanism is one of them. Wiring the brand
+  and adding the lint rule is tracked in `09-known-gaps.md`.
 - **Fiat: unconstrained NUMERIC**, full precision internally; rounding (half-up, 2dp)
   only at export boundaries; every exported journal balances per currency — the close-pack
   draft via an appended rounding-residue line, the QBO/Xero drafts by construction (a
   non-zero residue fails the export).
 - **The decimal library is [decimal.js](https://mikemcl.github.io/decimal.js/)**, chosen
-  with the pricing slice where division first appears (fiat = qty × price × fx). It is a
-  private clone at `precision: 40, rounding: ROUND_HALF_UP` (`packages/pricing/src/decimal.ts`),
-  so global config elsewhere can't perturb money math; `core/money.ts` stays lib-free
-  (bigint↔string scaling is exact/terminating). Division/FX is confined to pricing (ADR-007).
+  with the pricing slice where division first appears (fiat = qty × price × fx). It is used
+  through a private clone at `precision: 40, rounding: ROUND_HALF_UP`, so global config
+  elsewhere can't perturb money math; `core/money.ts` stays lib-free (bigint↔string scaling
+  is exact/terminating).
+
+  *Amended 2026-09-15 (ADR sweep — accuracy).* Two claims here were wrong. There is **not
+  one clone but two** — `packages/pricing/src/decimal.ts` and
+  `packages/exporters/src/decimal.ts` — configured identically today, which is exactly the
+  hazard: naming a single file as *the* money-math config invites a future re-tune of one and
+  a silent divergence from the other. And **division is not confined to pricing**:
+  `netOfVat` in the exporters clone divides a gross amount by `(100 + rate)` for the VAT
+  split. Structurally it has to be there — `.dependency-cruiser.cjs`'s
+  `domain-depends-only-on-db-core` rule forbids `exporters → pricing`, so "confined to
+  pricing" and the enforced boundary graph could never both be true.
+
+  The accurate rule is the one both clones already follow: **every site that divides money
+  configures its own decimal clone at `precision: 40, ROUND_HALF_UP`, and rounds only at an
+  export boundary.** Pricing divides for FX; exporters divide for the VAT split, at 2dp, on
+  the way out. Any third such site adopts the same clone rather than importing someone
+  else's.
 
 ## Alternatives considered
 
