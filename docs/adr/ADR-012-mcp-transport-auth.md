@@ -3,7 +3,9 @@
 **Status:** accepted · **Date:** 2026-07-14 · **Amended:** 2026-08-06 (transport-level
 defense in depth — decision 6; model-controlled write roots — decision 7) ·
 2026-09-13 (decision 7: the error contract has two halves, and the no-write-outside
-guarantee is about content, not directories)
+guarantee is about content, not directories) · 2026-09-15 (ADR sweep: decision 7's shape
+question decided — `realpath` check-then-use accepted, with a stop rule and a trigger;
+decision 5's tool-name constraint is now enforced by a registry sweep)
 
 ## Context
 
@@ -32,6 +34,18 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    no server process in the eval loop, deterministic and fast.
 5. **Tool naming**: wire names use underscores (`analytics_balances`); dots break the
    Claude API's tool-name constraint (`^[a-zA-Z0-9_-]+$`). Namespaces are conventions.
+
+   *Amended 2026-09-15 (ADR sweep).* This stated a constraint that **nothing checked.** The
+   registry is a plain array, dispatch is `tools.find((t) => t.name === name)`, and the only
+   assertions were per-tool spot checks — so `analytics.balances` would have shipped and
+   failed at the Claude API rather than in CI. Worse, nothing checked **uniqueness**: two
+   descriptors sharing a name is not an error anywhere, and `find` would silently return the
+   first while the server still advertised both.
+
+   Both are now swept over the whole registry in `apps/mcp-server/test/server.test.ts`. The
+   test enumerates `tools` rather than naming any, so a tool added later is covered by
+   existing on the list — which is the point: a constraint stated in an ADR and checked
+   nowhere is a convention, and this one is cheap enough to be a rule.
 6. **Transport-level defense in depth, layered on top of bearer auth (2026-08-06).** Two
    protections that don't change the auth model itself, added to the streamable-HTTP
    entrypoint:
@@ -68,86 +82,133 @@ OAuth. The MCP spec's remote-auth story is OAuth 2.1 and still evolving.
    escape the caller *supplied* (`..` traversal, an absolute path outside the root) is
    `INVALID_INPUT`, refused before anything is created (H2 audit finding).
 
-   *Amended 2026-09-13.* Two things this originally said are not what the implementation
-   can deliver, and both were found by review rather than by design:
+   *Amended 2026-09-13 and 2026-09-15.* The rule as it now stands is stated first. The
+   attempts that produced it are in **How this got here** at the end of this decision —
+   separated deliberately, because every one of them was found by review rather than chosen
+   by design, and that pattern is itself the finding this decision closes.
 
-   - **The error contract has two halves, not one.** The escapes above are the caller's
-     argument and stay `INVALID_INPUT`. But a link planted *between* validation and use —
-     and a redirect to a different location *inside* the root — are refused as `INTERNAL`:
-     by then the caller's argument has already passed, the fault is not theirs, and telling
-     the model its `out_dir` is bad would be false. The server-side cause records which.
+   **The mechanism, end to end.** Prefix check → `realpath` of the deepest existing ancestor
+   → single-path-segment checks on every caller-supplied component (`exportId`, each rendered
+   file name) → `mkdir -p` → `realpath` of the finished directory, required to be contained
+   in `realpath` of the ROOT → writes through, AND reporting of, the resolved directory →
+   cleanup of anything this call created. Containment is judged between two REALPATH'd paths:
+   both sides are resolved, so filesystem casing is not part of the answer, and a link is
+   followed wherever it goes and judged on where it landed.
 
-     The split is about OWNERSHIP, not about `out_dir`, so it governs the read edge the same
-     way. The test is what a refusal is a statement ABOUT, not where in the sequence it
-     happens: an amendment that drew the line at confinement was contradicted by the
-     `INVALID_INPUT` checks that follow it (a FIFO, a file over the cap) and had to be
-     withdrawn. A statement about the REQUEST — absent, malformed, too long, escaping, not a
-     regular file, over the cap — is `INVALID_INPUT`, and a different path fixes it. A
-     statement about the FILESYSTEM is `INTERNAL`: a `realpath` refused with `EACCES`, `EIO`
-     or `ELOOP`, where the path may be perfectly good and the filesystem will not say; a
-     `file_path` that resolved and then vanished or was denied before `open`; one that
-     changed size between its `stat` and its last byte. Written as `INVALID_INPUT` until
-     2026-09-14, which invited the one recovery that cannot work — retrying with a different
-     path — and discarded the operator's only signal that something is racing writes in
-     their import directory. Two later attempts got the boundary wrong in turn: an errno
-     test at the post-confinement sites (where `ENOENT` means the file went away, not that
-     the caller named nothing), and a shared `try` over both realpaths, which blamed the
-     caller for an unusable import ROOT.
+   **The error contract has two halves.** A refusal is classified by what it is a statement
+   ABOUT, not by where in the sequence it happens. A statement about the REQUEST — absent,
+   malformed, too long, escaping the root, not a regular file, over the cap — is
+   `INVALID_INPUT`, and a different path fixes it. A statement about the FILESYSTEM is
+   `INTERNAL`: a `realpath` refused with `EACCES`, `EIO` or `ELOOP`, where the path may be
+   perfectly good and the filesystem will not say; a `file_path` that resolved and then
+   vanished or was denied before `open`; one that changed size between its `stat` and its
+   last byte; a link planted between validation and use, or a redirect to a different
+   location inside the root — by then the caller's argument has passed, the fault is not
+   theirs, and telling the model its `out_dir` is bad would be false. The server-side cause
+   records which. The split is about OWNERSHIP, so it governs the read edge the same way.
 
-     There is exactly one exception, and it is written down because "the caller can act on
-     it" is true of every failure on these edges and so cannot be what selects it: the BASE
-     itself. An import root that is unset, missing, or not a directory makes the whole
-     `file_path` input unavailable rather than any particular path wrong — and the tool also
-     takes `content`. That is `INVALID_INPUT` with a hint naming the alternative, in its own
-     words rather than borrowing `file_path`'s. `INTERNAL` there would say "nothing you can
-     do" about the one case where something can be.
+   There is exactly one exception, written down because "the caller can act on it" is true of
+   every failure on these edges and so cannot be what selects it: the BASE itself. An import
+   root that is unset, missing, or not a directory makes the whole `file_path` input
+   unavailable rather than any particular path wrong — and the tool also takes `content`.
+   That is `INVALID_INPUT` with a hint naming the alternative, in its own words rather than
+   borrowing `file_path`'s. `INTERNAL` there would say "nothing you can do" about the one
+   case where something can be. The base is STATED to be a directory (`stat`), never inferred
+   from what the target's realpath does.
 
-     The base is STATED to be a directory (`stat`), never inferred from what the target's
-     realpath does. `realpath` succeeds on a regular file, so a root pointing at one used to
-     surface as the target's `ENOTDIR` — a path-shape code, blamed on the caller, with no
-     hint — and no errno can separate "the base is a file" from "a component inside it is".
-   - **"Never a write outside the configured base" was too strong.** No export CONTENT is
-     ever written outside the root — that is the guarantee, and it holds. But `mkdir -p`
-     runs before the post-creation check can fire, so a link planted in that window does get
-     a real DIRECTORY created behind it (best-effort `rmdir`'d, at most the leaf). Closing
-     that needs `openat`/`O_NOFOLLOW` per segment, which Node's promises API does not
-     expose.
-
-   What the implementation actually does now, since two steps grew to several: prefix check
-   → `realpath` of the deepest existing ancestor → single-path-segment checks on every
-   caller-supplied component (`exportId`, each rendered file name) → `mkdir -p` → `realpath`
-   of the finished directory, required to stay inside `realpath` of the ROOT → writes
-   through, AND reporting of, the resolved directory → cleanup of anything this call created.
-
-   That post-creation step took four attempts, and what it asks is the part worth recording.
-   Three of them answered a question that was not the guarantee above. Anchored at the
-   out_dir-narrowed base, both operands resolved through a planted link and the check was
-   blind to it: with `<root>/june` pointing at `<root>/tenant-b`, an export asked for under
-   `june/close` was accepted while its bytes landed in tenant-b and every reported path said
-   june. Re-anchored at `realpath(root)` plus the relative path it saw that — but compared a
-   caller-spelled string against a realpath'd one, so a second export under `June/Close`
-   after one under `june/close` was REFUSED on a case-insensitive filesystem. Refusing every
-   link between root and target fixed the casing and broke `<root>/current -> <root>/2026-09`,
-   an ordinary operator layout that had always worked.
-
-   Containment between two REALPATH'd paths is the rule that matches the guarantee. Both
-   sides are resolved, so casing is not part of the answer; a link is followed wherever it
-   goes and judged on where it landed.
+   **What is guaranteed, and what is not.** No export CONTENT is ever written outside the
+   root; that holds. "Never a WRITE outside the configured base" does not: `mkdir -p` runs
+   before the post-creation check can fire, so a link planted in that window does get a real
+   DIRECTORY created behind it (best-effort `rmdir`'d, at most the leaf).
 
    **A link that stays inside the root is honoured, not refused** — it is the operator's
    arrangement, and the export root is theirs to lay out. What must not happen is the audit
    trail lying about where the files are, so the `exports` row and the tool response carry
-   the RESOLVED path. A redirect is therefore permitted and never invisible. The cost is
-   that an operator whose root is itself a symlink or bind-mount (macOS `/var` →
-   `/private/var`) sees the resolved prefix rather than the one they configured; both name
-   the same directory and only one of them is checkable. The stricter rule — refuse any link
-   on the path — was implemented and rejected: it buys protection against a co-resident
-   writer redirecting an export to another location inside the root, which under this threat
-   model can already read those files, and it costs a layout self-hosters actually use.
-   Revisit if the export root is ever shared between tenants.
+   the RESOLVED path. A redirect is therefore permitted and never invisible. The cost is that
+   an operator whose root is itself a symlink or bind-mount (macOS `/var` → `/private/var`)
+   sees the resolved prefix rather than the one they configured; both name the same directory
+   and only one of them is checkable.
 
-   The deeper question — whether a confinement this shaped should
-   be built out of `realpath` at all — is recorded in `09-known-gaps.md` for the ADR sweep.
+   **The shape question, decided 2026-09-15 (ADR sweep): `realpath`-based check-then-use is
+   accepted, and no further mechanism is added to this path.**
+
+   The residue is structural, not a gap in the current implementation. `realpath` answers
+   "where does this path point *right now*", and every use of that answer happens afterwards:
+   `mkdir -p` creates a directory behind a link planted mid-call, and the write that follows
+   the check is a second lookup of a path the check has released. Narrowing the window is not
+   closing it, which is why five rounds of narrowing did not terminate.
+
+   Closing it properly needs the file descriptor to BE the check — `openat`/`O_NOFOLLOW` per
+   segment — which Node's promises API does not expose (`fs.open` takes no `dirfd`, and
+   `O_NONBLOCK` is likewise unavailable, which is why a writer-less FIFO can still block an
+   `open` and hold a libuv threadpool thread). The three real options are a native addon, a
+   child process, or accepting the residue. **Accept**, for a reason about the threat model
+   rather than about cost:
+
+   > This confinement exists against **H2, model-controlled input**. A model supplies a
+   > string; it cannot plant a symlink. Every remaining window requires a **co-resident writer
+   > with filesystem access to the export or import root** — who is already inside the trust
+   > boundary those roots assume, since they can read every exported file and drop a CSV into
+   > the import directory regardless of what this code does. A native addon would buy nothing
+   > against H2, and against the co-resident writer it would harden one path while leaving the
+   > root itself readable.
+
+   A native addon also costs what this project has specifically refused elsewhere: a compile
+   step, a platform matrix, and a dependency with native code in the tree that ADR-011's
+   supply-chain guard would have to reason about.
+
+   **The stop rule, which is the part with lasting value.** No further check-then-use
+   mechanism is added here. A finding on this path is answered by either changing the threat
+   model or doing nothing — not by a tenth narrowing. Reviews will keep producing them,
+   because each one is locally correct; the accumulation is what this decision ends.
+
+   **Trigger that reopens it:** the export or import root is shared with a less-trusted
+   co-tenant process. At that point the residue stops being acceptable, the answer is
+   fd-based confinement (addon or child process) rather than another `realpath`, and the
+   per-tenant root separation this ADR does not currently require becomes the cheaper half of
+   the fix.
+
+   ---
+
+   **How this got here** (history — none of the following is a rule; it is the record of how
+   the rules above were arrived at, kept because the stop rule only makes sense against it).
+
+   The 2026-09-13 amendment corrected two things the original decision said that the
+   implementation cannot deliver: that the error contract had one half, and that no write ever
+   lands outside the base. Both were found by review.
+
+   The error-contract boundary was got wrong three times before the OWNERSHIP test above.
+   An amendment that drew the line at confinement was contradicted by the `INVALID_INPUT`
+   checks that follow it (a FIFO, a file over the cap) and was withdrawn. The filesystem half
+   was written as `INVALID_INPUT` until 2026-09-14, which invited the one recovery that cannot
+   work — retrying with a different path — and discarded the operator's only signal that
+   something is racing writes in their import directory. Two later attempts got the boundary
+   wrong in turn: an errno test at the post-confinement sites (where `ENOENT` means the file
+   went away, not that the caller named nothing), and a shared `try` over both realpaths,
+   which blamed the caller for an unusable import ROOT. The base-is-a-directory `stat` exists
+   because `realpath` succeeds on a regular file, so a root pointing at one used to surface as
+   the target's `ENOTDIR` — a path-shape code, blamed on the caller, with no hint — and no
+   errno can separate "the base is a file" from "a component inside it is".
+
+   The post-creation containment check took four attempts, three of which answered a question
+   that was not the guarantee. Anchored at the out_dir-narrowed base, both operands resolved
+   through a planted link and the check was blind to it: with `<root>/june` pointing at
+   `<root>/tenant-b`, an export asked for under `june/close` was accepted while its bytes
+   landed in tenant-b and every reported path said june. Re-anchored at `realpath(root)` plus
+   the relative path it saw that — but compared a caller-spelled string against a realpath'd
+   one, so a second export under `June/Close` after one under `june/close` was REFUSED on a
+   case-insensitive filesystem. Refusing every link between root and target fixed the casing
+   and broke `<root>/current -> <root>/2026-09`, an ordinary operator layout that had always
+   worked — which is why the stricter rule was implemented and then rejected: it buys
+   protection against a co-resident writer redirecting an export to another location inside
+   the root, which under this threat model can already read those files, and it costs a layout
+   self-hosters actually use. **That rejection has its own reopen condition, separate from
+   the stop rule's: revisit refusing links if the export root is ever shared between
+   tenants.**
+
+   The five narrowings the stop rule refers to, in the order review produced them: prefix
+   check, ancestor realpath, per-segment checks, post-`mkdir` re-resolve, `wx` plus cleanup
+   and orphan `rmdir`.
 
 ## Alternatives considered
 

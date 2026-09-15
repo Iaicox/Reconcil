@@ -73,7 +73,13 @@ type WarningCode =
   | 'COVERAGE_INCOMPLETE'   // some requested wallet still backfilling / errored
   | 'ANCHORED_BASELINE'     // figures rest on an opening_balance anchor, not full history
   | 'DATA_STALE'            // checkpoint older than freshness threshold
-  | 'UNVERIFIED_EXCLUDED'   // spam-filtered tokens were omitted (default)
+  | 'UNVERIFIED_EXCLUDED'   // DERIVED FROM THE REQUEST FLAG, not from what was excluded: the
+                            // four tools that take include_unverified emit it whenever it is
+                            // unset, whether or not an unverified token existed. Two tools
+                            // never emit it — analytics_gas has no spam filter (native only),
+                            // analytics_stablecoin_movements filters with no flag and no
+                            // warning, which is the real gap (ADR-011 layer 3). The close
+                            // pack emits it unconditionally: five emit sites in all.
   | 'PRICE_MISSING'         // no snapshot for (token, date); value omitted, not guessed
   | 'FX_DATE_SHIFTED'       // weekend/holiday: previous ECB rate used
   | 'SANITIZED_HEAVY'       // >30% of an untrusted string lost to charset-stripping and/or truncation
@@ -117,7 +123,9 @@ type ErrorCode =
   | 'PERIOD_TOO_LARGE'      // exceeds server-side limits (hint: split the period)
   | 'MATCH_CONFLICT'        // confirm would violate a matching invariant
   | 'NOT_SUGGESTED'         // confirm/reject on a match not in 'suggested' state
-  | 'RATE_LIMITED'          // provider budget exhausted (hint: retry later)
+  | 'RATE_LIMITED'          // provider budget exhausted (hint: retry later) — DECLARED BUT
+                            // UNREACHABLE: no budget counter exists, so no tool throws it
+                            // (the HTTP limiter is transport-level and does not use this)
   | 'INTERNAL';
 ```
 
@@ -135,14 +143,19 @@ interface Scope {              // default: all wallets of the tenant
 interface Period { from: string; to: string; }   // ISO dates, inclusive, UTC
 interface Valuation {
   currency: 'USD' | 'EUR';
-  policy?: 'market' | 'peg_for_stables';         // default: tenant setting
+  policy?: 'market' | 'peg_for_stables';         // default: 'market' (ADR-007 d4)
 }
 // Pagination: opaque cursor = base64(chain_id, block_number, log_index, id).
 ```
 
-Tenant identity is **not** an input: it comes from the transport session (ADR-012) and is
-injected into every repository call. A tool can never be asked to read another tenant's
-data.
+Tenant identity is **not** an input: it comes from the transport session (ADR-012). It is
+**not** injected into every repository call — `packages/ledger` has no tenant parameter at
+all and receives an already-resolved address list (ADR-006 d2 as amended 2026-09-15). Two
+mechanisms carry the boundary instead: a tool that reads the chain tables by ADDRESS first
+resolves its scope from the tenant's `wallets`, and a tool that reads them by ROW ID reaches
+that id only through a tenant-predicated row it already owns (`recon_confirm_match` loads a
+`chain_events` row by the id on a `matches` leg selected under `tenant_id`). Either way a
+tool can never be asked to read another tenant's data.
 
 ## 6. Tool catalog
 
@@ -253,8 +266,9 @@ not the full counterparty set — these are the highest-activity counterparties,
 worth labeling first.
 
 Resolution: `entity_addresses` exact match (tenant rows shadow curated rows). The tool
-suggests labeling, the agent proposes it, the human confirms — the tool never invents
-names (P1).
+suggests labeling and the agent proposes it; the write tool records the decision — the tool
+never invents names (P1). (Who makes that decision rests on the client's approval gate, not
+on anything here — ADR-010 d4 as amended 2026-09-15.)
 
 **`analytics_stablecoin_movements`** — flows restricted to verified stablecoins.
 
@@ -323,14 +337,15 @@ output: { wallets: Array<{ address: string; chain_id: number;
             integrity?: { checked_at: string; block: number; clean: boolean;
                           drifts: Array<{ token: string; computed: DecimalString;
                                           provider: DecimalString }> };
-            estimate?: { tx_count_hint: number; suggests_anchored: boolean } }> }  // >50k probe (async)
+            estimate?: { tx_count_hint: number; suggests_anchored: boolean } }> }  // nonce>50k probe
 ```
 
-The `estimate` carries the **>50k probe** result (ADR-008 Q5). The probe runs
-asynchronously worker-side after `ledger_track_wallet` seeds the wallet, so it surfaces
+The `estimate` carries the **nonce > 50k probe** result (ADR-008 Q5) — `tx_count_hint` is the
+account nonce, so it counts only outbound transactions (ADR-008 d4, amended 2026-09-15). The
+probe runs asynchronously worker-side after `ledger_track_wallet` seeds the wallet, so it surfaces
 here — not in the write tool's response (the MCP server may not import the provider
-layer; ADR-011 boundary). `suggests_anchored` is `true` when the estimated transaction
-count exceeds the tunable threshold **and** the wallet is not already anchored: the HITL
+layer; ADR-011 boundary). `suggests_anchored` is `true` when that nonce exceeds the
+tunable threshold **and** the wallet is not already anchored: the HITL
 nudge to re-track in `mode: 'anchored'`.
 
 **`ledger_track_wallet`** — the onboarding write tool.
@@ -349,9 +364,9 @@ address is never downgraded). `mode: 'full'` seeds `queued` checkpoints (full-hi
 backfill); `mode: 'anchored'` seeds `anchoring` with `anchor_from`, and the worker writes
 an `opening_balance` baseline at the resolved anchor block (ADR-008). `enqueued.job_id` is
 the deterministic id the scanner will use — a `backfill:*` id under `full`, an `anchor:*`
-id under `anchored`. The tool never silently chooses anchored: the >50k probe's
-`suggests_anchored` surfaces on `ledger_status` and the **human decides** (HITL), then
-re-tracks with `mode: 'anchored'`.
+id under `anchored`. The tool never silently chooses anchored: the nonce probe's
+`suggests_anchored` surfaces on `ledger_status` and re-tracking with `mode: 'anchored'` is
+a separate, explicit call — the tool never upgrades a wallet on its own.
 
 **`ledger_trace_tool_call`** — audit replay of any previous answer.
 
@@ -457,13 +472,25 @@ output: { suggestions: Array<{
 ```
 
 The engine (not the LLM) scores candidates; the agent's job is to *present* rationale and
-collect the human decision. Split/partial detection uses a bounded subset search: the
-pool is the ≤ 6 LARGEST-valued candidate events in the date window (largest first, so a
-full settlement needs the fewest legs), and every subset within that pool is tried —
-documented complexity cap, no heuristics hidden in prompts. Two cases therefore stay
-open, honestly: a record that would need more than 6 events to settle at all, and one
-whose only exact split includes a member too small to make the top-6-by-size pool even
-though fewer than 6 events would suffice.
+collect the human decision. Split/partial detection uses a bounded subset search over a pool
+built in three steps, in this order: every candidate valued above `open + tolerance` is
+dropped (it could only overshoot), the survivors are sorted descending by value with an event-id
+tiebreak, and the top 6 are taken. Every subset within that pool is tried — documented
+complexity cap, no heuristics hidden in prompts — and subsets are ranked by FEWEST EVENTS
+first, with confidence only as a tiebreak, so the proposed split is the smallest that fits
+rather than the highest-scoring one. Two cases therefore find no SPLIT, honestly: a record
+that would need more than 6 events to settle at all, and one whose only exact split includes
+a member too small to survive the top-6 cut even though fewer than 6 events would suffice.
+Neither case pins the record at `open` by itself. The subset search runs only when no single
+event is within band, so in both cases the amount gate cannot fire — but a single-event leg is
+still proposed if the event matches the record's expected address or a known counterparty. A
+record with neither does stay `open`.
+
+*Corrected 2026-09-15 (ADR sweep).* This paragraph described the pool as "the ≤ 6
+LARGEST-valued candidate events in the date window", which is what ADR-010's 2026-08-06
+amendment said and not what `findBestSubset` builds: the ceiling filter runs BEFORE the
+top-6 cut, so a window holding an event larger than `open + tolerance` yields a different
+pool. The miss-modes named above are unaffected.
 
 A suggestion always carries a non-empty `rationale`: the engine only emits a leg when its
 scored confidence is `> 0` — a candidate with no articulable reason (e.g. landing exactly
@@ -631,8 +658,10 @@ sanitizes to nothing is a row error, not a silently-substituted placeholder.
   recommendations; eval cases assert refusal + redirect. Tools themselves never return
   judgment fields (no "performance", no "recommendation") — only facts.
 - **Read-only by construction.** No signing libraries, no key material, no transaction
-  construction anywhere in the dependency tree — enforced by a dependency-cruiser rule
-  banning `ethers`' Wallet/signer modules and equivalents, checked in CI.
+  construction anywhere in the dependency tree — enforced by `pnpm check:supply-chain`, which
+  scans both lockfiles. The dependency-cruiser rule banning `ethers`' Wallet/signer modules
+  and equivalents runs in CI too but sees only direct first-party imports, so it cannot speak
+  for the tree (ADR-011 as amended 2026-09-15).
 - **Drafts, not filings.** Every journal artifact is labeled draft-for-professional-review
   in file content and tool output.
 

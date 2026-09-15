@@ -1,7 +1,10 @@
 /**
- * Chains as configuration (ADR-009, 03-ingestion §7): adding an EVM chain is one
- * entry here, zero code changes. Fee strategy is a chain property, not a provider
- * property — OP-stack chains carry an L1 data fee (ADR-005).
+ * Chains as configuration (ADR-009, 03-ingestion §7) — true of INGESTION only. An entry
+ * here does NOT finish the job: pricing, verified-token seeding and (when the chain names
+ * an env var this worker does not already read) the worker's own env record each need a
+ * change in source. ADR-009 d3's 2026-09-15 amendment is the authoritative list — read it
+ * before adding a chain; getting it wrong is silent, not loud. Fee strategy is a chain
+ * property, not a provider property — OP-stack chains carry an L1 data fee (ADR-005).
  */
 export type FeeStrategy = 'txlist' | 'receipts-opstack';
 
@@ -57,9 +60,11 @@ export function chainById(chainId: number): ChainConfig {
 }
 
 /**
- * >50k probe threshold (ADR-008, open question Q5): a wallet whose provider-
- * estimated transaction count exceeds this is a "whale", and `ledger_status`
- * surfaces `suggests_anchored` so a human can re-track it in anchored mode. It is
+ * >50k probe threshold (ADR-008, open question Q5): a wallet whose account NONCE
+ * exceeds this is a "whale", and `ledger_status` surfaces `suggests_anchored` so it
+ * can be re-tracked in anchored mode. Nonce counts only OUTBOUND transactions, so a
+ * receive-only address never trips this however large its history (ADR-008 d4,
+ * amended 2026-09-15; tracked in 09-known-gaps.md). It is
  * a tunable guess — kept in one place so re-tuning is a one-line change.
  */
 export const ANCHOR_SUGGEST_TX_THRESHOLD = 50_000;

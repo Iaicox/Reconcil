@@ -5,7 +5,9 @@
  * the client scope, mapping wire tolerances to the engine, building the citable event
  * view (sanitized token symbols via toTokenView), validating the output against the
  * contract, and persisting the tool_call before responding (C2). Nothing here matches
- * or confirms on the model's behalf (P1/P8): humans confirm via recon_confirm_match.
+ * or confirms on the model's behalf (P1/P8) — a leg is applied only once confirmed through
+ * recon_confirm_match, and who confirms rests on the transport client's approval gate rather
+ * than on anything here (ADR-010 d4, amended 2026-09-15).
  */
 import {
   reconSuggestMatchesInput, reconSuggestMatchesOutput,

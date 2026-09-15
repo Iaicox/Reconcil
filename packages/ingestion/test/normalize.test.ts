@@ -247,72 +247,92 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
   const slots = (events: NormalizedEvent[]): Record<string, number> =>
     Object.fromEntries(events.map((e) => [e.amountRaw.toString(), e.logIndex]));
 
-  it('numbers by the provider trace id, not arrival order (emission stays in arrival order)', () => {
-    // Etherscan `traceId`: dotted DFS path. Trace order is 0 < 0_2 < 0_10.
+  // Label-INDEPENDENCE is asserted sweepingly in sentinel-permutation.property.test.ts
+  // ("is independent of the trace label"), over every label shape the deleted comparator had
+  // a rule for. The cases here pin the concrete numbering instead.
+  //
+  // Five cases used to live here named after trace LABELS ("0_2 before 0_10", "2 before 10",
+  // "a repeated label falls to the tuple", "a shape neither provider sends falls to the
+  // tuple", and a key-multiset re-fetch check). All five lost their SUBJECT when the label
+  // path was deleted (ADR-005 d2, amended 2026-09-15), and were replaced by the cases below.
+  //
+  // Correcting the reason given when they were removed, because it did not survive checking:
+  // four of the five still asserted something real — their fixtures made label order and
+  // tuple order disagree, so they were live tests of the tuple path wearing label-shaped
+  // names, and each went red under comparator→arrival. They were removed for being
+  // MISLEADING (a reader would take them as evidence the label path survives), not for being
+  // vacuous. Only the fifth, the key-multiset check, was genuinely unfalsifiable — a k-row
+  // group emits {-1000 … -(999+k)} whatever the comparator does — and that one is the reason
+  // sentinel-permutation.property.test.ts asserts a row→key MAP instead.
+  it('ranks by the (from, to, value) tuple, never by the provider trace label', () => {
+    // The three rows the label path used to order 0 < 0_2 < 0_10. The labels are inert now;
+    // the values decide, and emission still follows arrival order.
     const events = run([
       trace({ traceId: '0_2', value: '30' }),
       trace({ traceId: '0', value: '10' }),
       trace({ traceId: '0_10', value: '20' }),
     ]);
     expect(events.map((e) => [e.amountRaw, e.logIndex])).toEqual([
-      [30n, -1001],
+      [30n, -1002],
       [10n, -1000],
-      [20n, -1002],
+      [20n, -1001],
     ]);
   });
 
-  it('dotted trace ids compare numerically per component, not lexically (0_2 before 0_10)', () => {
-    const events = run([trace({ traceId: '0_10', value: '2' }), trace({ traceId: '0_2', value: '1' })]);
-    expect(slots(events)).toEqual({ '1': -1000, '2': -1001 });
-  });
-
-  it("Blockscout's plain numeric `index` orders numerically too (2 before 10)", () => {
-    const events = run([trace({ traceId: '10', value: '2' }), trace({ traceId: '2', value: '1' })]);
-    expect(slots(events)).toEqual({ '1': -1000, '2': -1001 });
-  });
-
-  it('a REPEATED label falls to the tuple — a repeated label is not a repeated row', () => {
-    // Two real value moves in one tx, both labelled '0'. Taking the label path here makes
-    // compareTraceIds tie and the sort fall to `a.arrival - b.arrival`, i.e. the provider's
-    // response order — which a re-fetch of the overlap boundary block, or a failover, can
-    // invert. The two would then hold each other's sentinels and ON CONFLICT DO NOTHING
-    // would stop matching (ADR-005 d2). The tuple separates them on their own content.
-    const forward = run([trace({ traceId: '0', value: '30' }), trace({ traceId: '0', value: '10' })]);
-    const reversed = run([trace({ traceId: '0', value: '10' }), trace({ traceId: '0', value: '30' })]);
-    expect(slots(forward)).toEqual({ '10': -1000, '30': -1001 });
-    // Same slots whichever order the provider served them in — that is the whole property.
-    expect(slots(reversed)).toEqual(slots(forward));
-  });
-
-  it('a label shape neither provider sends falls to the tuple rather than an invented order', () => {
-    // Trailing underscore: an empty segment. It is the one shape where the label comparator
-    // changed behaviour (ADR-005, amended 2026-09-13), so it must not reach it.
-    const forward = run([trace({ traceId: '0_', value: '30' }), trace({ traceId: '1', value: '10' })]);
-    const reversed = run([trace({ traceId: '1', value: '10' }), trace({ traceId: '0_', value: '30' })]);
-    expect(slots(forward)).toEqual({ '10': -1000, '30': -1001 });
-    expect(slots(reversed)).toEqual(slots(forward));
-  });
-
-  it('keys stay identical across a re-fetch that reorders the page', () => {
-    // The property the sentinel exists for, stated directly: (tx_hash, log_index) is a
-    // function of the row SET, so ON CONFLICT DO NOTHING still matches on a re-serve.
-    const items = [
-      trace({ traceId: '0_2', value: '30' }),
-      trace({ traceId: '0', value: '10' }),
-      trace({ traceId: '0_10', value: '20' }),
-    ];
-    expect(keys(run(items)).sort()).toEqual(keys(run([...items].reverse())).sort());
-  });
-
-  it('falls back to a deterministic (from, to, value) tuple when the provider sends no trace id', () => {
+  it('ranks by the (from, to, value) tuple: from wins over to wins over value', () => {
     const events = run([trace({ value: '30' }), trace({ value: '10' }), trace({ value: '20' })]);
     expect(slots(events)).toEqual({ '10': -1000, '20': -1001, '30': -1002 });
-    // from wins over to wins over value
+    // `from` wins over the rest: 0xaa sorts first although its value is the smaller one, so
+    // a comparator that consulted `value` first would rank these the other way.
     const byFrom = run([
       trace({ from: '0xbb', to: '0xaa', value: '9' }),
       trace({ from: '0xaa', to: '0xzz', value: '1' }),
     ]);
     expect(slots(byFrom)).toEqual({ '1': -1000, '9': -1001 });
+    // `to` wins over `value`, which the pair above cannot show — there `from`-order and
+    // `value`-order agree, so it separates `from` from `to` and never `to` from `value`.
+    // Same `from`, and the smaller `to` carries the LARGER value.
+    const byTo = run([
+      trace({ from: '0xaa', to: '0xzz', value: '1' }),
+      trace({ from: '0xaa', to: '0xbb', value: '9' }),
+    ]);
+    expect(slots(byTo)).toEqual({ '9': -1000, '1': -1001 });
+  });
+
+  it('address casing cannot change the order — the comparator lowercases both endpoints', () => {
+    // A provider is free to return checksummed addresses, and two providers serving the same
+    // window may not agree on the casing. Raw string order puts every upper-case letter
+    // before every lower-case one ('B' is 0x42, 'a' is 0x61), so without the lowercasing
+    // `0xBB…` would sort before `0xaa…` and the two traces would swap sentinels between a
+    // checksummed response and a lower-cased one — an ADR-005 d2 double-insert on re-fetch.
+    //
+    // Pinned here rather than in the property test: that generator dedupes on the LOWERCASED
+    // tuple, so it can never place two case-variant rows in one group.
+    //
+    // Coverage, measured rather than assumed. Four single-line mutants drop a `.toLowerCase()`
+    // (`a.from`, `b.from`, `a.to`, `b.to`); every one dies, but not all to the same test:
+    //   both sides of a pair → THIS case goes red; the property test stays green, because the
+    //                          comparator is still a consistent order, just over raw bytes.
+    //   one side only        → the property test goes red, because a one-sided drop destroys
+    //                          antisymmetry and the sort result then depends on input order,
+    //                          which is the whole property. (`b.from` reddens both tests;
+    //                          `a.from` only the property test — the asymmetry is an artefact
+    //                          of which argument position a two-element sort fills first.)
+    // An earlier version of this comment claimed the one-sided `a.from` mutant SURVIVED. It
+    // does not; that came from mirroring the assertions in a harness instead of running the
+    // suite. Verified 3/3 runs on each of the four.
+    const byTo = run([
+      trace({ from: '0xaa', to: '0xBBBB', value: '1' }),
+      trace({ from: '0xaa', to: '0xaaaa', value: '2' }),
+    ]);
+    expect(slots(byTo)).toEqual({ '2': -1000, '1': -1001 });
+    // Both endpoints, not just one: the two branches lowercase independently, so a mutation
+    // dropping it from `from` alone survives a `to`-only case.
+    const byFrom = run([
+      trace({ from: '0xBBBB', to: '0xcc', value: '1' }),
+      trace({ from: '0xaaaa', to: '0xcc', value: '2' }),
+    ]);
+    expect(slots(byFrom)).toEqual({ '2': -1000, '1': -1001 });
   });
 
   it('a re-fetch that returns the same traces in a different order re-derives the SAME keys', () => {
@@ -328,29 +348,44 @@ describe('internal transfers — stable sentinel numbering across re-fetches', (
     expect(slots(run([bare[1]!, bare[2]!, bare[0]!]))).toEqual(slots(run(bare)));
   });
 
-  it('split page: a truncated page and the overlap re-fetch agree at every boundary', () => {
-    // A provider page that ends mid-tx carries a PREFIX of the tx's traces; the
-    // cursor overlaps that block (cursor = last − 1), so the next page re-fetches
-    // the tx whole. Union of the two calls' keys must equal the whole-tx keys —
-    // no collisions inside a page, no rows dropped by the overlap's ON CONFLICT.
+  it('split page: a truncated page does NOT reproduce the whole-tx slots — why ingest withholds', () => {
+    // A rank is a position among the rows PRESENT in this call, so a prefix of a tx ranks its
+    // members among themselves. With the label path gone there is no ordering under which a
+    // prefix is guaranteed to agree with the full set: ranking by label happened to agree
+    // whenever a provider enumerated in label order, and that side effect is deliberately
+    // given up (ADR-005 d2, amended 2026-09-15) because it held only on an assumption about
+    // the provider that nothing here verifies.
+    //
+    // So this is a CHARACTERIZATION test, not a safety property. The safety property lives on
+    // the write side: processors/ingest.ts never commits an event above the new cursor, so a
+    // partially-fetched tx is withheld and stored only once its whole trace set has been
+    // fetched (pinned by processors.itest.ts, "a page cut mid-transaction stores nothing of
+    // that tx until the re-fetch sees it whole"). This case exists so that guard's necessity
+    // is visible here rather than inferred.
+    //
+    // The values DESCEND in arrival order on purpose. The version of this test that shipped
+    // before used ascending values, where arrival order, label order and tuple order all
+    // coincide — so it passed under either scheme while proving neither.
     const whole = [
-      trace({ traceId: '0', value: '10' }),
-      trace({ traceId: '0_1', value: '20' }),
-      trace({ traceId: '0_2', value: '30' }),
-      trace({ traceId: '1', value: '40' }),
+      trace({ traceId: '0', value: '40' }),
+      trace({ traceId: '0_1', value: '30' }),
+      trace({ traceId: '0_2', value: '20' }),
+      trace({ traceId: '1', value: '10' }),
     ];
-    const wholeKeys = keys(run(whole));
-    expect(new Set(wholeKeys).size).toBe(whole.length);
+    const full = slots(run(whole));
+    expect(new Set(keys(run(whole))).size).toBe(whole.length); // no self-collision
+    expect(full).toEqual({ '10': -1000, '20': -1001, '30': -1002, '40': -1003 });
+
     for (let cut = 1; cut < whole.length; cut++) {
-      const truncated = run(whole.slice(0, cut));
-      expect(new Set(keys(truncated)).size).toBe(cut); // no self-collision
-      // every already-stored key comes back identical on the re-fetch
-      expect(keys(truncated).every((k) => wholeKeys.includes(k))).toBe(true);
-      expect(new Set([...keys(truncated), ...wholeKeys])).toEqual(new Set(wholeKeys));
-      // and each individual trace keeps its slot
-      for (const [value, slot] of Object.entries(slots(truncated))) {
-        expect(slots(run(whole))[value]).toBe(slot);
-      }
+      const prefix = slots(run(whole.slice(0, cut)));
+      expect(new Set(Object.values(prefix)).size).toBe(cut); // still no self-collision
+      // The 40-wei trace is the largest, so it is last under tuple order and takes the LAST
+      // slot of whatever set it is ranked in. In a prefix that is a slot belonging to another
+      // trace in the full set — storing the prefix would double-insert on the re-fetch.
+      // Asserted as the exact slot rather than as "differs from the full-set slot": the
+      // latter is implied by this line plus the `full` expectation above, so it would be a
+      // second assertion that no mutation can redden on its own.
+      expect(prefix['40']).toBe(-(1000 + cut - 1));
     }
   });
 

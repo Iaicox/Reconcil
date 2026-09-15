@@ -51,9 +51,9 @@ Two boundaries matter:
 flowchart TB
     subgraph host["Customer infra or Railway (docker-compose)"]
         mcps["<b>mcp-server</b><br/>Node/TS. MCP tools over stdio and<br/>streamable HTTP (Fastify host: /mcp, /healthz)"]
-        worker["<b>worker</b><br/>Node/TS. BullMQ processors:<br/>backfill, live tail, prices, token resolve,<br/>integrity checks, exports"]
+        worker["<b>worker</b><br/>Node/TS. BullMQ processors:<br/>tail, backfill, prices, onboard, anchor, probe<br/>(token-resolve, integrity, exports: ADR-008 scope, not built)"]
         pg[("Postgres 16<br/>event store + everything durable")]
-        redis[("Redis<br/>BullMQ queues, rate-limit budgets")]
+        redis[("Redis<br/>BullMQ queues (rate-limit budgets are designed, not built — ADR-008 d2)")]
         files[/"export artifacts<br/>(bind-mounted volume)"/]
     end
 
@@ -73,15 +73,17 @@ Notes:
 
 - `mcp-server` and `worker` are **two commands over one image** (same codebase, different
   entrypoint) — one Dockerfile, no duplicated builds.
-- The server does not ingest; the worker does not serve. All provider I/O, rate limiting,
-  and retries live in the worker. The server reads the ledger and enqueues jobs.
+- The server does not ingest; the worker does not serve. All provider I/O and retries live
+  in the worker; the server reads the ledger and enqueues jobs. Provider rate limiting is
+  designed and **not built** — the chain path has no limiter at all (ADR-008 d2, amended
+  2026-09-15).
 - The web dashboard (Nuxt) is deliberately absent — post-gate (P11).
 
 ## 3. Bounded contexts
 
 | Context | Responsibility | Owns tables | Package |
 |---|---|---|---|
-| **Ingestion** | Providers → normalized events; checkpoints; finality; backfill/live; integrity checks | `chain_events` (writes), `ingestion_checkpoints`, `tokens` (discovery) | `packages/ingestion` |
+| **Ingestion** | Providers → normalized events; checkpoints; finality; backfill/live (integrity checks: designed, not built — ADR-005 d4) | `chain_events` (writes), `ingestion_checkpoints`, `tokens` (discovery) | `packages/ingestion` |
 | **Ledger** | Deterministic computation over events: balances, flows, gas, counterparty turnover | reads `chain_events`, `tokens` | `packages/ledger` |
 | **Pricing** | Daily price snapshots, ECB FX; valuation with pinned snapshot IDs | `price_snapshots`, `fx_rates` | `packages/pricing` |
 | **Directory** | Address book: entities, labels, curated global labels | `entities`, `entity_addresses` | `packages/db` (thin; logic in tools) |
@@ -109,11 +111,12 @@ pnpm workspaces + Turborepo (ADR-001).
 reconcil/
 ├── apps/
 │   ├── mcp-server/        # stdio entry + Fastify host for streamable HTTP (/mcp, /healthz)
-│   ├── worker/            # BullMQ processors (ingestion, prices, exports, integrity)
+│   ├── worker/            # BullMQ processors: tail, backfill, prices, onboard, anchor, probe
+│   │                      #  (token-resolve/integrity/exports are ADR-008 scope, not built)
 │   └── cli/               # thin agent (Agent SDK): demo REPL + `evals run`
 ├── packages/
 │   ├── core/              # domain types, zod schemas, Money, sanitizer, chains config
-│   ├── db/                # drizzle schema, SQL migrations, tenant-scoped repositories
+│   ├── db/                # drizzle schema, SQL migrations, tenant bootstrap
 │   ├── ingestion/         # ChainDataProvider adapters, normalizer, checkpoint state machine
 │   ├── pricing/           # DefiLlama/CoinGecko/ECB adapters, snapshot service
 │   ├── ledger/            # deterministic aggregations (pure functions + SQL builders)

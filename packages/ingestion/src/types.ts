@@ -45,13 +45,22 @@ export interface RawInternalTx {
   value: string;
   isError: '0' | '1';
   /**
-   * Where this trace sits in its parent tx, as the provider labels it: Etherscan
-   * sends a dotted DFS path (`traceId`, e.g. "0_1_2"), Blockscout a plain ordinal
-   * (`index`, e.g. "67"). Both enumerate the call tree in execution order, so
-   * either one sorts a tx's traces identically. normalize() ranks on it before
-   * assigning the −(1000+n) sentinels, which keeps the append-only idempotency
-   * key a function of the row set rather than of the provider's array order.
-   * Optional (a provider that sends neither falls back to a tuple sort).
+   * How the provider labels this trace's position in its parent tx: Etherscan sends a dotted
+   * DFS path (`traceId`, e.g. "0_1_2"), Blockscout a plain ordinal (`index`, e.g. "67").
+   * Optional — a provider may send neither.
+   *
+   * **Audit payload, not an ordering key.** Until 2026-09-15 `normalize()` ranked on this
+   * before assigning the −(1000+n) sentinels; it no longer does, because the sentinel is half
+   * an idempotency key and a label is how a provider chose to NAME a row rather than what the
+   * row is (ADR-005 d2). Ranking is now `(from, to, value)`, full stop. The Blockscout half of
+   * the old claim was never verifiable anyway: in the smaller of the two captured fixtures
+   * with rows, five SINGLE-trace transactions carry `index` 67, 81, 161, 98 and 17 — which is
+   * not a per-tx ordinal.
+   *
+   * Its only consumer is `chain_events.raw`, and nothing in `src/` reads it back. That is
+   * deliberate, not neglect: it is what makes "deleting the label path does not lose the
+   * label" true, and it is pinned by processors.itest.ts ("keeps the provider trace label in
+   * chain_events.raw"). Do not remove it as dead code without reading that test first.
    */
   traceId?: string | undefined;
 }

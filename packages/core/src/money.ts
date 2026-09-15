@@ -2,7 +2,9 @@
  * Money math (ADR-004, P1). Canonical amounts are base units (uint256) held as
  * `bigint`; display/fiat values cross boundaries as decimal strings. Scaling by
  * 10^decimals is exact/terminating, so it needs no decimal library — pure
- * bigint↔string. Division/FX (fiat valuation) lives in the pricing slice.
+ * bigint↔string. Non-terminating division over money (FX, the VAT split) lives behind a
+ * decimal clone — in `pricing` and in `exporters`, not only pricing, and ADR-004 names the
+ * three classes of money division and which of them needs a clone.
  */
 import type { Brand } from './brand.js';
 

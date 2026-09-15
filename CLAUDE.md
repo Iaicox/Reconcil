@@ -27,12 +27,13 @@ alternatives.
 ## Commands
 
 ```bash
-pnpm install      # Node >= 24, pnpm 11 (packageManager is pinned)
-pnpm build        # turbo run build — tsc -b with project references
-pnpm typecheck    # turbo run typecheck (build-ordered tsc -b)
-pnpm lint         # eslint per package (flat config at repo root)
-pnpm test         # vitest per package (--passWithNoTests for test-less packages)
-pnpm depcruise    # boundary rules + signing-lib ban — needs `pnpm build` first
+pnpm install             # Node >= 24, pnpm 11 (packageManager is pinned)
+pnpm build               # turbo run build — tsc -b with project references
+pnpm typecheck           # turbo run typecheck (build-ordered tsc -b)
+pnpm lint                # eslint per package (flat config at repo root)
+pnpm test                # vitest per package (--passWithNoTests for test-less packages)
+pnpm depcruise           # boundary rules + DIRECT signing-lib imports — needs a build first
+pnpm check:supply-chain  # the transitive signing ban (ADR-011)
 ```
 
 Dev entrypoints (tsx): `pnpm --filter @reconcil/mcp-server dev` (stdio) /
@@ -58,10 +59,18 @@ docker rm -f schema_check
 These are the constraints a coding session can violate without noticing; each has an ADR
 with full rationale.
 
-- **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)`
-  (uint256 does not fit BIGINT); JSON carries money as decimal strings; TS uses
-  `bigint`/decimal lib with branded types. Aggregate raw in SQL, scale once at the edge.
-  Rounding only at export boundaries. (ADR-004)
+- **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)` (uint256
+  does not fit BIGINT); JSON carries money as decimal strings; TS uses `bigint` or a decimal
+  clone. Aggregate raw in SQL, scale once at the edge. **Rounding only at export boundaries**
+  — that is the rule, and it covers rounding a fiat sum to 2dp, not only a non-terminating
+  quotient. Two sanctioned exceptions, both inside the matcher and neither producing money
+  that reaches a report — one to each rule above: `computeBand` truncates in bigint (rounding
+  away from an export boundary, on integer operands at a fixed scale), and `amountScore`
+  converts two money bigints to `number` for a ranking score — the one place money
+  legitimately becomes a `number`, because nothing monetary comes back out. **Do not rely on
+  the type system here**: `RawAmount` is declared and applied nowhere and there is no lint
+  rule against `number` arithmetic — what holds the line is Zod rejecting JSON numbers at the
+  wire, `mode: 'bigint'` at the DB edge, and SQL-side aggregation. (ADR-004)
 - **The LLM never computes.** All figures come from deterministic functions and must be
   traceable through the citation envelope (`tool_call_id`, event refs, pinned
   price/fx snapshot IDs). A number without provenance is a bug. (P1/P2, ADR-012)
@@ -70,7 +79,9 @@ with full rationale.
   advances past `head − finality_depth` — there is deliberately no reorg rollback path.
   (ADR-005)
 - **No signing or key material anywhere in the dependency tree** — the product is
-  read-only by construction (MiCA); a dependency-cruiser CI rule will enforce it. (ADR-011)
+  read-only by construction (MiCA). Enforced by `pnpm check:supply-chain`, which scans both
+  lockfiles; the dependency-cruiser `no-signing-libraries` rule sees only direct first-party
+  imports (`doNotFollow` skips `node_modules`) and cannot speak for the tree. (ADR-011)
 - **On-chain and imported strings are hostile input.** Only sanitized `*_display` values
   may reach tool responses, and only under `untrusted` keys; `*_raw` and provider `raw`
   JSONB never leave the server. This ban is about hostile **string** fields
@@ -78,10 +89,15 @@ with full rationale.
   base units as a decimal string, e.g. on `analytics_list_events` events) is not hostile
   input and does cross the wire. (ADR-011)
 - **Tenant identity comes from the transport session, never from tool arguments.**
-  All repository methods are tenant-scoped; chain data tables are global by design.
-  (ADR-006, ADR-012)
+  Chain data tables are global by design. Tenant-owned repositories (recon, directory, audit)
+  take a tenant context and predicate on it. `packages/ledger` does NOT: it takes an address
+  set already resolved from the tenant's `wallets`, by eight call sites through `resolveScope`
+  plus three that re-derive the same tenant-scoped select inline. So a new caller of the
+  ledger must resolve its own scope the same way, and nothing enforces that. One write tool
+  (`directory_upsert_entity`) does not validate its `client_id` at all. (ADR-006, ADR-012)
 - **MCP tool wire names use underscores** (`analytics_balances`) — dots break the Claude
-  API tool-name constraint; `analytics.*` namespaces are logical only. (ADR-012)
+  API tool-name constraint; `analytics.*` namespaces are logical only. Swept over the whole
+  registry, with uniqueness, in `apps/mcp-server/test/server.test.ts`. (ADR-012)
 - **No Python in this project** — TypeScript/Node only (hard constraint from the brief).
 
 ## Conventions

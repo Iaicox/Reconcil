@@ -13,9 +13,18 @@ and if so which one.
 No REST/GraphQL API in the MVP. A minimal **Fastify** app exists solely as the process
 host for:
 
-- `POST/GET/DELETE /mcp` — MCP streamable HTTP transport (SDK's server transport mounted
-  on Fastify routes), with bearer-key tenant resolution (ADR-012);
+- `/mcp` — MCP streamable HTTP transport (SDK's server transport mounted on Fastify
+  routes), with bearer-key tenant resolution (ADR-012);
 - `GET /healthz` — container orchestration.
+
+*Amended 2026-09-15 (ADR sweep — accuracy).* The `/mcp` line read `POST/GET/DELETE` — the
+three methods the transport implements. The route is registered with `app.all('/mcp', …)`
+(`apps/mcp-server/src/http.ts`), so PUT, PATCH, HEAD and OPTIONS match it too: each spends a
+rate-limit token and a live `resolveTenantByBearer` DB round-trip before the SDK rejects it.
+Enumerating three methods here described an HTTP surface narrower than the one that exists.
+Narrowing the route to match is a code change and is
+tracked in `09-known-gaps.md`; nothing here depends on it, since an unsupported method is
+still refused.
 
 stdio mode bypasses HTTP entirely (separate entrypoint, same tool registry).
 

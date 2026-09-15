@@ -175,7 +175,7 @@ describe('getInternalTxs', () => {
     expect(u.searchParams.get('apikey')).toBe(KEY);
   });
 
-  it('maps rows to RawInternalTx, dropping gas fields but KEEPING traceId (the sentinel order key)', async () => {
+  it('maps rows to RawInternalTx, dropping gas fields but KEEPING traceId (audit payload for chain_events.raw)', async () => {
     const { transport } = stub({ status: '1', message: 'OK', result: [INTERNAL_ROW] });
     const page = await adapter(transport).getInternalTxs!(Q);
     expect(page.items).toEqual([

@@ -2,8 +2,8 @@
 /**
  * Supply-chain guard for the ADR-011 red line (P8, MiCA read-only): no signing or key
  * material ANYWHERE in the dependency tree. The dependency-cruiser `no-signing-libraries`
- * rule only catches DIRECT workspace imports — `doNotFollow: ['node_modules']` means it
- * never traverses transitive deps. This scans BOTH lockfiles in the repo — the pnpm
+ * rule only catches DIRECT workspace imports — `doNotFollow: { path: ['node_modules',
+ * 'dist'] }` means it never traverses into either. This scans BOTH lockfiles in the repo — the pnpm
  * workspace's pnpm-lock.yaml and the standalone site/package-lock.json (site/ is a real npm
  * tree, not a pnpm workspace member, so it needs its own scan) — against the SAME
  * banned-name list (required from the cruiser config — single source of truth, no drift)

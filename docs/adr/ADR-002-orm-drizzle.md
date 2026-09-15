@@ -16,8 +16,17 @@ Drizzle ORM + drizzle-kit.
 - Schema in TypeScript, migrations generated as plain SQL files, hand-auditable, checked
   into `packages/db`.
 - `numeric` columns surface as strings in JS — exactly what the money rules want
-  (string → bigint/Decimal at the boundary; a custom column type wraps
-  `NUMERIC(78,0) ↔ bigint`).
+  (string → bigint/Decimal at the boundary).
+
+  *Amended 2026-09-15 (ADR sweep — accuracy).* This originally continued "a custom column
+  type wraps `NUMERIC(78,0) ↔ bigint`". No such custom type was ever built: the only
+  `customType` in the schema is `bytea` (`packages/db/src/schema.ts`), and the canonical
+  money columns use drizzle's built-in `numeric(…, { precision: 78, scale: 0, mode:
+  'bigint' })` — which is exact at scale 0 and needs no wrapper. The consequence is that the
+  "surfaces as strings" premise holds for the **fiat** columns (`price`, `rate`,
+  `fiat_value`, `amount` — unconstrained `numeric`, default string mode) and not for
+  `amount_raw` / `amount_applied_raw`, which arrive as `bigint`. Both land where ADR-004
+  wants them; the mechanism is drizzle's, not ours.
 - The SQL-first query builder (and `sql` template escape hatch) keeps complex
   aggregations typed without hiding the SQL.
 

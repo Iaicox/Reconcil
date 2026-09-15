@@ -20,6 +20,37 @@ async function connect(makeContext: () => ToolContext): Promise<Client> {
 const noDbContext = (): ToolContext => ({ db: {} as never, tenantId: 'test-tenant' });
 
 describe('mcp-server adapter — declaration + error mapping (no DB)', () => {
+  // ADR-012 d5 states the Claude API tool-name constraint and, until 2026-09-15, nothing
+  // checked it: the registry is a plain array, dispatch is `tools.find(t => t.name === name)`,
+  // and every other assertion in this file names one tool at a time. Both cases below sweep
+  // the WHOLE advertised list instead, so a tool added later is covered by existing rather
+  // than by someone remembering to extend an enumeration.
+  it('advertises only names the Claude API tool-name constraint accepts (ADR-012 d5)', async () => {
+    const client = await connect(() => {
+      throw new Error('handler must not run during listTools');
+    });
+    const { tools } = await client.listTools();
+    expect(tools.length).toBeGreaterThan(0); // an empty list would satisfy the loop vacuously
+    // The constraint verbatim from ADR-012 d5. A dot is the failure this exists for —
+    // `analytics.balances` is rejected by the API, not by us, so it would surface as a broken
+    // client rather than a red build.
+    const bad = tools.filter((t) => !/^[a-zA-Z0-9_-]+$/.test(t.name)).map((t) => t.name);
+    expect(bad).toEqual([]);
+  });
+
+  it('advertises no duplicate tool name (ADR-012 d5)', async () => {
+    const client = await connect(() => {
+      throw new Error('handler must not run during listTools');
+    });
+    const { tools } = await client.listTools();
+    const names = tools.map((t) => t.name);
+    // `tools.find(...)` in server.ts resolves a duplicate to whichever descriptor is listed
+    // first and never complains, so the second one is dead weight that still shows up in the
+    // client's tool list. Compared against a Set rather than a hand-written expectation, so
+    // this cannot drift as the registry grows.
+    expect(names).toHaveLength(new Set(names).size);
+  });
+
   it('lists all 19 tools with correct annotations and object input schemas', async () => {
     const client = await connect(() => {
       throw new Error('handler must not run during listTools');

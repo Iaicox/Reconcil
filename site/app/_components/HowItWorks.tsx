@@ -9,12 +9,12 @@ const steps = [
   {
     n: '02',
     title: 'Match payments',
-    body: 'A deterministic engine matches on-chain settlements to invoices across many-to-many splits: partial payments, overpayments and network fees included.',
+    body: 'A deterministic engine matches on-chain settlements to invoices: partial payments, overpayments and network fees included.',
   },
   {
     n: '03',
     title: 'Confirm',
-    body: 'You approve each match — human-in-the-loop. Record status tracks open, partial, paid and overpaid as you go.',
+    body: 'Nothing counts until you confirm it: every write is flagged for approval, and clients like Claude Desktop ask first. Record status tracks open, partial, paid and overpaid as you go.',
   },
   {
     n: '04',

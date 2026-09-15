@@ -15,6 +15,24 @@ pnpm workspaces for package linking; Turborepo as the task runner (`turbo.json`:
 project references for incremental typechecking; `tsx` for dev execution, `tsc -b` for
 builds. Boundary enforcement via dependency-cruiser (also bans signing libraries — P8).
 
+*Amended 2026-09-15 (ADR sweep — accuracy).* "Boundary enforcement" is narrower than the
+layer graph `.dependency-cruiser.cjs` documents at the top of itself
+(`apps/* → mcp-tools → { ledger, recon, exporters, pricing } → db → core`). The ten rules
+constrain `core`, `db`, the domain packages, `mcp-tools`, `evals`, circularity and
+resolvability — but **no rule constrains what `apps/*` may import from `packages/*`**.
+`nothing-imports-apps` and `no-cross-app-imports` are different directions, and
+`not-to-unresolvable` is not a backstop either, because the root workspace declares
+`@reconcil/ingestion` as a devDependency (see `09-known-gaps.md`) so an undeclared import
+from an app still resolves by node_modules walk-up. No app imports something the graph puts
+ABOVE it today — though the graph is itself incomplete: `apps/cli` depends on
+`@reconcil/evals`, which appears in no arrow of it. The `apps/* → packages/*` edge is
+simply unguarded, and that gap is tracked in `09-known-gaps.md` rather than closed
+here.
+
+The decision's parenthetical — "(also bans signing libraries — P8)" — is not what delivers
+its stated scope either: dependency-cruiser sees only direct first-party imports, and the
+transitive guarantee comes from `pnpm check:supply-chain`. See ADR-011.
+
 ## Alternatives considered
 
 - **Nx** — powerful (generators, graph, plugins) but a framework with its own concepts,

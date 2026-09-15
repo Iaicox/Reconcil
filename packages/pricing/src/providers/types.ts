@@ -1,19 +1,22 @@
 /**
  * Price/FX provider contracts (ADR-007, ADR-009 shape). Adapters are dumb: they
- * fetch and parse into a canonical daily close; retries/throttling/failover live
+ * fetch and parse into one canonical figure per UTC date; retries/throttling/failover live
  * above (worker + factory). Prices are quoted in USD; ECB FX is EUR-based.
  */
 import type { FetchJson } from './transport.js';
 
 export type { FetchJson };
 
-/** A token's daily close as returned by a source, in `currency`. */
+/** A token's figure for one UTC date as returned by a source, in `currency`. Not a close:
+ *  DefiLlama is asked for a literal 00:00 UTC timestamp and CoinGecko for a bare date, which
+ *  requests no instant at all (ADR-007 d1, amended 2026-09-15). This type deliberately carries
+ *  no timestamp — see 09-known-gaps.md on the missing provenance. */
 export interface DailyPrice {
   price: string; // canonical decimal string
   currency: string; // 'USD'
 }
 
-/** What a source needs to look up one token's daily close. */
+/** What a source needs to look up one token's figure for a UTC date. */
 export interface PriceQuery {
   chainSlug: string; // DefiLlama chain slug: 'ethereum' | 'base'
   address: string | null; // erc20 contract (lowercase); null = native

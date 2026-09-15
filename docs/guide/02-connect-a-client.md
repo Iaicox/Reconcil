@@ -146,8 +146,8 @@ The bearer scheme is deliberate minimalism for a pre-gate self-host product. If 
 leaves localhost:
 
 - Terminate TLS in front of it. The server speaks plain HTTP.
-- Treat the key as a full credential for that tenant's data. It carries no scopes and no
-  expiry.
+- Treat the key as a full credential for that tenant's data. It carries no scopes, and no
+  expiry unless you minted it with `--expires-in-days` (above).
 - Claude Desktop and claude.ai custom connectors require **OAuth**, which is post-gate
   (ADR-012). Until then, remote Desktop users are not supported; use Claude Code or stdio.
 

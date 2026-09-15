@@ -1,11 +1,15 @@
 /**
- * `recon_confirm_match` (contract §6.4, write, HITL, ADR-010) — a human confirms one
- * suggested leg. `decideMatchInTx` (SERIALIZABLE) enforces the matching invariants and
+ * `recon_confirm_match` (contract §6.4, write, HITL, ADR-010) — confirms one suggested
+ * leg. `decideMatchInTx` (SERIALIZABLE) enforces the matching invariants and
  * re-derives the parent record's status; `runWriteTool` owns the transaction (with
  * serialization-failure retry) and persists the tool_call in that same transaction, so the
  * decision and its audit row commit atomically (C2). This handler owns the edges: input
- * validation and output-contract validation. The agent never confirms on its own initiative
- * (P1/P8) — it relays a human decision.
+ * validation and output-contract validation.
+ *
+ * The agent never MATCHES (P1) — the engine proposes, this records a decision. Who makes that
+ * decision is the transport client's approval gate, not anything here: `confirmed_by` is a
+ * hardcoded 'agent' and the in-process CLI binding has no gate at all. ADR-010 d4 was
+ * amended on 2026-09-15 to say so; tracked in 09-known-gaps.md.
  */
 import { reconConfirmMatchInput, reconConfirmMatchOutput, type ReconMatchDecisionOutput } from '@reconcil/core';
 

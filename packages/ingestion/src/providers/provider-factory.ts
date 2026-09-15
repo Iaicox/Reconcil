@@ -75,8 +75,9 @@ export function failoverProvider(providers: ChainDataProvider[]): ChainDataProvi
   // skip-non-implementers rule buildProviderBundle's `requireCapability` uses).
   // A caller can therefore keep testing `typeof indexer.getInternalTxs ===
   // 'function'` and get the honest answer — on a chain whose providers offer no
-  // trace data, ingestion degrades to txlist-only (the pre-existing behaviour,
-  // whose drift the integrity job surfaces) instead of hard-failing every page.
+  // trace data, ingestion degrades to txlist-only (the pre-existing behaviour, whose
+  // drift the integrity job WOULD surface — that job is designed and not built, ADR-005
+  // d4 noted 2026-09-15) instead of hard-failing every page.
   const internalCapable = providers.filter((p) => typeof p.getInternalTxs === 'function');
   if (internalCapable.length > 0) {
     wrapper.getInternalTxs = (q: PageQuery) => attemptOn(internalCapable, (p) => p.getInternalTxs!(q));

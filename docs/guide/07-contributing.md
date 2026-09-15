@@ -22,8 +22,8 @@ pnpm build              # tsc -b (this is also the typecheck)
 pnpm typecheck          # build-ordered tsc -b
 pnpm lint               # eslint per package (flat config at the root)
 pnpm test               # vitest per package (--passWithNoTests where there are none)
-pnpm depcruise          # dependency direction + signing-library ban — run after build
-pnpm check:supply-chain # lockfile scan for signing/key-material packages
+pnpm depcruise          # dependency direction + DIRECT signing-lib imports — after build
+pnpm check:supply-chain # the transitive signing ban: scans both lockfiles
 pnpm smoke:compose      # full compose stack + stdio client + tool calls, then tears down
 ```
 
@@ -56,7 +56,7 @@ apps/
   cli/          thin agent: demo REPL + eval runner (Anthropic SDK Tool Runner)
 packages/
   core/         domain types, Zod schemas, Money, sanitizer, chain config — imports nothing internal
-  db/           Drizzle schema, migrations, tenant-scoped repositories — depends only on core
+  db/           Drizzle schema, migrations, tenant bootstrap — depends only on core
   ingestion/    provider adapters, normalizer, checkpoint state machine
   pricing/      DefiLlama / CoinGecko / ECB adapters, snapshot service
   ledger/       deterministic aggregations: pure functions + SQL builders
@@ -81,7 +81,7 @@ imports `apps/*` · no cross-app imports · no cycles.
 | Contract — tool schemas vs golden JSON | vitest snapshots | every commit |
 | Integration — fixtures in, ledger asserted | vitest + testcontainers Postgres | every commit |
 | E2E smoke — compose up, stdio client, tool calls | `pnpm smoke:compose` | pre-release |
-| Agent evals — 30 cases, deterministic graders | `packages/evals` + CLI runner | smoke on PR, full nightly |
+| Agent evals — 30 cases, deterministic graders | `packages/evals` + CLI runner | smoke on PR, full on manual dispatch |
 
 **No test touches the network.** Providers replay from recorded fixtures. If a change needs a
 new fixture, record it — do not add a live call.
@@ -112,10 +112,10 @@ The runner provisions its own Postgres via testcontainers if `DATABASE_URL` is u
 | `schema-parity` | PR + main | Drizzle migrations vs `docs/architecture/schema.sql`, `pg_dump` diff must be empty |
 | `integration` | PR + main | testcontainers Postgres per suite, fixture ingest, ledger assertions |
 | `evals-smoke` | PR | 6-case subset, 1 run — cheap contract-drift catch |
-| `evals-full` | nightly + manual | 30 cases × 3 runs, publishes a scorecard artifact |
-| `e2e-smoke` | manual / pre-release | the real compose stack (`pnpm smoke:compose`) |
+| `evals-full` | manual dispatch only | 30 cases × 3 runs, publishes a scorecard artifact |
+| `e2e-smoke` | weekly schedule / manual | the real compose stack (`pnpm smoke:compose`) |
 
-All of the above are jobs of the single `ci` workflow, which also runs on the nightly
+All of the above are jobs of the single `ci` workflow, which also runs on a WEEKLY
 schedule and on manual dispatch; a small `evals-preflight` helper job resolves whether
 `ANTHROPIC_API_KEY` is present. That key is used only by `evals-*`. Provider keys are never
 needed in CI. A missing key makes the eval jobs **skip**, never fail red.
@@ -127,21 +127,27 @@ without noticing.
 
 - **Money is never `number`.** Canonical amounts are base units in `NUMERIC(78,0)` — uint256
   does not fit in `BIGINT`. JSON carries money as decimal strings; TypeScript uses `bigint` or
-  a decimal library with branded types. Aggregate raw in SQL, scale once at the edge, round
-  only at export boundaries. (ADR-004)
+  a decimal clone. Aggregate raw in SQL, scale once at the edge, round only at export
+  boundaries — two sanctioned exceptions inside the matcher (`computeBand` truncates in
+  bigint, `amountScore` makes a ranking score out of two money bigints). Branded types exist
+  but `RawAmount` is applied nowhere and there is no money lint rule. (ADR-004)
 - **The LLM never computes.** Every figure comes from a deterministic function and must be
   traceable through the citation envelope. A number without provenance is a bug. (P1/P2, ADR-012)
 - **`chain_events` is append-only.** No UPDATE, no DELETE, ever. Idempotency via
   `UNIQUE (chain_id, tx_hash, log_index, token_id)`; ingestion never advances past
   `head − finality_depth`; there is deliberately no reorg rollback path. (ADR-005)
 - **No signing or key material anywhere in the dependency tree.** Read-only by construction
-  (MiCA). Enforced by depcruise plus a lockfile scan. (ADR-011)
+  (MiCA). Enforced by `pnpm check:supply-chain` (lockfile scan); the depcruise rule sees only
+  direct first-party imports and cannot speak for the tree. (ADR-011)
 - **On-chain and imported strings are hostile.** Only sanitized `*_display` values may reach
   tool responses, and only under `untrusted` keys. `*_raw` string fields and provider `raw`
   JSONB never leave the server. (The trusted numeric `amount_raw` — uint256 base units as a
   decimal string — is not hostile input and does cross the wire.) (ADR-011)
-- **Tenant identity comes from the transport session, never from tool arguments.** All
-  repository methods are tenant-scoped; chain data tables are global by design. (ADR-006, ADR-012)
+- **Tenant identity comes from the transport session, never from tool arguments.** Chain data
+  tables are global by design. The tenant-owned repositories take a tenant context;
+  `packages/ledger` does not — it receives an address set resolved from the tenant's wallets
+  one layer up, and nothing enforces that a new caller does the same. One write tool,
+  `directory_upsert_entity`, does not validate its `client_id` at all. (ADR-006, ADR-012)
 - **MCP wire names use underscores.** `analytics_balances`, not `analytics.balances` — dots
   break the Claude API tool-name constraint. (ADR-012)
 - **No Python.** TypeScript and Node only.
@@ -168,10 +174,15 @@ that rule is what keeps the design pack trustworthy.
 
 ## Adding a chain
 
-One entry in `packages/core/src/chains.config.ts` — chain id, native token, finality depth,
-poll interval, fee strategy, provider list, and (for OP-stack chains) the RPC env var. No
-code changes. That "chains are configuration" property is a deliberate architectural seam
-(ADR-009); keep it.
+Start with one entry in `packages/core/src/chains.config.ts` — chain id, native token,
+finality depth, poll interval, fee strategy, provider list, and (for OP-stack chains) the
+name of an RPC env var. That covers **ingestion**, and it is the only part where the "chains
+are configuration" seam is real (ADR-009).
+
+It is not the whole job, and every remaining step fails silently or deep inside a job rather
+than at boot. **Follow ADR-009 d3's 2026-09-15 amendment, which lists all four sites** —
+pricing's `CHAIN_SLUG` map, a curated-token seed row per chain, and (naming an env var is
+not the same as the worker reading it) the worker's own env schema and provider record.
 
 ## Working with the board
 

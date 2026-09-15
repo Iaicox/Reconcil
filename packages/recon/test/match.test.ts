@@ -158,8 +158,12 @@ describe('suggestForRecord — bounded subset (split) search', () => {
     expect(suggestForRecord(rec, events)).toEqual([]);
   });
 
-  it('also leaves a record open when the exact split needs a member outside the top-6-by-size pool (known limitation, req 5)', () => {
-    // The pool is the 6 LARGEST candidates, not "any 6". Here the true split is
+  it('also leaves a record open when the exact split needs a member outside the top-6 pool (known limitation, req 5)', () => {
+    // The pool is a top-6 SELECTION, not "any 6" — every candidate above `open + band` is
+    // dropped first, the survivors are sorted descending, and only then are 6 taken
+    // (engine.ts header; the "≤ 6 largest in the window" wording this comment used to carry
+    // was corrected on 2026-09-15, since the ceiling filter runs before the cut). Nothing
+    // here is above the ceiling, so this fixture exercises the cut itself. The true split is
     // 650.00 + 50.00 = 700.00, but five 100.00 decoys crowd the 50.00 leg out of the
     // top-6 pool (650 + five 100s already fill it), so the search never sees it. This
     // is the honest, documented blind spot (engine.ts header) distinct from the

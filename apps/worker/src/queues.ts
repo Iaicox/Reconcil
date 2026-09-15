@@ -24,7 +24,7 @@ export const PROBE_QUEUE = 'probe';
 // promptly; idempotent (backfill jobId dedup) so re-scans are cheap.
 export const ONBOARD_TICK_EVERY_MS = 15_000;
 
-// Prices are daily UTC closes (ADR-007) — one fill tick per day is enough; it
+// One price per UTC date (ADR-007) — one fill tick per day is enough; it
 // backfills every not-yet-priced (token, date) each run, so a missed tick self-heals.
 export const PRICE_TICK_EVERY_MS = 24 * 60 * 60 * 1000;
 

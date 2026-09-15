@@ -22,7 +22,7 @@ No network in any test: providers are replayed from recorded fixtures.
 packages/evals/fixtures/
 ├── providers/                 # recorded provider HTTP responses (scrubbed), replayed
 │   ├── etherscan-v2/…json     # by a FixtureProvider implementing ChainDataProvider
-│   └── prices/…json           # DefiLlama/CoinGecko/ECB closes (pricing capture, ADR-007)
+│   └── prices/…json           # DefiLlama/CoinGecko/ECB per-date prices (capture, ADR-007)
 ├── wallets/
 │   ├── freelancer.expect.json # hand-verified expectations: balances per date, flows,
 │   ├── smb-stables.expect.json#   gas totals, counterparty turnover
@@ -293,7 +293,7 @@ Failing the gate blocks the OSS demo publication, by definition of "done" for we
 
 | Job | Trigger | Contents |
 |---|---|---|
-| `check` | PR + main | pnpm install (frozen), turbo lint + typecheck + depcruise (banned deps: signing libs; float-money ESLint) |
+| `check` | PR + main | pnpm install (frozen), turbo lint + typecheck + depcruise (signing-lib import ban) + check:supply-chain (lockfile scan — the real transitive guarantee) + test:scripts. There is no float-money ESLint rule; ADR-004 names what actually holds that line |
 | `test` | PR + main | unit + property + contract |
 | `schema-parity` | PR + main | `scripts/check-schema-parity.sh`: drizzle migrations vs `schema.sql` applied to two fresh DBs (disposable postgres:16), `pg_dump --schema-only` diff must be empty |
 | `integration` | PR + main | Postgres service container, fixture ingest, ledger assertions |

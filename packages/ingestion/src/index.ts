@@ -1,6 +1,7 @@
 /**
  * Ingestion: providers → normalized events; checkpoints; finality; backfill /
- * live; integrity checks (03-ingestion.md, ADR-005/008/009). Worker-only —
+ * live (03-ingestion.md, ADR-005/008/009). The integrity checks those documents
+ * describe are designed and not built — nothing here computes them. Worker-only —
  * never imported by the MCP server path.
  */
 export * from './types.js';

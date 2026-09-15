@@ -124,7 +124,7 @@ CREATE INDEX chain_events_token_time_idx ON chain_events (token_id, block_time);
 
 -- ---------------------------------------------------------------- pricing ---
 
--- Daily UTC close snapshots (P5). Append-only: corrections are new rows under a
+-- One price snapshot per UTC date (P5). Append-only: corrections are new rows under a
 -- different source ('manual'); calculations pin the exact row they used by FK.
 CREATE TABLE price_snapshots (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -30,8 +30,10 @@ counterparty turnover, stablecoin movements) and two exports — monthly close p
 
 **Face B — second (weeks 6–8). Stablecoin payment ↔ invoice reconciliation.**
 Audience: EU SMBs, freelancers, and agencies paid in stablecoins.
-MVP: invoice import (CSV minimum), many-to-many matching (partial payments, overpayments,
-fees), match statuses with manual confirmation, EUR/USD equivalent at payment date,
+MVP: invoice import (CSV minimum), split and partial matching — several settlements against
+one invoice, with overpayments detected (several invoices against one settlement is schema,
+not engine: ADR-010 d2, noted 2026-09-15) — match statuses with manual confirmation,
+fee handling, EUR/USD equivalent at payment date,
 VAT tagging, journal draft export for QuickBooks/Xero.
 
 **Option C — NOT built.** Tax reconciliation of agentic payments (x402). Only two cheap
@@ -39,8 +41,10 @@ seams remain in the architecture for optionality:
 1. The matching engine is source-agnostic: `external_record ↔ settlement` pairs, where an
    invoice is just one `kind` of external record (discriminator field), not a hard-coded
    invoice↔transfer link.
-2. Chains are configuration: adding a new EVM network (Base is already in the list) touches
-   no code.
+2. Chains are configuration for INGESTION: adding a new EVM network (Base is already in the
+   list) is one entry in `chains.config.ts`. Pricing, verified-token seeding and the
+   worker's env record each still need a source change — see ADR-009 d3, amended
+   2026-09-15. The seam is real and narrower than "touches no code".
 
 ## Hard architectural principles (constraints, not suggestions)
 
@@ -67,9 +71,10 @@ seams remain in the architecture for optionality:
 - Analytics: balances, flows, gas, counterparty turnover, stablecoin movements; address
   book / counterparty labels.
 - Exports: monthly close pack (CSV + draft journal entries), PDF summary.
-- Face B: invoice import (CSV minimum), many-to-many matching (partials, overpayments,
-  fees), match statuses, manual confirmation, EUR/USD at payment date, VAT tagging,
-  QuickBooks/Xero journal export.
+- Face B: invoice import (CSV minimum), split and partial matching (several settlements per
+  invoice; overpayments, fees), match statuses, manual confirmation, EUR/USD at payment date,
+  VAT tagging, QuickBooks/Xero journal export. The m:n schema also allows several invoices
+  per settlement; the engine does not apportion, so that direction is unbuilt (ADR-010 d2).
 
 **Out (kill list — see ADR-013 consequences and `05-risks-open-questions.md`):**
 - DeFi decoding (swaps, LP, lending), staking derivatives, bridges, cross-chain tracing.

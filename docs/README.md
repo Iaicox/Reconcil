@@ -44,7 +44,7 @@ Reading order:
 | [003](adr/ADR-003-http-minimal-fastify.md) | HTTP: minimal Fastify host, no REST in MVP (NestJS rejected) |
 | [004](adr/ADR-004-money-representation.md) | Money: `NUMERIC(78,0)` base units, strings on the wire, float ban |
 | [005](adr/ADR-005-event-store.md) | Event store: append-only, `(chain, tx, log_index, token_id)` idempotency, gas-as-event, finality lag |
-| [006](adr/ADR-006-tenancy.md) | Tenancy: global chain data + tenant-owned tracking; repository scoping |
+| [006](adr/ADR-006-tenancy.md) | Tenancy: global chain data + tenant-owned tracking; scoping at the tool layer over a tenant-resolved address set |
 | [007](adr/ADR-007-pricing-snapshots.md) | Pricing: daily UTC snapshots, DefiLlama/CoinGecko + ECB, FK-pinned |
 | [008](adr/ADR-008-queues-and-backfill.md) | Jobs: BullMQ topology; full-history backfill + anchored-window fallback |
 | [009](adr/ADR-009-provider-abstraction.md) | Providers: capability interface; chains as configuration |
@@ -75,7 +75,7 @@ Reading order:
 | Prisma vs Drizzle | Drizzle | ADR-002 |
 | Fastify vs NestJS; HTTP needed at all? | Minimal Fastify host only (`/mcp`, `/healthz`); no REST in MVP | ADR-003 |
 | Amount storage & conversion rules | `NUMERIC(78,0)` raw; aggregate raw, scale at edge; strings on wire | ADR-004, 01 §2 |
-| Backfill: full vs window; prioritization | Full by default; anchored window > 50k txs; live > backfill | ADR-008, 03 §3 |
+| Backfill: full vs window; prioritization | Full by default; anchored window at nonce > 50k (outbound txs only — ADR-008 d4); live > backfill | ADR-008, 03 §3 |
 | MCP transport & tool auth | stdio (self-host) + streamable HTTP (bearer) ; OAuth post-gate | ADR-012, 02 §9 |
 | Eval dataset format & demo gate | YAML cases, deterministic graders; citations/guardrails/injections 100%, numeric ≥ 90% (27/30, 2-of-3) | 04 §5–6 |
 
@@ -90,7 +90,7 @@ Reading order:
 | P5 | Persistent price snapshots | ADR-007, pinned FKs in `matches`/manifests |
 | P6 | Multi-provider abstraction | ADR-009, 03 §5 |
 | P7 | On-chain strings are hostile | 02 §7, ADR-011, `*_raw` vs `*_display` split |
-| P8 | MiCA red lines | ADR-011 (dep-cruiser signing ban, guardrail evals, drafts) |
+| P8 | MiCA red lines | ADR-011 (`check:supply-chain` lockfile signing ban, guardrail evals, drafts) |
 | P9 | Client secrets encrypted, never logged | 01 §7 (`integration_credentials`), log-scrub test in 04 |
 | P10 | Self-host first-class, multi-tenant schema | 00 §5, ADR-006 |
 | P11 | MCP-first | ADR-003, ADR-012, 02 |

@@ -7,7 +7,8 @@
 Etherscan free tier (≈5 req/s, 100k/day) is enough for demos but a single whale backfill
 can eat the daily budget; commercial-use terms of free tiers are mutable.
 **Mitigations (built into the architecture):** multi-provider abstraction with failover
-(ADR-009); daily budget guard that pauses backfills but keeps live tails; anchored
+(ADR-009); a daily budget guard that pauses backfills but keeps live tails (**designed, not
+built** — see ADR-008 d2 as amended 2026-09-15); anchored
 backfill caps whale cost (ADR-008); development runs on recorded fixtures, not live APIs;
 self-host users bring their own keys (cost and ToS exposure shifts to them).
 **Residual:** verify Etherscan V2 & CoinGecko/DefiLlama commercial terms before the
@@ -34,13 +35,16 @@ headline gap and are now **ingested**: the worker's `native` stream pulls
 `txlistinternal` alongside `txlist` (ADR-005 d2, 03-ingestion.md §3), and the
 golden-wallet balance reconciles to `eth_get_balance` to the wei through the production
 processor.
-**Mitigations:** the integrity job diff-checks computed balances against provider
-balances and *tells the user* when they drift (`ledger_status`, warnings); coverage
-warnings are contractual (C5); a "supported wallet types" doc states EOA-only MVP;
-the `log_index` sentinel space held room for internal transfers, and Etherscan's
-`txlistinternal` made them a stream rather than a redesign — as shipped. The
-provider-vs-computed reconciliation test itself is specced in `04-testing.md` §2, and is
-green for native+gas+internal on chain 1 (erc20 still gated on the receipts capture).
+**Mitigations:** the integrity job (**designed, not built** — ADR-005 d4 as amended
+2026-09-15) would diff-check computed balances against provider balances and tell the user
+when they drift; today nothing does, so R3 rests on the golden-wallet reconciliation test
+alone. Coverage warnings ARE contractual and shipped (C5). EOA-only is stated in this
+document and nowhere else — there is no "supported wallet types" doc and the guides do not
+mention wallet types at all; the `log_index` sentinel space held room for internal
+transfers, and Etherscan's `txlistinternal` made them a stream rather than a redesign — as
+shipped. The provider-vs-computed reconciliation test itself is specced in `04-testing.md`
+§2, and is green for native+gas+internal on chain 1 (erc20 still gated on the receipts
+capture).
 **Positioning:** honesty-as-feature — the tool says when it cannot be trusted, unlike a
 spreadsheet.
 
@@ -63,20 +67,23 @@ artifacts, not the technology; self-host + data-sovereignty pitch differentiates
 SaaS incumbents; the Nuxt dashboard is a planned post-gate answer, and Face B's CSV
 in/out flow works without any UI by design.
 
-*Honorable mentions:* GDPR — address-book names and invoice counterparties are PII
-(mitigated: tenant-owned tables cascade-delete; self-host keeps data on-prem; document a
+*Honorable mentions:* GDPR — address-book names and invoice counterparties are PII (partly
+mitigated: tenant-owned tables cascade-delete and self-host keeps data on-prem, but export
+FILES on disk survive the cascade — ADR-006 Consequences as amended 2026-09-15; document a
 DPA template post-gate). Spam-token UX — a wrong default would either hide real funds or
-drown the user in scams (mitigated: `verified` + explicit `UNVERIFIED_EXCLUDED` warning +
-eval case).
+drown the user in scams (partly mitigated: `verified` filtering is real, but the
+`UNVERIFIED_EXCLUDED` warning is derived from the request flag rather than from what was
+excluded, and `analytics_stablecoin_movements` emits none and offers no opt-in — ADR-011
+layer 3 as amended 2026-09-15; plus an eval case).
 
 ## Open questions (with recommendations)
 
 | # | Question | Recommendation / plan |
 |---|---|---|
-| Q1 | **Stablecoin valuation policy**: book USDC at peg 1.0 or at market (±0.3%)? Affects journal amounts and matching tolerances. | Default `peg_for_stables` for recon tolerance, `market` for analytics valuation; per-tenant setting exists (ADR-007). Put the question in every validation interview — accountants' convention wins. |
+| Q1 | **Stablecoin valuation policy**: book USDC at peg 1.0 or at market (±0.3%)? Affects journal amounts and matching tolerances. | Intended default `peg_for_stables` for recon tolerance, `market` for analytics valuation. The per-tenant setting does **not** exist — `tenants.settings` is read by nothing and the policy is a per-call argument defaulting to `market` (ADR-007 d4 as amended 2026-09-15). Put the question in every validation interview — accountants' convention wins. |
 | Q2 | **QBO/Xero: file import vs API push for MVP.** Xero manual-journal CSV import is standard; QBO journal-entry CSV import availability varies by region/edition. | Ship file export (both formats) in weeks 6–8; verify QBO CSV import against a trial account in week 6 — if blocked, start Intuit OAuth app review immediately (lead time is weeks) and treat API push as the QBO path. Architecture is indifferent (exporter port, ADR-013 keeps API connectors closed-source). |
 | Q3 | **Internal transfers & Safe wallets: how loud is the demand?** DAOs (a stated audience) live on Safe. | Ask in interviews. If Safe ranks top-2, promote internal-tx stream + Safe address support to the first post-gate milestone; the event model and sentinel space are already shaped for it. |
 | Q4 | **Provider/price-source commercial terms** for a public hosted demo (Etherscan V2 free tier, DefiLlama, CoinGecko demo plan). | Re-read ToS before the demo goes public (week 4); fallback: demo on Blockscout + DefiLlama; self-host docs always instruct BYO keys. |
-| Q5 | **Anchored-backfill threshold** (50k txs) and UX: who decides, with what wording? | Keep 50k as default; `ledger_track_wallet` already refuses to silently choose (returns `suggests_anchored`). Tune after first real whale onboarding. |
+| Q5 | **Anchored-backfill threshold** (nonce > 50k — outbound txs only, so receive-only wallets never trip it, ADR-008 d4) and UX: who decides, with what wording? | Keep 50k as default; `ledger_track_wallet` never chooses silently — `suggests_anchored` surfaces on `ledger_status`, not in its response (ADR-008, 2026-07-23 amendment). Tune after first real whale onboarding. |
 | Q6 | **Close pack for EU firms in Face A**: is EUR valuation needed before Face B ships? | Cheap: valuation currency is already a parameter and ECB rates land in week 2 (pricing). Default the demo to USD; flip per audience. |
 | Q7 | **Eval gate strictness**: is majority-of-3 too lenient for the demo video? | Keep the gate at 2/3 majority for iteration speed; record the demo video only from a 3/3 clean run. Post-gate, raise to 3/3 when the model/prompt stabilizes. |
