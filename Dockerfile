@@ -29,7 +29,7 @@
 # way, the fix is a newer minor — never COREPACK_INTEGRITY_KEYS=0, which would trade a
 # build error for an unverified toolchain.
 
-FROM node:24.21-slim AS builder
+FROM node:26.10-slim AS builder
 RUN corepack enable pnpm
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -55,7 +55,7 @@ RUN rm -rf apps/cli
 # prod deps (e.g. pg) that a workspace app still needs at runtime. We ship the
 # full node_modules; slimming via `pnpm deploy --prod` is a later size optimization.
 
-FROM node:24.21-slim
+FROM node:26.10-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=builder /app /app
